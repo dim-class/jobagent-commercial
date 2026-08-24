@@ -1,0 +1,62 @@
+# --- secrets ---
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+
+# --- python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tmp/
+htmlcov/
+.coverage
+
+# --- node ---
+node_modules/
+frontend/dist/
+frontend/.vite/
+# extension/dist/ is deliberately NOT ignored: Chrome loads the unpacked
+# extension straight from extension/, and the extraction tests inject the
+# built files, so the compiled output has to be present.
+
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+
+# --- data / local db ---
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+data/uploads/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+logs/
+*.log
+# Persistent browser profile: cookies and login session for the capture
+# browser. Local-only, never committed.
+data/browser_profiles/
+!data/.gitkeep
+
+# --- os / editors ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# --- local orchestration state ---
+docs/orchestration/.claude-worker-session-id
+docs/orchestration/.claude-worker.lock

@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "JobAgent BOSS Detector",
+  "version": "0.1.0",
+  "description": "只读检测你已经打开的 BOSS 直聘页面，把结构化岗位信息交给本机 JobAgent。不自动搜索、不翻页、不投递、不发消息。",
+
+  "permissions": ["activeTab", "scripting", "storage"],
+
+  "host_permissions": ["http://127.0.0.1:8000/*", "http://localhost:8000/*"],
+
+  "background": {
+    "service_worker": "dist/background.js"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["https://www.zhipin.com/*"],
+      "js": [
+        "dist/boss/selectors.js",
+        "dist/boss/extract.js",
+        "dist/content.js",
+        "dist/overlay.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "JobAgent BOSS Detector"
+  }
+}

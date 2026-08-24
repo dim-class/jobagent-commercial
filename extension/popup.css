@@ -1,0 +1,268 @@
+/* JobAgent BOSS Detector popup - one small stylesheet, no framework. */
+
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --border: #e2e5eb;
+  --text: #1a1d23;
+  --muted: #616a78;
+  --faint: #8b94a3;
+  --accent: #2f6df6;
+  --good: #14875a;
+  --good-soft: #e2f5ec;
+  --warn: #b3730a;
+  --warn-soft: #fdf1dc;
+  --bad: #c0392f;
+  --bad-soft: #fceceb;
+  --mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 420px;
+  max-height: 580px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 14px;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+}
+
+h1 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.tagline {
+  margin: 4px 0 12px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  flex: 1;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn-sm {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.checkbox input {
+  margin: 0;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.diagnostic-panel {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.diagnostic-panel .tagline {
+  margin: 8px 0 0;
+}
+
+.diagnostic-output {
+  margin: 8px 0 0;
+  padding: 8px;
+  max-height: 220px;
+  overflow: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+.status {
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.status-ok {
+  background: var(--good-soft);
+  border-color: transparent;
+  color: var(--good);
+}
+
+.status-warn {
+  background: var(--warn-soft);
+  border-color: transparent;
+  color: var(--warn);
+}
+
+.status-error {
+  background: var(--bad-soft);
+  border-color: transparent;
+  color: var(--bad);
+}
+
+.card {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.card h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.sub {
+  font-size: 11px;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.count {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mono {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 3px 10px;
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+
+.fields dt {
+  color: var(--muted);
+}
+
+.fields dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+.fields dd.missing {
+  color: var(--faint);
+  font-style: italic;
+}
+
+.selector {
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--faint);
+  word-break: break-all;
+}
+
+.warn {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--warn);
+}
+
+.error {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--bad);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.row-title {
+  flex: 1;
+  word-break: break-word;
+}
+
+.badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: var(--bg);
+  color: var(--muted);
+}
+
+.badge-new {
+  background: var(--good-soft);
+  color: var(--good);
+}
+
+.badge-duplicate {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.badge-incomplete {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
+footer {
+  margin-top: 12px;
+  font-size: 10px;
+  color: var(--faint);
+}
+
+code {
+  font-family: var(--mono);
+}

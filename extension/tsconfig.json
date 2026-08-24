@@ -1,0 +1,25 @@
+{
+  "//": [
+    "Classic scripts, not ES modules: a Manifest V3 content script cannot",
+    "`import`, and Chrome injects the files in `content_scripts.js` in order",
+    "into one shared isolated world. `module: none` makes tsc emit exactly",
+    "that - one plain script per source file, no loader, no bundler."
+  ],
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "none",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "outDir": "dist",
+    "rootDir": "src",
+    "strict": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "removeComments": false,
+    "types": []
+  },
+  "include": ["src/**/*.ts"]
+}

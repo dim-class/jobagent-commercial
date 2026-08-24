@@ -1,0 +1,152 @@
+# ---------------------------------------------------------------------------
+# 求职策略 / Career strategy
+# ---------------------------------------------------------------------------
+# This file is the single source of truth for what "a good job" means.
+# It is read at request time (hot-reloaded on mtime change) and can also be
+# edited from the web UI (设置 -> 求职策略), which rewrites this file.
+#
+# Nothing in here should be duplicated inside Python code.
+# ---------------------------------------------------------------------------
+
+version: 1
+
+# Cities the user is willing to work in. First entry = most preferred.
+target_cities:
+  - 北京
+  - 上海
+  - 广州
+  - 杭州
+
+# Accept remote roles regardless of city.
+remote_ok: true
+
+# Job title families the user is targeting. Matching is case-insensitive and
+# substring based, so "Cloud Engineer" also matches "Senior Cloud Engineer".
+preferred_roles:
+  - Cloud Engineer
+  - Cloud Infrastructure Engineer
+  - Infrastructure Engineer
+  - DevOps Engineer
+  - SRE
+  - Site Reliability Engineer
+  - Platform Engineer
+  - Cloud Operations Engineer
+  - 运维开发工程师
+  - 云计算工程师
+  - 云平台工程师
+  - 云运维工程师
+  - 云原生工程师
+
+# Skills the user actually has / is targeting. Used for deterministic keyword
+# overlap before the LLM ever sees the job.
+relevant_skills:
+  - AWS
+  - Linux
+  - Terraform
+  - Docker
+  - Kubernetes
+  - CI/CD
+  - Git
+  - Python
+  - Shell
+  - Networking
+  - EC2
+  - VPC
+  - ECS
+  - ALB
+  - CloudFormation
+  - Monitoring
+  - Middleware
+  - WebSphere
+  - WAS
+  - IHS
+  - AIX
+
+# Aliases so that "K8s" counts as "Kubernetes" etc.
+skill_aliases:
+  Kubernetes: [K8s, K8S, 容器编排]
+  Docker: [容器, 容器化]
+  CI/CD: [CICD, Jenkins, GitLab CI, GitHub Actions, 持续集成, 持续交付, ArgoCD]
+  Linux: [CentOS, RedHat, Ubuntu, RHEL, 红帽]
+  Shell: [Bash, Shell脚本, shell script]
+  AWS: [Amazon Web Services, 亚马逊云, 亚马逊云科技]
+  Monitoring: [Prometheus, Grafana, Zabbix, Nagios, 监控, ELK, Datadog]
+  Terraform: [IaC, Infrastructure as Code, 基础设施即代码]
+  Networking: [TCP/IP, 网络, DNS, 负载均衡, LoadBalancer]
+  Python: [Python3, py]
+  WebSphere: [WAS, IBM WebSphere]
+  IHS: [IBM HTTP Server]
+
+# Roles to avoid. A hit here is a strong negative signal (never an automatic
+# hard reject on its own — the LLM still gets to explain itself).
+excluded_keywords:
+  - Helpdesk
+  - Help Desk
+  - Desktop Support
+  - PC support
+  - PC维护
+  - 桌面运维
+  - 桌面支持
+  - IT桌面
+  - 电脑维修
+  - 装机
+  - 弱电
+  - 综合布线
+  - 驻场支持
+  - 现场支持
+  - 售前
+  - 售后客服
+  - 销售
+  - 电话销售
+  - 渠道销售
+  - 机房搬运
+  - 上架布线
+
+# Excluded keywords that are forgiven when the JD is genuinely cloud/technical.
+# e.g. "售前" is fine if the role is a Cloud Solution Architect.
+excluded_soft_override_skills:
+  - AWS
+  - Kubernetes
+  - Terraform
+  - CloudFormation
+  - DevOps
+
+experience_policy:
+  preferred_min_years: 1
+  preferred_max_years: 3
+  # Jobs asking for more than preferred_max_years are NOT auto-rejected.
+  hard_reject_above_years: 8
+  # How much the model is allowed to forgive an experience gap when the
+  # technical match is strong: "strict" | "balanced" | "lenient"
+  flexibility: balanced
+  notes: >
+    3-5 年的岗位不要自动拒绝。如果技能和项目经历高度匹配，仍然可以给出较高分数。
+    只有当 JD 明确写出硬性门槛（例如「必须 5 年以上」「不满 5 年勿投」）时，
+    才把经验当作硬性条件。
+
+salary:
+  # Monthly salary in CNY. Used as a soft signal only.
+  min_monthly_cny: 15000
+  ideal_monthly_cny: 25000
+  # Do not let salary alone kill an otherwise excellent match.
+  hard_filter: false
+
+scoring:
+  # Score bands used as guidance in the prompt (not enforced blindly).
+  bands:
+    strong_apply: 90
+    apply: 80
+    apply_with_gaps: 70
+    maybe: 60
+  # Deterministic guardrail: cap the score when the JD is clearly an excluded
+  # role and shows essentially no relevant skill overlap.
+  excluded_role_score_cap: 45
+  min_skill_overlap_for_override: 3
+
+preferences:
+  # Free-form notes handed to the model verbatim. Keep it short.
+  notes: >
+    目标是云 / 基础设施 / DevOps / SRE 方向的工程岗位。
+    有中间件（WebSphere / IHS / AIX）与 AWS 云运维背景，
+    愿意从云运维向云平台开发、平台工程方向发展。
+    不接受纯桌面运维、纯销售、纯机房搬运类岗位。

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>JobAgent BOSS Detector</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <h1>JobAgent BOSS Detector</h1>
+      <p class="tagline">
+        只读检测你已经打开的 BOSS 页面。不会自动搜索、翻页、投递或发消息。
+      </p>
+    </header>
+
+    <div class="card">
+      <h3>受监督浏览会话（M4a · 无翻页/滚动/点击）</h3>
+      <p class="tagline">
+        本阶段只记录一个人工确认的会话，不做任何页面操作。选择任务、设置不超过上限的次数、
+        确认当前标签页，再点「开始会话」。
+      </p>
+      <label class="checkbox">任务
+        <select id="session-task"></select>
+      </label>
+      <div id="session-criteria" class="sub"></div>
+      <label class="checkbox">页数上限（≤3）
+        <input id="session-page-cap" type="number" min="1" max="3" value="1" />
+      </label>
+      <label class="checkbox">候选人上限（≤20）
+        <input id="session-candidate-cap" type="number" min="1" max="20" value="5" />
+      </label>
+      <label class="checkbox">每页滚动上限（≤5）
+        <input id="session-scroll-cap" type="number" min="0" max="5" value="0" />
+      </label>
+      <div id="session-tab-confirm" class="sub"></div>
+      <div class="actions">
+        <button id="session-start" class="btn-primary" type="button">开始会话</button>
+        <button id="session-stop" class="hidden" type="button">停止会话</button>
+      </div>
+      <div id="session-status" class="status status-info"></div>
+      <div id="session-progress" class="sub"></div>
+      <div id="session-history"></div>
+    </div>
+
+    <div class="actions">
+      <button id="detect" class="btn-primary" type="button">检测当前页面</button>
+      <button id="preview" type="button" disabled>发送到 JobAgent 预览</button>
+    </div>
+
+    <label class="checkbox">
+      <input id="dev-mode" type="checkbox" />
+      <span>开发者模式（显示命中的选择器）</span>
+    </label>
+
+    <div id="diagnostic-panel" class="diagnostic-panel hidden">
+      <div class="actions">
+        <button id="diagnose" type="button" disabled>结构诊断（仅职位详情页）</button>
+        <button id="diagnostic-copy" type="button" disabled>复制诊断结果</button>
+      </div>
+      <p class="tagline">
+        只读取标题 / 薪资 / 详情容器附近的少量节点：标签名、class、极短文本样本。
+        不发送到任何地方，仅显示在这里。
+      </p>
+      <pre id="diagnostic-output" class="diagnostic-output"></pre>
+    </div>
+
+    <div id="status" class="status status-info"></div>
+    <div id="result"></div>
+
+    <footer>
+      预览与导入都发送到本机 <code>127.0.0.1:8000</code>，不经过任何外部服务。
+    </footer>
+
+    <!-- Plain classic scripts, loaded in dependency order. -->
+    <script src="dist/config.js"></script>
+    <script src="dist/session.js"></script>
+    <script src="dist/popup.js"></script>
+  </body>
+</html>

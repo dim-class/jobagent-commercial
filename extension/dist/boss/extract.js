@@ -491,6 +491,15 @@ var BossExtract = (function () {
                 continue;
             let current = titleNode;
             for (let level = 0; current && level < 7; level++) {
+                // An ancestor that already wraps more than one title-bearing node
+                // spans multiple cards (e.g. the whole `<ul>` result list), not one.
+                // Adding it would let its fields - picked by "first descendant match
+                // anywhere in the subtree" - mix pieces of different cards into a
+                // single Frankenstein candidate, and that candidate can collide with
+                // a real card's URL and silently overwrite its correct extraction.
+                // Climbing must stop here rather than add this ancestor or go higher.
+                if (level > 0 && pickAllKnown(current, BossSelectors.CARD_TITLE).length > 1)
+                    break;
                 if (candidateRoots.indexOf(current) === -1)
                     candidateRoots.push(current);
                 current = current.parentElement;

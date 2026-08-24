@@ -1,10 +1,10 @@
 # JobAgent Orchestration Status
 
-- **Current state:** Git review available: **yes**; local-only baseline
-  `72399b1053160a78d3f2a7be93681ce44b568794`. Persistent Claude worker proof passed twice with
-  session `5640aa23-1b35-4a75-b977-e7add35b7628`. Live BOSS detail extraction reads title,
-  salary, and URL; company, city, experience, education, and description are missing.
-- **Blocker:** Live selector/extraction compatibility still requires verification in the user's
-  logged-in Chrome after the focused implementation and fixture tests pass.
-- **Next action:** Delegate the bounded live-detail extraction milestone to the same Claude worker,
-  review its Git diff, and run focused extension acceptance tests before requesting Chrome action.
+- **Current state:** Git review available; baseline `72399b1053160a78d3f2a7be93681ce44b568794`.
+  Persistent worker session reuse is proven. Detail correlation fix passes build, 28 extension
+  tests, and 36 fixture extraction tests. Logged-in Chrome popup verification confirms title,
+  company, salary, city, experience, education, canonical URL, and description on a real BOSS
+  dedicated detail page with no missing-field warning.
+- **Blocker:** Live BOSS search-results popup output is not yet verified.
+- **Next action:** Open a logged-in BOSS search-results page, run 检测当前页面, and verify detected
+  job cards keep title, company, salary, city, experience, and URL correlated.

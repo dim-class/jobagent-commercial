@@ -465,7 +465,7 @@ async def test_diagnostic_redacts_identifiers_and_never_inherits_excluded_descen
     await _load_fixture(browser_page, extension_bundle, "boss_job_detail.html", url=DETAIL_URL)
     await browser_page.evaluate(
         """() => {
-          const title = document.querySelector('.job-detail-box .job-name');
+          const title = document.querySelector('.job-banner .name h1');
           const probe = document.createElement('span');
           probe.className = 'diagnostic-probe';
           probe.textContent = 'hr@example.test 13812345678 www.example.test token=abc123def456ghi789';

@@ -1,26 +1,29 @@
 # Claude Worker Task
 
-State: proof 2 (read-only resume)
+State: implementation — live BOSS detail extraction
 
 ## Objective
 
-Prove the same persistent worker session can be resumed without changing product code.
+Make detail extraction reliably return company, city, experience, education, and description on
+current BOSS dedicated detail pages while preserving working title, salary, and canonical URL.
 
-## Scope
+## Live evidence
 
-- Read `CLAUDE.md` and this task.
-- Rely on the prior conversation context to confirm this is the continuation after proof 1.
-- Read only the names of the repository's top-level entries.
-- Write `docs/orchestration/RESULT.md` with `proof_step: 2`, confirmation that both instruction
-  files were read, and confirmation that proof 1 is present in the resumed conversation context.
+- Dedicated URLs use `https://www.zhipin.com/job_detail/<id>.html`.
+- Current live verification reports title, salary, and URL, but the five objective fields missing.
+- BOSS also renders a selected-job detail pane inside `/web/geek/jobs`; do not regress it.
+- Salary may use a PUA font; never emit unreadable PUA text as a valid salary.
 
-## Exclusions
+## Scope and acceptance
 
-- Do not modify product code, configuration, tests, build output, STATUS.md, or TASK.md.
-- Do not inspect `.env`, credentials, browser data, databases, or other secrets.
-- Do not run builds, tests, network calls, or implementation work.
-
-## Acceptance
-
-- Only `docs/orchestration/RESULT.md` changes during the worker invocation.
-- The result is concise and contains no repository source or secret values.
+- Inspect existing selectors/extraction/tests first; make the smallest robust change.
+- Centralize selectors in `extension/src/boss/selectors.ts`; adjust extraction only if necessary.
+- Add/update fixture coverage for both dedicated detail and selected-job detail shapes.
+- Preserve canonical URL/external-id behavior and meaningful `missing_fields`.
+- Run extension build and all relevant extension tests; fix failures in this invocation.
+- Run focused backend extension extraction/API tests if extension output contracts are affected.
+- Do not access live BOSS, secrets, browser state, `.env`, databases, or browser profiles.
+- Do not add navigation, scrolling, pagination, applying, messaging, CDP, Playwright, stealth, or
+  CAPTCHA behavior.
+- Write a concise `docs/orchestration/RESULT.md`: files changed, behavior, exact test/build counts,
+  and remaining logged-in Chrome verification.

@@ -12,6 +12,9 @@ test may ever contact zhipin.com.
 | `boss_search.html` | a search results page with several rendered cards |
 | `boss_job_detail.html` | one job detail page, all fields present |
 | `boss_job_no_salary.html` | a detail page with no visible salary |
+| `boss_job_pua_salary.html` | a detail page whose salary is obfuscated by a PUA glyph font |
+| `boss_job_detail_live_shape.html` | a dedicated detail page using the live-observed `.job-banner .info-primary` / `.job-boss-info` markup for company, city, experience and education |
+| `boss_search_split_pane_live_shape.html` | a split-pane search page (job list + selected-job detail pane) using live-observed markup, including a look-alike wrapper and duplicate-title cards that must not be mistaken for the selected card |
 | `unsupported.html` | a BOSS page that is neither a search nor a detail page |
 
 Because the fixtures mirror *conventions* rather than a captured DOM, a passing

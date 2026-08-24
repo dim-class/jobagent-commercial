@@ -1,17 +1,18 @@
 # Claude Worker Task
 
-State: proof 1 (read-only)
+State: proof 2 (read-only resume)
 
 ## Objective
 
-Prove the persistent worker can read repository instructions without changing product code.
+Prove the same persistent worker session can be resumed without changing product code.
 
 ## Scope
 
 - Read `CLAUDE.md` and this task.
+- Rely on the prior conversation context to confirm this is the continuation after proof 1.
 - Read only the names of the repository's top-level entries.
-- Write `docs/orchestration/RESULT.md` with `proof_step: 1`, confirmation that both instruction
-  files were read, and the number of top-level directories observed.
+- Write `docs/orchestration/RESULT.md` with `proof_step: 2`, confirmation that both instruction
+  files were read, and confirmation that proof 1 is present in the resumed conversation context.
 
 ## Exclusions
 

@@ -5,8 +5,9 @@
   fixed and covered by tests. Acceptance passed: extension build clean; extension 64/64 (`node --test
   tests/*.test.cjs`); backend session tests 43/43; backend extraction tests 43/43; static scan/diff
   check.
-- **Blocker:** None. Only logged-in Chrome selector/action verification remains.
-- **Next action:** the user (or Codex) runs the one remaining live Chrome check - confirm
-  scroll/pagination selectors resolve on a real `/web/geek/jobs` page, caps and gating hold, and the
-  loop guard behaves sanely across a real full-page pagination navigation. No further implementation
-  is expected unless that check finds a defect.
+- **Blocker:** Live verification cannot start because the ChatGPT Chrome control extension's Native
+  Host registry entry is missing; Chrome tabs are visible but cannot be claimed. The rebuilt unpacked
+  BOSS extension also requires a manual reload on `chrome://extensions`.
+- **Next action:** the user reinstalls the Chrome/Browser plugin from the Codex plugin UI, reloads the
+  unpacked BOSS extension, returns to `/web/geek/jobs`, and says `已完成`. Codex then runs the bounded
+  live scroll/pagination check; no implementation change is expected unless that check finds a defect.

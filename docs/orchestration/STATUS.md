@@ -1,10 +1,10 @@
 # JobAgent Orchestration Status
 
-- **Current state:** Git review available; baseline `72399b1053160a78d3f2a7be93681ce44b568794`.
-  Persistent worker session reuse is proven. Detail correlation fix passes build, 28 extension
-  tests, and 36 fixture extraction tests. Logged-in Chrome popup verification confirms title,
-  company, salary, city, experience, education, canonical URL, and description on a real BOSS
-  dedicated detail page with no missing-field warning.
-- **Blocker:** Live BOSS search-results popup output is not yet verified.
-- **Next action:** Open a logged-in BOSS search-results page, run 检测当前页面, and verify detected
-  job cards keep title, company, salary, city, experience, and URL correlated.
+- **Current state:** M4b is live-verified in the user's logged-in Chrome on `/web/geek/jobs`:
+  rendered-card discovery, one-card open, pending-capture Next lock, selected-pane detail capture,
+  loopback preview, and post-capture unlock all worked. Codex independently passed build, 43
+  extension behavior tests, and 42 focused extraction tests.
+- **Blocker:** None for M4b within its authorized scope. Scrolling and pagination remain excluded
+  and separately gated as M4c.
+- **Next action:** Commit the verified M4b milestone. Any further automation scope requires the
+  corresponding explicit policy authorization; do not add it implicitly.

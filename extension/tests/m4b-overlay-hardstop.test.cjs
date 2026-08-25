@@ -75,10 +75,11 @@ function makeElement(tag) {
  * each message type - it stands in for background.ts, which is tested for
  * real separately.
  */
-function loadOverlay({ detectResult, openResult, backendResponses }) {
+function loadOverlay({ detectResult, openResult, backendResponses, captureResult }) {
   const elementsById = {}
   const sentMessages = []
   const openCalls = []
+  const captureCalls = []
   const listeners = []
 
   const documentElement = {
@@ -112,11 +113,16 @@ function loadOverlay({ detectResult, openResult, backendResponses }) {
     BossContentScript: {
       DETECT: 'jobagent:detect',
       OPEN_CANDIDATE: 'jobagent:open-candidate',
+      CAPTURE_DETAIL: 'jobagent:capture-detail',
       handle(msg) {
         if (msg.type === 'jobagent:detect') return { ok: true, result: detectResult }
         if (msg.type === 'jobagent:open-candidate') {
           openCalls.push(msg.index)
           return { ok: true, result: openResult }
+        }
+        if (msg.type === 'jobagent:capture-detail') {
+          captureCalls.push(msg.canonicalUrl)
+          return { ok: true, result: captureResult || { status: 'not_loaded', candidate: null } }
         }
         return { ok: false }
       },
@@ -127,7 +133,7 @@ function loadOverlay({ detectResult, openResult, backendResponses }) {
   const code = fs.readFileSync(OVERLAY_PATH, 'utf8')
   new vm.Script(code, { filename: 'overlay.js' }).runInContext(sandbox)
 
-  return { sandbox, elementsById, sentMessages, openCalls, listeners }
+  return { sandbox, elementsById, sentMessages, openCalls, captureCalls, listeners }
 }
 
 async function settle() {
@@ -140,6 +146,11 @@ async function settle() {
 function nextButtonOf(env) {
   const bar = env.elementsById['jobagent-session-bar']
   return bar && bar.children.find((c) => c.textContent === '下一位候选人')
+}
+
+function captureButtonOf(env) {
+  const bar = env.elementsById['jobagent-session-bar']
+  return bar && bar.children.find((c) => c.textContent === '捕获详情')
 }
 
 function stopMessagesOf(env) {
@@ -234,10 +245,18 @@ test('a duplicate (looping) candidate URL stops without a second click', { skip:
   const env = loadOverlay({
     detectResult: SEARCH_PAGE,
     openResult: { ok: true },
+    // A candidate pending capture already keeps Next disabled and refused
+    // (see m4b-capture-behavior.test.cjs) - so to reach the loop-guard this
+    // test actually targets, the one candidate must be captured first, same
+    // as a real run would require.
+    captureResult: { status: 'ok', candidate: { title: '云计算工程师', source_url: SEARCH_PAGE.candidates[0].source_url } },
     backendResponses: (msg) => {
       if (msg.type === 'jobagent:session-snapshot') return { kind: 'session', session: SESSION }
       if (msg.type === 'jobagent:navigate-prepare') return { ok: true, session: SESSION }
       if (msg.type === 'jobagent:navigate-confirm') return { ok: true, session: SESSION }
+      if (msg.type === 'jobagent:send-preview') {
+        return { ok: true, preview: { new_count: 1, duplicate_count: 0, incomplete_count: 0 } }
+      }
       if (msg.type === 'jobagent:stop-session') return { ok: true }
       return { ok: false }
     },
@@ -248,6 +267,13 @@ test('a duplicate (looping) candidate URL stops without a second click', { skip:
   nextButtonOf(env).click()
   await settle()
   assert.equal(env.openCalls.length, 1)
+
+  // Capture it so nothing is pending - otherwise a second Next click is
+  // refused for that reason alone (see m4b-capture-behavior.test.cjs), not
+  // because the candidate is a duplicate, which is what this test covers.
+  captureButtonOf(env).click()
+  await settle()
+  assert.equal(env.captureCalls.length, 1)
 
   // A second click finds the same (only) candidate already handled - the
   // search page never changes, so this is the loop path, not "no candidates".

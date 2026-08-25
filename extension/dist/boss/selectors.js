@@ -33,6 +33,18 @@ var BossSelectors = {
         '/job_detail/', // BOSS also renders a list beside a detail pane
         '/c', // company page: has a job list
     ],
+    /**
+     * Paths that are always a job LISTING, never one posting - even when BOSS
+     * also renders a selected-card detail pane beside the list. Checked before
+     * any detail-pane markup, so a listing page is never reported as "found 1
+     * job": live evidence on `/web/geek/jobs` showed exactly that failure, with
+     * salary/city/experience/education/URL missing because they depended on
+     * correlating the pane back to one specific card. Deliberately narrower
+     * than `SEARCH_PATH_HINTS` above - that list also carries `/job_detail/`
+     * and `/c` for unrelated reasons, and including either here would
+     * misclassify a genuine dedicated detail page as a listing.
+     */
+    SEARCH_LISTING_PATH_HINTS: ['/web/geek/job', '/web/geek/jobs', '/web/geek/recommend'],
     /** Pages this extension must never treat as a job source. */
     BLOCKED_PATH_HINTS: [
         '/web/geek/chat', // recruiter conversations - private, never read
@@ -48,8 +60,6 @@ var BossSelectors = {
         '.job-primary',
         '.job-detail',
     ],
-    /** Split-pane search page: the human-selected job rendered on the right. */
-    SELECTED_DETAIL_ROOT: ['.job-detail-box'],
     TITLE: [
         '.job-banner .name h1',
         '.job-primary .name h1',

@@ -14,7 +14,8 @@ test may ever contact zhipin.com.
 | `boss_job_no_salary.html` | a detail page with no visible salary |
 | `boss_job_pua_salary.html` | a detail page whose salary is obfuscated by a PUA glyph font |
 | `boss_job_detail_live_shape.html` | a dedicated detail page using the live-observed `.job-banner .info-primary` / `.job-boss-info` markup for company, city, experience and education |
-| `boss_search_split_pane_live_shape.html` | a split-pane search page (job list + selected-job detail pane) using live-observed markup, including a look-alike wrapper and duplicate-title cards that must not be mistaken for the selected card |
+| `boss_search_split_pane_live_shape.html` | `/web/geek/jobs`: a rendered card list plus the selected-job detail pane BOSS renders beside it, proving the page reads as `search` (never as one job from the pane) and that duplicate-title/company cards each keep their own fields |
+| `boss_search_fallback_card_discovery.html` | `/web/geek/jobs` with none of the fixed `BossSelectors.CARD` shapes present at all, proving cards are still found from their own canonical `/job_detail/` anchors, a duplicate in-card anchor dedupes to one card, the selected pane's own link is never a card, and fields never mix |
 | `unsupported.html` | a BOSS page that is neither a search nor a detail page |
 
 Because the fixtures mirror *conventions* rather than a captured DOM, a passing

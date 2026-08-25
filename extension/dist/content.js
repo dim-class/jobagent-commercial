@@ -2,13 +2,15 @@
 /**
  * The content script.
  *
- * It sits idle on a BOSS page and does exactly nothing until the popup asks it
- * a question. There is no timer, no MutationObserver, no scroll handler and no
- * automatic capture: a detection happens only because a human clicked
- * 检测当前页面.
+ * It sits idle on a BOSS page and does exactly nothing until the popup or
+ * `overlay.ts` asks it a question. There is no timer, no MutationObserver,
+ * no scroll handler and no automatic capture: a detection happens only
+ * because a human clicked 检测当前页面, and the one click this script can
+ * perform (`OPEN_CANDIDATE`, M4b, explicitly authorized) only happens after
+ * `overlay.ts` has already gotten a per-click authorization from the backend.
  *
- * It reads the DOM and replies. It never navigates, clicks, submits, scrolls,
- * or writes to the page.
+ * Beyond that one authorized click, it never navigates, submits, scrolls, or
+ * writes to the page - it only reads the DOM and replies.
  */
 // eslint-disable-next-line no-var
 var BossContentScript = (function () {
@@ -20,6 +22,10 @@ var BossContentScript = (function () {
     //: script's isolated world, so this is a plain function call, not a
     //: `chrome.runtime` message.
     const OPEN_CANDIDATE = 'jobagent:open-candidate';
+    //: M4b phase two - read the selected-card detail pane and merge it with
+    //: the card `OPEN_CANDIDATE` was told to click. Same isolated-world direct
+    //: call as `OPEN_CANDIDATE`, not a `chrome.runtime` message.
+    const CAPTURE_DETAIL = 'jobagent:capture-detail';
     function handle(message) {
         const request = (message || {});
         if (request.type === PING) {
@@ -41,6 +47,16 @@ var BossContentScript = (function () {
             // guesses on an ambiguous match. See `boss/extract.ts`.
             return { ok: true, result: BossExtract.openCandidateLink(document, request.index) };
         }
+        if (request.type === CAPTURE_DETAIL
+            && typeof request.canonicalUrl === 'string'
+            && request.cachedCard) {
+            // Read the (hopefully now-loaded) detail pane and merge it with the
+            // exact card `OPEN_CANDIDATE` clicked. See `boss/extract.ts`.
+            return {
+                ok: true,
+                result: BossExtract.captureAndMerge(document, document.location.href, request.canonicalUrl, request.cachedCard),
+            };
+        }
         return { ok: false, error: 'unknown_request' };
     }
     // Guard against a double registration if the script is ever injected twice
@@ -60,5 +76,5 @@ var BossContentScript = (function () {
             return false; // responded synchronously
         });
     }
-    return { handle, PING, DETECT, DIAGNOSE, OPEN_CANDIDATE };
+    return { handle, PING, DETECT, DIAGNOSE, OPEN_CANDIDATE, CAPTURE_DETAIL };
 })();

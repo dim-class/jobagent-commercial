@@ -1,29 +1,24 @@
-# Claude Worker Task
+# Delta: enforce M4b phase ordering after live failure
 
-State: implementation — live BOSS detail extraction
+Continue the current implementation; do not redesign it.
 
-## Objective
+Real logged-in Chrome result:
+- Card discovery/open and capture-to-loopback-preview worked.
+- The human could click 下一位候选人 repeatedly before capturing. The overlay reached 5/5 and
+  overwrote the pending candidate; only the latest capture was previewed.
 
-Make detail extraction reliably return company, city, experience, education, and description on
-current BOSS dedicated detail pages while preserving working title, salary, and canonical URL.
+Fix and test:
+1. Once one candidate opens successfully, disable 下一位候选人 until that exact pending candidate
+   is captured and its preview succeeds. `not_loaded` or preview failure keeps Next disabled while
+   allowing only another explicit 捕获详情 attempt.
+2. After capture/preview succeeds, re-enable Next only when the approved candidate cap has not been
+   reached. At cap (live case 5/5), keep it disabled.
+3. Session start/re-render/reconnect must derive button state safely: no pending capture means Next
+   follows cap state; pending capture never gets silently discarded or overwritten.
+4. Add behavior tests proving repeated Next clicks cannot prepare/open/confirm a second candidate,
+   capture success unlocks one next candidate below cap, soft capture failures do not unlock it,
+   and cap completion never unlocks it.
+5. Rebuild and run all extension behavior tests plus focused extraction tests; fix failures.
 
-## Live evidence
-
-- Dedicated URLs use `https://www.zhipin.com/job_detail/<id>.html`.
-- Current live verification reports title, salary, and URL, but the five objective fields missing.
-- BOSS also renders a selected-job detail pane inside `/web/geek/jobs`; do not regress it.
-- Salary may use a PUA font; never emit unreadable PUA text as a valid salary.
-
-## Scope and acceptance
-
-- Inspect existing selectors/extraction/tests first; make the smallest robust change.
-- Centralize selectors in `extension/src/boss/selectors.ts`; adjust extraction only if necessary.
-- Add/update fixture coverage for both dedicated detail and selected-job detail shapes.
-- Preserve canonical URL/external-id behavior and meaningful `missing_fields`.
-- Run extension build and all relevant extension tests; fix failures in this invocation.
-- Run focused backend extension extraction/API tests if extension output contracts are affected.
-- Do not access live BOSS, secrets, browser state, `.env`, databases, or browser profiles.
-- Do not add navigation, scrolling, pagination, applying, messaging, CDP, Playwright, stealth, or
-  CAPTCHA behavior.
-- Write a concise `docs/orchestration/RESULT.md`: files changed, behavior, exact test/build counts,
-  and remaining logged-in Chrome verification.
+No scrolling, pagination, auto-retry/import/apply/message behavior, or live site access. Keep
+RESULT concise with exact counts and the remaining one-candidate live recheck.

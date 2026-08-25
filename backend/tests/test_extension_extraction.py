@@ -330,22 +330,139 @@ async def test_live_standalone_detail_info_child_classes_are_extracted(detect):
 
 
 @pytest.mark.asyncio
-async def test_live_split_pane_reads_only_the_human_selected_detail(detect):
+async def test_a_geek_jobs_listing_is_search_not_a_selected_detail_pane(detect):
+    """Real live-site failure: `/web/geek/jobs` was misreported as one job
+    (popup: "职位详情页", "识别到 1 个岗位"), with salary/city/experience/
+    education/URL all missing - because classification tried to treat the
+    selected-card detail pane BOSS renders beside the list as the one job on
+    the page, then correlate it back to a single list card. It must classify
+    as `search` and read the already-rendered list cards directly instead.
+    """
     result = await detect("boss_search_split_pane_live_shape.html", url=SEARCH_URL)
 
-    assert result["page_type"] == "detail"
-    assert len(result["candidates"]) == 1
-    first = result["candidates"][0]
+    assert result["page_type"] == "search"
+    assert len(result["candidates"]) == 3
+    first, second, third = result["candidates"]
+
     assert first["title"] == "云计算运维工程师"
     assert first["company"] == "纳新电子"
     assert first["salary_text"] == "8-12K"
     assert first["city"] == "北京"
     assert first["experience_text"] == "1-3年"
     assert first["education_text"] == "大专"
-    assert first["description"] == "负责当前选中岗位，熟悉云计算技术，具备相关经验与专业能力。"
     assert first["source_url"] == "https://www.zhipin.com/job_detail/live-card-1.html"
     assert first["external_id"] == "live-card-1"
-    assert first["missing_fields"] == []
+
+    assert third["title"] == "云计算工程师"
+    assert third["company"] == "信通院"
+    assert third["salary_text"] == "16-19K"
+    assert third["city"] == "北京"
+    assert third["experience_text"] == "1年以内"
+    assert third["education_text"] == "硕士"
+    assert third["source_url"] == "https://www.zhipin.com/job_detail/live-card-3.html"
+
+
+@pytest.mark.asyncio
+async def test_a_geek_jobs_listing_never_mixes_fields_across_duplicate_title_cards(detect):
+    """The second card shares its title *and* company with the first - two
+    separate postings, exactly the shape that once let a shared-ancestor bug
+    silently overwrite one card's salary with another's (see git history).
+    Each card's own fields must stay its own."""
+    result = await detect("boss_search_split_pane_live_shape.html", url=SEARCH_URL)
+    first, second, _third = result["candidates"]
+
+    assert second["title"] == first["title"] == "云计算运维工程师"
+    assert second["company"] == first["company"] == "纳新电子"
+    assert second["salary_text"] == "18-25K"
+    assert second["city"] == "北京"
+    assert second["experience_text"] == "3-5年"
+    assert second["education_text"] == "本科"
+    assert second["source_url"] == "https://www.zhipin.com/job_detail/live-card-2.html"
+    assert second["salary_text"] != first["salary_text"]
+    assert second["source_url"] != first["source_url"]
+
+
+@pytest.mark.asyncio
+async def test_a_geek_jobs_listing_never_leaks_the_selected_detail_pane(detect):
+    """The pane's own title/company/salary/description are deliberately
+    distinct from every list card, so any leak into a candidate is caught."""
+    result = await detect("boss_search_split_pane_live_shape.html", url=SEARCH_URL)
+
+    rendered = str(result)
+    assert "详情面板" not in rendered
+    assert "99-99K" not in rendered
+    assert all(c["description"] is None for c in result["candidates"])
+
+
+# --------------------------------------------------------------------------
+# fallback card discovery - fixed BossSelectors.CARD selectors miss entirely
+# --------------------------------------------------------------------------
+#
+# Confirmed live failure: on real `/web/geek/jobs`, the fixed card-root
+# selectors (`.job-card-wrapper`, `.job-list-box .job-card-box`, ...) return
+# zero matches even though several cards are visibly rendered. `extractSearch`
+# and `openCandidateLink` then fall back to discovering cards from their own
+# canonical `/job_detail/<id>.html` anchors - never from `.job-detail-box`,
+# the selected-pane's own, unrelated link.
+
+
+@pytest.mark.asyncio
+async def test_fallback_discovery_finds_cards_when_fixed_selectors_miss(detect):
+    result = await detect("boss_search_fallback_card_discovery.html", url=SEARCH_URL)
+
+    assert result["page_type"] == "search"
+    # Exactly the two real cards - not three (the pane's own link excluded)
+    # and not more from the duplicate in-card anchor being double-counted.
+    assert len(result["candidates"]) == 2
+    assert any("回退识别候选人卡片" in w for w in result["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_fallback_discovery_dedupes_two_anchors_on_the_same_card(detect):
+    """The first card has two `/job_detail/` anchors pointing at the same
+    canonical URL - a title link and a "查看详情" link. That must produce one
+    candidate, never two."""
+    result = await detect("boss_search_fallback_card_discovery.html", url=SEARCH_URL)
+    urls = [c["source_url"] for c in result["candidates"]]
+
+    assert urls.count("https://www.zhipin.com/job_detail/fallback-card-1.html") == 1
+    assert "https://www.zhipin.com/job_detail/fallback-card-2.html" in urls
+
+
+@pytest.mark.asyncio
+async def test_fallback_discovery_never_leaks_the_selected_pane_as_a_card(detect):
+    result = await detect("boss_search_fallback_card_discovery.html", url=SEARCH_URL)
+    urls = [c["source_url"] for c in result["candidates"]]
+
+    assert "https://www.zhipin.com/job_detail/should-not-be-a-card.html" not in urls
+    rendered = str(result)
+    assert "详情面板" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_fallback_discovery_never_mixes_fields_across_duplicate_title_cards(detect):
+    """Both fallback-discovered cards share a title and company - the same
+    shape that once let a shared-ancestor bug overwrite one card's salary
+    with another's. Each card's own fields must stay its own."""
+    result = await detect("boss_search_fallback_card_discovery.html", url=SEARCH_URL)
+    first, second = result["candidates"]
+
+    assert first["title"] == second["title"] == "云计算运维工程师"
+    assert first["company"] == second["company"] == "纳新电子"
+    assert first["salary_text"] == "10-15K"
+    assert first["city"] == "北京"
+    assert first["experience_text"] == "3-5年"
+    assert first["education_text"] == "本科"
+    assert first["external_id"] == "fallback-card-1"
+
+    assert second["salary_text"] == "20-30K"
+    assert second["city"] == "北京"
+    assert second["experience_text"] == "5-10年"
+    assert second["education_text"] == "硕士"
+    assert second["external_id"] == "fallback-card-2"
+
+    assert first["salary_text"] != second["salary_text"]
+    assert first["source_url"] != second["source_url"]
 
 
 # --------------------------------------------------------------------------

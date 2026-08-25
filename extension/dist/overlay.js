@@ -46,12 +46,56 @@
     //: load - the loop guard.
     const handledUrls = new Set();
     const NEXT_BTN_ID = 'jobagent-next-candidate-btn';
+    const CAPTURE_BTN_ID = 'jobagent-capture-detail-btn';
     //: Synchronous in-flight guard against a rapid double-click starting a
     //: second concurrent `openNextCandidate()` - set/checked before any
     //: `await`, so two clicks in the same tick can never both pass it.
     let navigationInFlight = false;
+    //: Same guard, for `captureSelectedDetail()` - a rapid double-click on
+    //: "捕获详情" must do at most one read-and-send, never two.
+    let captureInFlight = false;
+    //: The exact card phase one (`openNextCandidate`) just opened - the only
+    //: thing phase two (`captureSelectedDetail`) is allowed to verify against
+    //: and merge with. Cleared the moment it is consumed (sent, or the
+    //: session/page it belongs to is no longer valid) so a stale capture can
+    //: never fire against a candidate that is no longer the one on screen.
+    //:
+    //: While this is set, "下一位候选人" must stay disabled - a real logged-in
+    //: Chrome run found that cap math alone let repeated Next clicks overwrite
+    //: this before it was ever captured, silently dropping every candidate but
+    //: the last. `nextAllowed()` below is the one place that decision is made;
+    //: every render and every state change after a capture attempt goes
+    //: through it, and `openNextCandidateStep` also refuses outright - as
+    //: defense in depth, not just a disabled attribute - to open a second
+    //: candidate while one is still pending.
+    let pendingCapture = null;
+    //: The most recently known session, kept in step with `pendingCapture` so
+    //: `nextAllowed()` can be recomputed after a capture attempt without a
+    //: full bar re-render (which would otherwise be the only place cap state
+    //: is read).
+    let lastSession = null;
+    /** Whether "下一位候选人" may open another candidate right now: never while
+     * one is still pending capture, and never at or above the approved cap. */
+    function nextAllowed(session) {
+        if (!session)
+            return false;
+        if (pendingCapture)
+            return false;
+        return session.candidates_extracted < session.candidate_cap;
+    }
     function setNextButtonDisabled(disabled) {
         const btn = document.getElementById(NEXT_BTN_ID);
+        if (btn)
+            btn.disabled = disabled;
+    }
+    /** Re-derive "下一位候选人"'s disabled state from current `pendingCapture` +
+     * `lastSession`, for the moments (a capture attempt finishing) that change
+     * one of those without re-rendering the whole bar. */
+    function refreshNextButton() {
+        setNextButtonDisabled(!nextAllowed(lastSession));
+    }
+    function setCaptureButtonDisabled(disabled) {
+        const btn = document.getElementById(CAPTURE_BTN_ID);
         if (btn)
             btn.disabled = disabled;
     }
@@ -104,6 +148,11 @@
      * here retries automatically.
      */
     async function hardStop(reason, message) {
+        // Whatever was pending is no longer safe to send under any outcome
+        // below - a confirmed stop ends the session outright, and even an
+        // unconfirmed one means the violation that triggered this is still real.
+        pendingCapture = null;
+        setCaptureButtonDisabled(true);
         const result = await askBackground({ type: 'jobagent:stop-session', reason });
         if (!result.ok) {
             setNextButtonDisabled(true);
@@ -121,7 +170,8 @@
             `候选人 ${session.candidates_extracted}/${session.candidate_cap} · ` +
             `不会翻页/滚动/投递/发消息`);
     }
-    function renderBar(session, onStop, onNext) {
+    function renderBar(session, onStop, onNext, onCapture) {
+        lastSession = session;
         removeBar();
         const bar = document.createElement('div');
         bar.id = BAR_ID;
@@ -137,11 +187,25 @@
         nextBtn.type = 'button';
         nextBtn.id = NEXT_BTN_ID;
         nextBtn.textContent = '下一位候选人';
-        nextBtn.disabled = session.candidates_extracted >= session.candidate_cap;
+        // Cap alone is not the whole story: a candidate still waiting on
+        // "捕获详情" must keep this disabled too - see `nextAllowed`.
+        nextBtn.disabled = !nextAllowed(session);
         nextBtn.setAttribute('style', 'padding:3px 12px;border-radius:4px;border:1px solid #fff;background:transparent;' +
             'color:#fff;cursor:pointer;font:inherit;');
         nextBtn.addEventListener('click', () => void onNext());
         bar.appendChild(nextBtn);
+        const captureBtn = document.createElement('button');
+        captureBtn.type = 'button';
+        captureBtn.id = CAPTURE_BTN_ID;
+        captureBtn.textContent = '捕获详情';
+        // Only enabled once phase one has actually opened a candidate on this
+        // page - a fresh bar render (session start, or a reconnect after this
+        // script re-injects) never has anything pending to capture yet.
+        captureBtn.disabled = !pendingCapture;
+        captureBtn.setAttribute('style', 'padding:3px 12px;border-radius:4px;border:1px solid #fff;background:transparent;' +
+            'color:#fff;cursor:pointer;font:inherit;');
+        captureBtn.addEventListener('click', () => void onCapture());
+        bar.appendChild(captureBtn);
         const stopBtn = document.createElement('button');
         stopBtn.type = 'button';
         stopBtn.textContent = '停止会话';
@@ -156,8 +220,11 @@
             type: 'jobagent:stop-session',
             reason: 'user_stop',
         });
-        if (result.ok)
+        if (result.ok) {
+            pendingCapture = null;
+            lastSession = null;
             removeBar();
+        }
         // If not confirmed, the session (and the pointer) are unchanged in the
         // worker - leave the bar as-is rather than guessing at a new state.
     }
@@ -185,6 +252,16 @@
         }
     }
     async function openNextCandidateStep() {
+        // Defense in depth, not just the disabled attribute: a real logged-in
+        // Chrome run showed repeated Next clicks reaching here while a candidate
+        // still awaited "捕获详情", silently overwriting it. Refuse outright -
+        // no page read, no prepare, no click - rather than trust only the button
+        // state a stray or racing click might bypass.
+        if (pendingCapture) {
+            setStatusLine('还有候选人等待"捕获详情"，请先完成捕获再打开下一位。');
+            refreshNextButton();
+            return;
+        }
         if (currentOrigin() !== REQUIRED_ORIGIN) {
             await hardStop('wrong_origin', '当前标签页已不是 https://www.zhipin.com，会话已结束。');
             return;
@@ -264,17 +341,119 @@
             await hardStop('confirm_failed', '候选人已打开，但未能确认写入后台，会话已结束（避免上限计数失真）。');
             return;
         }
+        // Phase one is done: cache exactly the card just opened (never anything
+        // re-derived later) so phase two has one unambiguous identity to verify
+        // the pane against.
+        pendingCapture = page.candidates[next];
         if (confirmed.session) {
-            renderBar(confirmed.session, () => void stopFromBar(), () => void openNextCandidate());
+            renderBar(confirmed.session, () => void stopFromBar(), () => void openNextCandidate(), () => void captureSelectedDetail());
         }
-        setStatusLine('已打开候选人详情页，请用"检测当前页面"确认并按需导入。');
+        setCaptureButtonDisabled(false);
+        setStatusLine('已打开候选人详情页，请等右侧详情加载后点击"捕获详情"。');
+    }
+    /**
+     * M4b phase two, the human's second click: read the pane the previous
+     * click opened, verify it is really `pendingCapture` (never guessed - see
+     * `boss/extract.ts`'s `captureAndMerge`), merge, and send only to the
+     * existing loopback preview path. Nothing here imports; the human still
+     * reviews and imports separately, exactly as `popup.ts` already works.
+     */
+    async function captureSelectedDetail() {
+        if (captureInFlight)
+            return;
+        captureInFlight = true;
+        setCaptureButtonDisabled(true);
+        try {
+            await captureSelectedDetailStep();
+        }
+        finally {
+            captureInFlight = false;
+        }
+    }
+    async function captureSelectedDetailStep() {
+        const cached = pendingCapture;
+        if (!cached || !cached.source_url) {
+            setStatusLine('没有待捕获的候选人，请先点击"下一位候选人"。');
+            return;
+        }
+        if (currentOrigin() !== REQUIRED_ORIGIN) {
+            await hardStop('wrong_origin', '当前标签页已不是 https://www.zhipin.com，会话已结束。');
+            return;
+        }
+        // Confirm this tab still owns a running session before sending anything
+        // - a stopped/reassigned session must never receive a capture.
+        const snapshot = await askBackground({ type: 'jobagent:session-snapshot' });
+        if (snapshot.kind !== 'session') {
+            pendingCapture = null;
+            setCaptureButtonDisabled(true);
+            setStatusLine('会话已结束或不属于当前标签页，捕获已取消（不会发送）。');
+            return;
+        }
+        // Keep cap numbers fresh for `nextAllowed` even though capture itself
+        // never changes them - the session-snapshot answer is the most current
+        // one available.
+        lastSession = snapshot.session;
+        const captured = BossContentScript.handle({
+            type: BossContentScript.CAPTURE_DETAIL,
+            canonicalUrl: cached.source_url,
+            cachedCard: cached,
+        });
+        if (!captured.ok || !captured.result) {
+            setStatusLine('读取详情面板失败，请重试。');
+            setCaptureButtonDisabled(false);
+            return;
+        }
+        const result = captured.result;
+        if (result.status === 'verification') {
+            await hardStop('verification', 'BOSS 正在要求安全验证或提示访问过于频繁，请自行处理，会话已结束（不会重试）。');
+            return;
+        }
+        if (result.status === 'not_loaded') {
+            // Inconclusive, not a confirmed violation - the pane may still be
+            // loading. Let the human simply try again.
+            setStatusLine('详情面板还没有加载完成，请稍候再点击"捕获详情"。');
+            setCaptureButtonDisabled(false);
+            return;
+        }
+        if (result.status === 'identity_mismatch') {
+            await hardStop('identity_mismatch', '捕获到的详情与刚打开的候选人不一致，会话已结束（不会猜测匹配，也不会发送）。');
+            return;
+        }
+        if (!result.candidate) {
+            setStatusLine('捕获失败，请重试。');
+            setCaptureButtonDisabled(false);
+            return;
+        }
+        setStatusLine('正在发送预览…');
+        const sent = await askBackground({
+            type: 'jobagent:send-preview',
+            pageType: 'detail',
+            pageUrl: result.candidate.source_url,
+            candidate: result.candidate,
+        });
+        if (!sent.ok) {
+            // Recoverable - the pane is presumably still visible, so the human
+            // may just click "捕获详情" again; nothing here retries by itself.
+            setStatusLine('发送预览失败：' + (sent.error || '未知错误') + '（不会自动重试，可再次点击"捕获详情"）。');
+            setCaptureButtonDisabled(false);
+            return;
+        }
+        pendingCapture = null;
+        setCaptureButtonDisabled(true);
+        // Only now - capture actually sent - may Next unlock again, and then
+        // only if the approved cap has not been reached.
+        refreshNextButton();
+        const counts = sent.preview;
+        setStatusLine(counts
+            ? `已发送预览：新 ${counts.new_count} / 重复 ${counts.duplicate_count}。什么都还没有保存，如需导入请另行打开弹窗操作。`
+            : '已发送预览。什么都还没有保存。');
     }
     async function init() {
         if (currentOrigin() !== REQUIRED_ORIGIN)
             return;
         const snapshot = await askBackground({ type: 'jobagent:session-snapshot' });
         if (snapshot.kind === 'session') {
-            renderBar(snapshot.session, () => void stopFromBar(), () => void openNextCandidate());
+            renderBar(snapshot.session, () => void stopFromBar(), () => void openNextCandidate(), () => void captureSelectedDetail());
         }
         // 'other_tab' | 'none' | 'unreachable' -> show nothing this pass.
     }
@@ -288,11 +467,13 @@
             const msg = (message || {});
             if (msg.type === 'jobagent:session-started' && msg.session) {
                 const session = msg.session;
-                renderBar(session, () => void stopFromBar(), () => void openNextCandidate());
+                renderBar(session, () => void stopFromBar(), () => void openNextCandidate(), () => void captureSelectedDetail());
                 sendResponse({ ok: true });
                 return false;
             }
             if (msg.type === 'jobagent:session-stopped') {
+                pendingCapture = null;
+                lastSession = null;
                 removeBar();
                 sendResponse({ ok: true });
                 return false;

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>北京招聘-BOSS直聘</title></head>
+<body>
+  <!-- No `.job-card-wrapper` / `.job-list-box .job-card-box` / any other
+       BossSelectors.CARD shape anywhere on this page - the fixed card-root
+       selectors must miss entirely, forcing the anchor-discovery fallback.
+       Confirmed live failure: fixed card-root selectors return zero matches
+       on /web/geek/jobs even though the page visibly renders several cards. -->
+  <div class="results-list">
+    <div class="posting-row">
+      <a class="job-card-left" href="/job_detail/fallback-card-1.html?lid=secret">
+        <span class="job-name">云计算运维工程师</span>
+      </a>
+      <span class="job-salary">10-15K</span>
+      <span class="job-area">北京·朝阳区</span>
+      <ul class="tag-list"><li>3-5年</li><li>本科</li></ul>
+      <div class="company-name"><a>纳新电子</a></div>
+      <!-- A second anchor to the SAME job on the same card - must dedupe to
+           one candidate, never two. -->
+      <a class="detail-link" href="/job_detail/fallback-card-1.html">查看详情</a>
+    </div>
+    <!-- Same title and company as the first card - a distinct posting BOSS
+         itself lists separately. Fields must not mix between the two. -->
+    <div class="posting-row">
+      <a class="job-card-left" href="/job_detail/fallback-card-2.html">
+        <span class="job-name">云计算运维工程师</span>
+      </a>
+      <span class="job-salary">20-30K</span>
+      <span class="job-area">北京·海淀区</span>
+      <ul class="tag-list"><li>5-10年</li><li>硕士</li></ul>
+      <div class="company-name"><a>纳新电子</a></div>
+    </div>
+  </div>
+
+  <!-- The selected-pane BOSS renders beside the list. Its own /job_detail/
+       link must never be treated as a third card. -->
+  <section class="job-detail-box">
+    <div class="job-name">云计算运维工程师（详情面板，应被忽略）</div>
+    <a href="/job_detail/should-not-be-a-card.html">相关推荐</a>
+  </section>
+</body>
+</html>

@@ -170,23 +170,6 @@ var BossExtract = (function () {
     return { nodes: [], selector: null }
   }
 
-  /** All nodes matching any known selector, deduped by DOM identity. */
-  function pickAllKnown(root: ParentNode, selectors: string[]): Element[] {
-    const nodes: Element[] = []
-    for (const selector of selectors) {
-      let matches: Element[] = []
-      try {
-        matches = Array.prototype.slice.call(root.querySelectorAll(selector))
-      } catch {
-        continue
-      }
-      for (const node of matches) {
-        if (nodes.indexOf(node) === -1) nodes.push(node)
-      }
-    }
-    return nodes
-  }
-
   /**
    * Scheme + host + path. The entire query string is dropped, not just the
    * parameters in `TRACKING_PARAMS`: BOSS puts `lid` / `securityId` there, the
@@ -299,16 +282,22 @@ var BossExtract = (function () {
       return 'unsupported'
     }
 
-    // A split-pane search page is a detail page for this POC: the human chose
-    // one card and the extension reads only the detail already rendered on
-    // the right. It never clicks or iterates through the list itself.
-    const selectedDetail = pickNode(doc, BossSelectors.SELECTED_DETAIL_ROOT)
-    const detail = pick(doc, BossSelectors.TITLE)
-    if (selectedDetail.node && detail.value) return 'detail'
-
+    // A listing path or several rendered cards always mean a search page,
+    // even when BOSS also renders a selected-card detail pane beside the
+    // list. Both checks come before any detail-pane markup: correlating a
+    // pane back to one specific card is fragile (BOSS gives no explicit
+    // link between the two), and live evidence on `/web/geek/jobs` showed it
+    // failing outright, reporting "found 1 job" with salary, city,
+    // experience, education and URL all missing. Reading each already-
+    // rendered card directly, the same way a plain search-results page
+    // already works, is the reliable path.
+    const isSearchListingPath = BossSelectors.SEARCH_LISTING_PATH_HINTS.some(
+      (hint) => path.indexOf(hint) === 0,
+    )
     const cards = pickAll(doc, BossSelectors.CARD)
+    if (isSearchListingPath || cards.nodes.length > 1) return 'search'
 
-    if (cards.nodes.length > 1) return 'search'
+    const detail = pick(doc, BossSelectors.TITLE)
     if (detail.value) return 'detail'
     if (cards.nodes.length === 1) return 'search'
     return 'unsupported'
@@ -346,8 +335,8 @@ var BossExtract = (function () {
    */
   function cleanDetailCompany(hit: FieldHit): FieldHit {
     if (!hit.value) return hit
-    // Live split-pane details may render "公司 · 招聘者职位" in the same
-    // attribute node. The left side is the company used for card correlation.
+    // Live detail pages may render "公司 · 招聘者职位" in the same attribute
+    // node. The left side is the company; the right side is not.
     const companyPart = hit.value.split(/\s*[·•|｜]\s*/, 1)[0]
     const value = companyPart
       .replace(
@@ -468,7 +457,7 @@ var BossExtract = (function () {
     )
     const rawSalary = pick(doc, BossSelectors.SALARY)
     const explicitSalaryUsable = isUsableSalary(rawSalary.value)
-    let salaryUnusableSeen = !!rawSalary.value && !explicitSalaryUsable
+    const salaryUnusableSeen = !!rawSalary.value && !explicitSalaryUsable
     candidate.salary_text = record(
       candidate,
       'salary_text',
@@ -500,39 +489,9 @@ var BossExtract = (function () {
       else candidate.missing_fields.push(field)
     }
 
-    const selectedCard = findUniqueSelectedCard(doc, candidate.title, candidate.company)
-    if (selectedCard) {
-      const selectedSalary = selectedCard.salary_text
-      if (isUsableSalary(selectedSalary)) {
-        if (!candidate.salary_text) {
-          candidate.salary_text = selectedSalary
-          copyMatchedSelector(candidate, selectedCard, 'salary_text')
-        }
-      } else if (selectedSalary) {
-        salaryUnusableSeen = true
-      }
-      if (!candidate.city) {
-        candidate.city = selectedCard.city
-        copyMatchedSelector(candidate, selectedCard, 'city')
-      }
-      if (!candidate.experience_text) {
-        candidate.experience_text = selectedCard.experience_text
-        copyMatchedSelector(candidate, selectedCard, 'experience_text', 'tags')
-      }
-      if (!candidate.education_text) {
-        candidate.education_text = selectedCard.education_text
-        copyMatchedSelector(candidate, selectedCard, 'education_text', 'tags')
-      }
-    }
-
     const pageUrl = cleanUrl(url)
     candidate.external_id = externalIdOf(pageUrl)
     candidate.source_url = candidate.external_id ? pageUrl : null
-    if (!candidate.source_url && selectedCard?.source_url) {
-      candidate.source_url = selectedCard.source_url
-      candidate.external_id = selectedCard.external_id
-      copyMatchedSelector(candidate, selectedCard, 'source_url')
-    }
     if (!candidate.source_url) candidate.missing_fields.push('source_url')
     candidate.missing_fields = candidate.missing_fields.filter((field) => {
       if (field === 'salary_text') return !candidate.salary_text
@@ -554,75 +513,6 @@ var BossExtract = (function () {
       candidate.warnings.push('没有找到职位描述容器，可能是页面还没加载完或改版了。')
     }
     return candidate
-  }
-
-  function copyMatchedSelector(
-    target: JobCandidate,
-    source: JobCandidate,
-    field: string,
-    fallbackField?: string,
-  ): void {
-    const selector = source.matched_selectors[field]
-      || (fallbackField ? source.matched_selectors[fallbackField] : null)
-    if (selector) target.matched_selectors[field] = selector
-  }
-
-  /**
-   * Correlate the already-selected right detail with one unique left card.
-   * No click or navigation: ambiguity returns null rather than guessing.
-   */
-  function findUniqueSelectedCard(
-    doc: Document,
-    title: string | null,
-    company: string | null,
-  ): JobCandidate | null {
-    if (!title) return null
-    const candidateRoots = pickAllKnown(doc, BossSelectors.CARD)
-    const selectedDetailSelector = BossSelectors.SELECTED_DETAIL_ROOT.join(',')
-    const selectedDetailRoot = pickNode(doc, BossSelectors.SELECTED_DETAIL_ROOT).node
-    for (const titleNode of pickAllKnown(doc, BossSelectors.CARD_TITLE)) {
-      if (text(titleNode) !== title || titleNode.closest(selectedDetailSelector)) continue
-      let current: Element | null = titleNode
-      for (let level = 0; current && level < 7; level++) {
-        // An ancestor that already wraps more than one title-bearing node
-        // spans multiple cards (e.g. the whole `<ul>` result list), not one.
-        // Adding it would let its fields - picked by "first descendant match
-        // anywhere in the subtree" - mix pieces of different cards into a
-        // single Frankenstein candidate, and that candidate can collide with
-        // a real card's URL and silently overwrite its correct extraction.
-        // Climbing must stop here rather than add this ancestor or go higher.
-        if (level > 0 && pickAllKnown(current, BossSelectors.CARD_TITLE).length > 1) break
-        if (candidateRoots.indexOf(current) === -1) candidateRoots.push(current)
-        current = current.parentElement
-      }
-    }
-
-    const byUrl: Record<string, JobCandidate> = {}
-    for (const root of candidateRoots) {
-      // A broad card selector can match a split-pane wrapper that also owns
-      // the selected detail. Treating that wrapper as a left result card can
-      // pair the detail title with an unrelated descendant link and make an
-      // otherwise unique selection look ambiguous.
-      if (
-        selectedDetailRoot
-        && (root === selectedDetailRoot
-          || root.contains(selectedDetailRoot)
-          || selectedDetailRoot.contains(root))
-      ) {
-        continue
-      }
-      const card = extractCard(root, 0)
-      if (card.title !== title || !card.source_url) continue
-      if (
-        company
-        && cleanDetailCompany({ value: card.company, selector: null }).value !== company
-      ) {
-        continue
-      }
-      byUrl[card.source_url] = card
-    }
-    const urls = Object.keys(byUrl)
-    return urls.length === 1 ? byUrl[urls[0]] : null
   }
 
   function extractCard(card: Element, index: number): JobCandidate {
@@ -666,18 +556,125 @@ var BossExtract = (function () {
     return candidate
   }
 
+  const MAX_FALLBACK_CARD_ANCESTOR_LEVELS = 6
+
+  /** Every `/job_detail/` anchor on the page, excluding the selected-pane's
+   * own (unrelated) link - the pane is never a result card. */
+  function jobDetailAnchors(root: ParentNode): HTMLAnchorElement[] {
+    const anchors = Array.prototype.slice.call(
+      root.querySelectorAll('a[href*="/job_detail/"]'),
+    ) as HTMLAnchorElement[]
+    return anchors.filter((a) => !a.closest('.job-detail-box'))
+  }
+
+  /**
+   * Fallback card discovery for when `BossSelectors.CARD` matches nothing at
+   * all - confirmed live failure: fixed card-root selectors return zero
+   * matches on `/web/geek/jobs`, even though the page visibly renders
+   * several cards. The one thing that stays true regardless of markup drift
+   * is that every real card links to its own canonical `/job_detail/<id>.html`,
+   * so cards are discovered from those anchors directly.
+   *
+   * Each anchor's card root is climbed only as far as it stays the *unique*
+   * job-detail anchor in that subtree - the same "stop before a shared
+   * ancestor" rule already used to keep the primary path from mixing two
+   * cards' fields together. A second anchor pointing at an already-seen
+   * canonical URL (e.g. a title link and a "view details" link on the same
+   * card) is deduplicated, never turned into a second candidate.
+   */
+  function discoverCardsFromJobDetailAnchors(
+    doc: Document,
+  ): { root: Element; anchor: Element; canonicalUrl: string }[] {
+    const results: { root: Element; anchor: Element; canonicalUrl: string }[] = []
+    const seen = new Set<string>()
+
+    for (const anchor of jobDetailAnchors(doc)) {
+      const canonicalUrl = cleanUrl(anchor.getAttribute('href'))
+      if (!canonicalUrl || !externalIdOf(canonicalUrl)) continue
+      if (seen.has(canonicalUrl)) continue
+      if (results.length >= MAX_CARDS) break
+
+      let root: Element = anchor
+      let current: Element = anchor
+      for (let level = 0; level < MAX_FALLBACK_CARD_ANCESTOR_LEVELS; level++) {
+        const parent: Element | null = current.parentElement
+        if (!parent) break
+        const distinctInParent = new Set(
+          jobDetailAnchors(parent)
+            .map((a) => cleanUrl(a.getAttribute('href')))
+            .filter((u): u is string => !!u),
+        )
+        if (distinctInParent.size > 1) break // parent already spans another card
+        root = parent
+        current = parent
+      }
+
+      seen.add(canonicalUrl)
+      results.push({ root, anchor, canonicalUrl })
+    }
+
+    return results
+  }
+
+  interface CardRoots {
+    nodes: Element[]
+    anchors: (Element | null)[]
+    canonicalUrls: (string | null)[]
+    usingFallback: boolean
+  }
+
+  /** The one place both `extractSearch` and `openCandidateLink` get their
+   * card list from, so the index one reports is always the index the other
+   * clicks - fallback or not. */
+  function findCardRoots(doc: Document): CardRoots {
+    const found = pickAll(doc, BossSelectors.CARD)
+    if (found.nodes.length) {
+      return {
+        nodes: found.nodes,
+        anchors: found.nodes.map(() => null),
+        canonicalUrls: found.nodes.map(() => null),
+        usingFallback: false,
+      }
+    }
+    const fallback = discoverCardsFromJobDetailAnchors(doc)
+    return {
+      nodes: fallback.map((f) => f.root),
+      anchors: fallback.map((f) => f.anchor),
+      canonicalUrls: fallback.map((f) => f.canonicalUrl),
+      usingFallback: true,
+    }
+  }
+
   function extractSearch(doc: Document): { candidates: JobCandidate[]; warnings: string[] } {
     const warnings: string[] = []
-    const found = pickAll(doc, BossSelectors.CARD)
+    const found = findCardRoots(doc)
 
     // Only what is already rendered. No scrolling, no pagination, no clicking.
     let nodes = found.nodes
+    let canonicalUrls = found.canonicalUrls
     if (nodes.length > MAX_CARDS) {
       warnings.push(`当前页面渲染了 ${nodes.length} 张卡片，只返回前 ${MAX_CARDS} 张。`)
       nodes = nodes.slice(0, MAX_CARDS)
+      canonicalUrls = canonicalUrls.slice(0, MAX_CARDS)
+    }
+    if (found.usingFallback && nodes.length) {
+      warnings.push('固定卡片选择器未命中，已根据职位详情链接回退识别候选人卡片。')
     }
 
-    const candidates = nodes.map((card, index) => extractCard(card, index))
+    const candidates = nodes.map((card, index) => {
+      const candidate = extractCard(card, index)
+      // The fallback's own canonical URL is authoritative - it is exactly
+      // how this card root was found, so it always wins over whatever
+      // `extractCard`'s own (unscoped, best-effort) link lookup guessed.
+      const canonicalUrl = canonicalUrls[index]
+      if (found.usingFallback && canonicalUrl) {
+        candidate.source_url = canonicalUrl
+        candidate.external_id = externalIdOf(canonicalUrl)
+        candidate.matched_selectors.source_url = 'a[href*="/job_detail/"]'
+        candidate.missing_fields = candidate.missing_fields.filter((f) => f !== 'source_url')
+      }
+      return candidate
+    })
     const usable = candidates.filter((c) => c.title).length
     if (usable !== candidates.length) {
       warnings.push(`${candidates.length - usable} 张卡片缺少职位名称，可能是广告位或占位卡片。`)
@@ -704,13 +701,38 @@ var BossExtract = (function () {
     error?: 'out_of_range' | 'no_link' | 'selector_ambiguous' | 'not_clickable'
   }
 
+  /**
+   * The one click primitive in the whole extension - every navigation path
+   * (fixed-selector cards and the anchor-discovery fallback alike) ends
+   * here, and only here, so there is exactly one call site that invokes
+   * `click` to audit, not two that could quietly drift apart.
+   */
+  function clickAnchor(candidateAnchor: Element | null | undefined): OpenCandidateResult {
+    const anchor = candidateAnchor as HTMLElement | null | undefined
+    if (!anchor || typeof anchor.click !== 'function') {
+      return { ok: false, error: 'not_clickable' }
+    }
+    anchor.click()
+    return { ok: true }
+  }
+
   function openCandidateLink(doc: Document, index: number): OpenCandidateResult {
-    const cards = pickAll(doc, BossSelectors.CARD).nodes
-    if (index < 0 || index >= cards.length) {
+    // Same discovery `extractSearch` used to report this index, fallback or
+    // not - so a click always lands on the card the popup/overlay actually
+    // showed at that position.
+    const found = findCardRoots(doc)
+    if (index < 0 || index >= found.nodes.length) {
       return { ok: false, error: 'out_of_range' }
     }
 
-    const link = pickAll(cards[index], BossSelectors.CARD_LINK)
+    if (found.usingFallback) {
+      // The anchor discovery already found and verified this card's one
+      // canonical link - no re-search, so there is nothing left to be
+      // ambiguous about.
+      return clickAnchor(found.anchors[index])
+    }
+
+    const link = pickAll(found.nodes[index], BossSelectors.CARD_LINK)
     if (link.nodes.length === 0) {
       return { ok: false, error: 'no_link' }
     }
@@ -719,13 +741,104 @@ var BossExtract = (function () {
     if (link.nodes.length !== 1) {
       return { ok: false, error: 'selector_ambiguous' }
     }
+    return clickAnchor(link.nodes[0])
+  }
 
-    const anchor = link.nodes[0] as HTMLElement
-    if (typeof anchor.click !== 'function') {
-      return { ok: false, error: 'not_clickable' }
+  /**
+   * M4b phase two (CLAUDE.md "Chrome extension - M4 supervised navigation
+   * policy", explicitly authorized). `openCandidateLink` (phase one) only
+   * clicks an already-rendered card's own link - on `/web/geek/jobs` that
+   * loads the selected-card detail pane beside the list, it does not
+   * navigate away. This reads that pane once the human judges it has
+   * loaded, verifies it is really the same job the human just opened (never
+   * correlated/guessed - `cachedCard` is the exact card `openCandidateLink`
+   * was told to click), and merges the two: the card's own structured
+   * fields (already known good) fill in first, the pane supplies whatever
+   * the card could not (description, above all - cards never carry one).
+   * Fails closed - `not_loaded` is a soft, retry-able "not yet", but
+   * `identity_mismatch` and `verification` are real problems the caller
+   * must end the session over, never retry automatically.
+   */
+  interface CachedCardLike {
+    title: string | null
+    company: string | null
+    salary_text: string | null
+    city: string | null
+    experience_text: string | null
+    education_text: string | null
+    source_url: string | null
+    external_id: string | null
+    matched_selectors?: Record<string, string>
+  }
+
+  interface CaptureOutcome {
+    status: 'ok' | 'not_loaded' | 'identity_mismatch' | 'verification'
+    candidate: JobCandidate | null
+  }
+
+  /** The identity used to compare a card and a pane: cleaned the same way a
+   * detail page's own company text is, so "纳新电子" and "纳新电子 人力" agree. */
+  function companyIdentity(value: string | null): string | null {
+    if (!value) return null
+    return cleanDetailCompany({ value, selector: null }).value
+  }
+
+  function captureAndMerge(
+    doc: Document,
+    currentUrl: string,
+    canonicalUrl: string,
+    cachedCard: CachedCardLike,
+  ): CaptureOutcome {
+    if (looksLikeVerification(doc, currentUrl)) {
+      return { status: 'verification', candidate: null }
     }
-    anchor.click()
-    return { ok: true }
+
+    // `canonicalUrl` is already known-correct (it is exactly the URL phase
+    // one clicked), so it - not whatever the address bar currently shows -
+    // is what resolves this candidate's own source_url/external_id.
+    const pane = extractDetail(doc, canonicalUrl)
+    if (!pane.title) {
+      // Inconclusive, not a confirmed violation - the pane may still be
+      // loading. The caller must let the human simply try again.
+      return { status: 'not_loaded', candidate: null }
+    }
+    if (pane.title !== cachedCard.title) {
+      return { status: 'identity_mismatch', candidate: null }
+    }
+    const cachedCompany = companyIdentity(cachedCard.company)
+    if (cachedCompany && pane.company && companyIdentity(pane.company) !== cachedCompany) {
+      return { status: 'identity_mismatch', candidate: null }
+    }
+
+    const merged = emptyCandidate()
+    merged.title = cachedCard.title
+    merged.company = cachedCard.company || pane.company
+    merged.salary_text = cachedCard.salary_text || pane.salary_text
+    merged.city = cachedCard.city || pane.city
+    merged.experience_text = cachedCard.experience_text || pane.experience_text
+    merged.education_text = cachedCard.education_text || pane.education_text
+    merged.source_url = cachedCard.source_url || pane.source_url
+    merged.external_id = cachedCard.external_id || pane.external_id
+    // Only the pane ever carries a description - cards never do.
+    merged.description = pane.description
+    // Later keys win: a field the card itself supplied keeps the card's own
+    // selector attribution; only a field the card lacked shows the pane's.
+    merged.matched_selectors = { ...pane.matched_selectors, ...(cachedCard.matched_selectors || {}) }
+    merged.missing_fields = (
+      [
+        'title',
+        'company',
+        'salary_text',
+        'city',
+        'experience_text',
+        'education_text',
+        'source_url',
+        'description',
+      ] as const
+    ).filter((field) => !merged[field])
+    merged.warnings = pane.warnings.slice()
+
+    return { status: 'ok', candidate: merged }
   }
 
   // ------------------------------------------------------ dev-mode diagnostic
@@ -1037,6 +1150,7 @@ var BossExtract = (function () {
     looksLikeVerification,
     diagnoseDetail,
     openCandidateLink,
+    captureAndMerge,
     MAX_DESCRIPTION_CHARS,
     MAX_CARDS,
     MAX_DIAGNOSTIC_NODES,

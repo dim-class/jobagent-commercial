@@ -95,6 +95,7 @@ type StopReason =
   | 'prepare_denied'
   | 'click_failed'
   | 'confirm_failed'
+  | 'identity_mismatch'
 
 async function postStop(sessionId: number, reason: StopReason): Promise<void> {
   await fetchJson(`/api/extension/sessions/${sessionId}/stop`, {
@@ -283,6 +284,42 @@ async function navigateConfirmForTab(
   }
 }
 
+interface PreviewResult {
+  ok: boolean
+  preview?: unknown
+  error?: string
+}
+
+/**
+ * M4b phase two's one and only backend call: the existing, unchanged
+ * `/api/extension/jobs/preview` path - writes nothing, same as every other
+ * use of it (`popup.ts`'s manual "检测/预览" flow). Never counts against any
+ * session cap and never imports - the human still reviews and imports
+ * separately, exactly as before. Same per-tab ownership check as every
+ * other handler here: only the tab a running session is approved for may
+ * send anything.
+ */
+async function sendPreviewForTab(
+  tabId: number | undefined,
+  pageType: 'search' | 'detail',
+  pageUrl: string | null,
+  candidate: unknown,
+): Promise<PreviewResult> {
+  if (tabId === undefined) return { ok: false, error: 'no_tab' }
+  const pointer = await getGlobalPointer()
+  if (!pointer || pointer.tabId !== tabId) return { ok: false, error: 'not_owner' }
+
+  try {
+    const preview = await fetchJson('/api/extension/jobs/preview', {
+      method: 'POST',
+      body: { page_type: pageType, page_url: pageUrl, candidates: [candidate] },
+    })
+    return { ok: true, preview }
+  } catch (err) {
+    return { ok: false, error: String((err as Error)?.message || err) }
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const request = (message || {}) as RuntimeRequest
 
@@ -304,6 +341,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       'prepare_denied',
       'click_failed',
       'confirm_failed',
+      'identity_mismatch',
     ]
     const reason = (allowed as string[]).indexOf(payload.reason || '') !== -1
       ? (payload.reason as StopReason)
@@ -345,6 +383,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       payload.pageUrl ?? null,
       payload.outcome,
       payload.error ?? null,
+    ).then((result) => sendResponse(result))
+    return true // asynchronous response
+  }
+
+  if (request.type === 'jobagent:send-preview') {
+    const payload = message as { pageType?: string; pageUrl?: string | null; candidate?: unknown }
+    if (payload.pageType !== 'search' && payload.pageType !== 'detail') {
+      sendResponse({ ok: false, error: 'bad_page_type' })
+      return false
+    }
+    if (!payload.candidate) {
+      sendResponse({ ok: false, error: 'no_candidate' })
+      return false
+    }
+    void sendPreviewForTab(
+      sender.tab?.id,
+      payload.pageType,
+      payload.pageUrl ?? null,
+      payload.candidate,
     ).then((result) => sendResponse(result))
     return true // asynchronous response
   }

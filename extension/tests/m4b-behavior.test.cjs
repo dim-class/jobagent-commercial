@@ -191,3 +191,87 @@ test('an unknown outcome is rejected before any fetch', { skip: SKIP }, async ()
   assert.equal(result.ok, false)
   assert.equal(env.fetchCalls.length, 0)
 })
+
+// --------------------------------------------------------------------------
+// M4b phase two: jobagent:send-preview - the one call captureSelectedDetail
+// makes, straight to the existing, unchanged /api/extension/jobs/preview.
+// --------------------------------------------------------------------------
+
+test('send-preview posts the candidate to the existing preview path', { skip: SKIP }, async () => {
+  const env = loadBackground({
+    tabId: 7,
+    storedPointer: { sessionId: 42, tabId: 7 },
+    fetchImpl: () => jsonResponse({ new_count: 1, duplicate_count: 0, incomplete_count: 0 }),
+  })
+  const candidate = { title: '云计算工程师', source_url: 'https://www.zhipin.com/job_detail/abc.html' }
+  const result = await env.send({
+    type: 'jobagent:send-preview',
+    pageType: 'detail',
+    pageUrl: candidate.source_url,
+    candidate,
+  })
+  assert.equal(result.ok, true)
+  assert.equal(result.preview.new_count, 1)
+  assert.equal(env.fetchCalls.length, 1)
+  assert.match(env.fetchCalls[0].url, /\/api\/extension\/jobs\/preview$/)
+  const body = JSON.parse(env.fetchCalls[0].init.body)
+  assert.equal(body.page_type, 'detail')
+  assert.deepEqual(body.candidates, [candidate])
+})
+
+test('send-preview from a non-owning tab is rejected with zero fetch calls', { skip: SKIP }, async () => {
+  const env = loadBackground({
+    tabId: 99,
+    storedPointer: { sessionId: 42, tabId: 7 },
+    fetchImpl: () => Promise.reject(new Error('must not be called')),
+  })
+  const result = await env.send({
+    type: 'jobagent:send-preview',
+    pageType: 'detail',
+    pageUrl: null,
+    candidate: { title: 'x' },
+  })
+  assert.equal(result.ok, false)
+  assert.equal(env.fetchCalls.length, 0)
+})
+
+test('send-preview surfaces a backend failure without throwing', { skip: SKIP }, async () => {
+  const env = loadBackground({
+    tabId: 7,
+    storedPointer: { sessionId: 42, tabId: 7 },
+    fetchImpl: () => errorResponse(500, '内部错误'),
+  })
+  const result = await env.send({
+    type: 'jobagent:send-preview',
+    pageType: 'detail',
+    pageUrl: null,
+    candidate: { title: 'x' },
+  })
+  assert.equal(result.ok, false)
+  assert.ok(result.error)
+})
+
+test('send-preview accepts "search" too, and rejects an unknown page type before any fetch', { skip: SKIP }, async () => {
+  const env = loadBackground({
+    tabId: 7,
+    storedPointer: { sessionId: 42, tabId: 7 },
+    fetchImpl: () => jsonResponse({ new_count: 0, duplicate_count: 0, incomplete_count: 1 }),
+  })
+  const result = await env.send({
+    type: 'jobagent:send-preview',
+    pageType: 'search',
+    pageUrl: null,
+    candidate: { title: 'x' },
+  })
+  assert.equal(result.ok, true, 'search is a valid page_type too')
+  assert.equal(env.fetchCalls.length, 1)
+
+  const badResult = await env.send({
+    type: 'jobagent:send-preview',
+    pageType: 'nonsense',
+    pageUrl: null,
+    candidate: { title: 'x' },
+  })
+  assert.equal(badResult.ok, false)
+  assert.equal(env.fetchCalls.length, 1, 'the rejected request never reaches fetch')
+})

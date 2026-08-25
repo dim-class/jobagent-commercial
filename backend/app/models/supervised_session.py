@@ -1,17 +1,18 @@
-"""SupervisedSession - M4a bounded-session scaffolding, no navigation.
+"""SupervisedSession - bounded human-supervised BOSS navigation (M4a-M4c).
 
 A row records one human-approved, bounded session: which task it is for,
 the caps the human approved (each independently re-checked against the
 immutable POC ceilings in ``services/supervised_sessions.py``), and the
-exact ``https://www.zhipin.com`` tab it is scoped to. M4a never navigates,
-so ``pages_visited`` / ``candidates_extracted`` / ``scrolls_used`` never
-leave 0 - the columns exist now so M4b/M4c (separately authorized, not
-implemented) can advance them without a new migration.
+exact ``https://www.zhipin.com`` tab it is scoped to. M4a never navigated,
+so this model's ``pages_visited`` / ``candidates_extracted`` / ``scrolls_used``
+columns existed from the start but stayed at 0; M4b (candidate cards) and
+M4c (scroll/pagination, both explicitly authorized) now advance them, with
+no migration needed since the columns were already there.
 
 ``SupervisedSessionEvent`` is the append-only audit trail, exactly like
 ``ApplicationEvent`` and ``OrchestrationEvent``: rows are never updated or
 deleted. See CLAUDE.md's "Chrome extension - M4 supervised navigation
-policy" and docs/orchestration/ROADMAP.md M4a.
+policy" and docs/orchestration/ROADMAP.md M4a-M4c.
 """
 
 from __future__ import annotations

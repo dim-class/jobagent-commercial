@@ -18,6 +18,20 @@ var BossExtract = (function () {
     const MAX_DESCRIPTION_CHARS = 20000;
     const MAX_CARDS = 60;
     /**
+     * M4c's stricter bar for a URL this extension is about to click into
+     * (`activateNextPage`) - the exact scheme+host `extension/manifest.json`'s
+     * `content_scripts.matches` declares and the backend's
+     * `REQUIRED_TAB_ORIGIN` requires, never the broader `BossSelectors.HOSTS`
+     * used elsewhere for merely *reading* whatever page a human already has
+     * open (that list also accepts the bare `zhipin.com` host).
+     */
+    const REQUIRED_NAV_ORIGIN = 'https://www.zhipin.com';
+    function isRequiredNavOrigin(url) {
+        if (!url)
+            return false;
+        return url === REQUIRED_NAV_ORIGIN || url.indexOf(REQUIRED_NAV_ORIGIN + '/') === 0;
+    }
+    /**
      * Bounds for the developer-mode structural diagnostic (see "dev-mode
      * diagnostic" below). Deliberately small: this is a look near a handful of
      * already-confirmed anchors, never a page-wide dump.
@@ -615,6 +629,58 @@ var BossExtract = (function () {
         }
         return clickAnchor(link.nodes[0]);
     }
+    /**
+     * Resolves the results container the same way `activateNextPage` resolves
+     * its control: the first `SCROLL_CONTAINER` selector that matches anything
+     * must match exactly one element - review finding fixed here - never the
+     * first of several silently picked via a bare `querySelector`. No match
+     * at all is not ambiguity; it falls through to the page/viewport itself.
+     */
+    function scrollResultsContainer(doc) {
+        const found = pickAll(doc, BossSelectors.SCROLL_CONTAINER);
+        if (found.nodes.length > 1)
+            return { ok: false, error: 'container_ambiguous' };
+        const container = found.nodes[0] || doc.scrollingElement || doc.documentElement;
+        const view = doc.defaultView;
+        const step = (container && container.clientHeight) || (view ? view.innerHeight : 0);
+        if (!container || !step || typeof container.scrollBy !== 'function') {
+            return { ok: false, error: 'not_scrollable' };
+        }
+        container.scrollBy({ top: step, left: 0 });
+        return { ok: true };
+    }
+    function isNextPageDisabled(el) {
+        const classes = Array.prototype.slice.call(el.classList).join(' ').toLowerCase();
+        if (BossSelectors.NEXT_PAGE_DISABLED_CLASS_HINTS.some((hint) => classes.indexOf(hint) !== -1)) {
+            return true;
+        }
+        return el.getAttribute('aria-disabled') === 'true';
+    }
+    function activateNextPage(doc) {
+        const found = pickAll(doc, BossSelectors.NEXT_PAGE);
+        if (found.nodes.length === 0)
+            return { ok: false, error: 'no_control' };
+        if (found.nodes.length !== 1)
+            return { ok: false, error: 'control_ambiguous' };
+        const control = found.nodes[0];
+        if (isNextPageDisabled(control))
+            return { ok: false, error: 'disabled' };
+        if (control.tagName === 'A') {
+            const href = control.getAttribute('href');
+            // A same-page (`href="#"`/empty/relative-to-here) control has nothing
+            // to check; one that names a different page must resolve to *exactly*
+            // `https://www.zhipin.com` - review finding fixed here - not merely
+            // any host `isSupportedHost` would read a page from (that list also
+            // accepts the bare `zhipin.com` host, which is fine for reading a
+            // page a human already opened but too loose a bar for a URL this
+            // extension itself is about to click into).
+            if (href && href !== '#' && !isRequiredNavOrigin(cleanUrl(href))) {
+                return { ok: false, error: 'wrong_origin' };
+            }
+        }
+        const result = clickAnchor(control);
+        return result.ok ? { ok: true } : { ok: false, error: 'not_clickable' };
+    }
     /** The identity used to compare a card and a pane: cleaned the same way a
      * detail page's own company text is, so "纳新电子" and "纳新电子 人力" agree. */
     function companyIdentity(value) {
@@ -930,6 +996,8 @@ var BossExtract = (function () {
         looksLikeVerification,
         diagnoseDetail,
         openCandidateLink,
+        scrollResultsContainer,
+        activateNextPage,
         captureAndMerge,
         MAX_DESCRIPTION_CHARS,
         MAX_CARDS,

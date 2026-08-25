@@ -1,17 +1,18 @@
-"""M4a/M4b supervised-session endpoints - bounded navigation, no scroll/pagination.
+"""M4a/M4b/M4c supervised-session endpoints - bounded navigation, scroll and pagination.
 
     POST /api/extension/sessions              start a session (one at a time)
     GET  /api/extension/sessions/active        the currently running session, or null
     GET  /api/extension/sessions/{id}          one session + its audit trail
     POST /api/extension/sessions/{id}/stop     stop it (human click, or fail-closed)
-    POST /api/extension/sessions/{id}/navigate record one already-performed step (M4b)
+    POST /api/extension/sessions/{id}/navigate record one already-performed step
+                                                (results/detail/scroll)
 
 Loopback only, the same guard the rest of ``/api/extension`` uses. No route
 here navigates, clicks, scrolls, paginates, searches, applies, or messages
-itself - the extension's own content script performs the one real click,
-and only afterward asks this module to account for it against the approved
-caps. See CLAUDE.md's "Chrome extension - M4 supervised navigation policy"
-and docs/orchestration/ROADMAP.md M4b.
+itself - the extension's own content script performs the one real scroll or
+click, and only afterward asks this module to account for it against the
+approved caps. See CLAUDE.md's "Chrome extension - M4 supervised navigation
+policy" and docs/orchestration/ROADMAP.md M4b/M4c.
 """
 
 from __future__ import annotations

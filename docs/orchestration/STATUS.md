@@ -1,10 +1,12 @@
 # JobAgent Orchestration Status
 
-- **Current state:** M4b is live-verified in the user's logged-in Chrome on `/web/geek/jobs`:
-  rendered-card discovery, one-card open, pending-capture Next lock, selected-pane detail capture,
-  loopback preview, and post-capture unlock all worked. Codex independently passed build, 43
-  extension behavior tests, and 42 focused extraction tests.
-- **Blocker:** None for M4b within its authorized scope. Scrolling and pagination remain excluded
-  and separately gated as M4c.
-- **Next action:** Commit the verified M4b milestone. Any further automation scope requires the
-  corresponding explicit policy authorization; do not add it implicitly.
+- **Current state:** M4c (bounded scrolling and pagination) is locally implemented and
+  fixture-verified. The reload loop-guard false-positive (page-2-to-page-3 incorrectly blocked) is
+  fixed and covered by tests. Acceptance passed: extension build clean; extension 64/64 (`node --test
+  tests/*.test.cjs`); backend session tests 43/43; backend extraction tests 43/43; static scan/diff
+  check.
+- **Blocker:** None. Only logged-in Chrome selector/action verification remains.
+- **Next action:** the user (or Codex) runs the one remaining live Chrome check - confirm
+  scroll/pagination selectors resolve on a real `/web/geek/jobs` page, caps and gating hold, and the
+  loop guard behaves sanely across a real full-page pagination navigation. No further implementation
+  is expected unless that check finds a defect.

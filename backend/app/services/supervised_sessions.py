@@ -1,14 +1,22 @@
-"""M4a/M4b supervised-session scaffolding and bounded-navigation accounting.
+"""M4a/M4b/M4c supervised-session scaffolding and bounded-navigation accounting.
 
 Every function here only creates/stops a ``SupervisedSession`` row, or
 records that one already-performed, human-initiated navigation step
 happened, appending a ``SupervisedSessionEvent`` each time. Nothing in this
 module navigates a tab, reads a page, scrolls, paginates, calls a model, or
-touches ``Job``/``Job.status`` - the extension performs the one real click
-(via its own content script, never Playwright/CDP), and only *afterward*
-tells this service what it did so the caps can be enforced and the trail
-audited. See CLAUDE.md's "Chrome extension - M4 supervised navigation
-policy" and docs/orchestration/ROADMAP.md M4b.
+touches ``Job``/``Job.status`` - the extension performs the one real
+scroll/click (via its own content script, never Playwright/CDP), and only
+*afterward* tells this service what it did so the caps can be enforced and
+the trail audited. See CLAUDE.md's "Chrome extension - M4 supervised
+navigation policy" and docs/orchestration/ROADMAP.md M4b/M4c.
+
+Three navigation targets, three independent budgets: ``"results"`` (a
+results-page visit, bounded by ``page_cap`` and counting the session's
+starting page exactly once - see ``create_session``), ``"scroll"`` (one
+bounded scroll step on the current results page, bounded by ``scroll_cap``
+and reset to 0 on every confirmed ``"results"`` navigation - never
+cumulative across the whole session), and ``"detail"`` (one candidate card
+opened, bounded by ``candidate_cap``).
 """
 
 from __future__ import annotations
@@ -139,6 +147,14 @@ def create_session(
         scroll_cap=scroll_cap,
         tab_origin=tab_origin,
         approved_criteria_json=_snapshot_criteria(task),
+        # The human is already looking at the starting results page the
+        # moment they approve a session - M4c (CLAUDE.md "Chrome extension -
+        # M4 supervised navigation policy", explicitly authorized) counts it
+        # exactly once, here, rather than waiting for a first pagination
+        # click that may never come. `page_cap=1` therefore means "the
+        # starting page only, no pagination" - not "one pagination click
+        # allowed on top of it".
+        pages_visited=1,
     )
     db.add(session)
     db.commit()
@@ -180,6 +196,14 @@ def _check_navigable(
             raise ValidationError(
                 f"已达到本次会话的候选人上限（{session.candidate_cap}）。",
                 detail={"field": "candidate_cap", "cap": session.candidate_cap},
+            )
+    elif target == "scroll":
+        # Per results page, reset to 0 on every confirmed pagination below -
+        # never cumulative across the whole session, only within one page.
+        if session.scrolls_used >= session.scroll_cap:
+            raise ValidationError(
+                f"已达到本页的滚动次数上限（{session.scroll_cap}）。",
+                detail={"field": "scroll_cap", "cap": session.scroll_cap},
             )
     else:
         raise ValidationError("未知的导航目标。", detail={"target": target})
@@ -240,6 +264,12 @@ def navigate_confirm(
 
     if target == "results":
         session.pages_visited += 1
+        # A confirmed pagination lands on a fresh results page - the scroll
+        # budget is per page, not per session, so it starts over here and
+        # only here (never on a mere prepare, and never on a failed click).
+        session.scrolls_used = 0
+    elif target == "scroll":
+        session.scrolls_used += 1
     else:
         session.candidates_extracted += 1
 

@@ -140,6 +140,32 @@ var BossSelectors = {
     CARD_LINK: ['a.job-card-left', 'a.job-name', 'a[href*="/job_detail/"]', 'a'],
     /** Cards sometimes carry a one-line teaser. It is not a job description. */
     CARD_TEASER: ['.job-card-footer .info-desc', '.info-desc'],
+    // --------------------------------------------------------- M4c scroll/page
+    //
+    // Explicitly authorized (CLAUDE.md "Chrome extension - M4 supervised
+    // navigation policy", M4c). Not yet live-verified against a real
+    // `/web/geek/jobs` page - conventional/documented BOSS markup, the same
+    // provisional status every other not-yet-confirmed selector list here
+    // carries until a human checks it in their own logged-in Chrome (see
+    // `extension/README.md`). A short, ordered fallback list, same discipline
+    // as every other selector group: never a single brittle guess.
+    /** The results list's own scrollable container, tried before falling back
+     * to the page/viewport itself (`scrollResultsContainer` in extract.ts). */
+    SCROLL_CONTAINER: ['.job-list-box', '.search-job-result', '.job-list-wrapper'],
+    /** The "next page" control on a BOSS results page. Must resolve to exactly
+     * one element - an ambiguous or missing match is a hard stop, never a
+     * guess (`activateNextPage` in extract.ts). */
+    NEXT_PAGE: [
+        '.options-pages a.ui-icon-arrow-right:not(.disabled)',
+        '.options-pages a.next:not(.disabled)',
+        'a.next-page:not(.disabled)',
+        '.pagination-next:not(.disabled)',
+    ],
+    /** Class-name fragments that mark a next-page control as unusable even if
+     * a selector above matched it (BOSS marks the last page this way instead
+     * of removing the control) - checked in addition to `:not(.disabled)`,
+     * which only guards the exact literal class `disabled`. */
+    NEXT_PAGE_DISABLED_CLASS_HINTS: ['disabled', 'dis-next', 'is-disabled'],
     // ------------------------------------------------------------ text parse
     /** "3-5年" / "1年以内" / "经验不限" / "应届生" */
     EXPERIENCE_RE: /(经验不限|应届生?|在校[生\/]?|\d{1,2}\s*-\s*\d{1,2}\s*年|\d{1,2}\s*年以[上内]|\d{1,2}\s*年)/,

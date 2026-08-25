@@ -50,7 +50,9 @@ def test_creating_a_session_persists_the_approved_caps_and_origin(db):
     assert session.candidate_cap == 10
     assert session.scroll_cap == 3
     assert session.tab_origin == VALID_ORIGIN
-    assert session.pages_visited == 0
+    # The starting results page is counted exactly once, at creation - see
+    # `test_the_starting_page_is_counted_exactly_once_at_creation` below.
+    assert session.pages_visited == 1
     assert session.candidates_extracted == 0
     assert session.scrolls_used == 0
     assert session.approved_criteria_json["task_name"] == task.name
@@ -393,7 +395,7 @@ def test_prepare_detail_writes_nothing(db):
     )
 
     assert prepared.candidates_extracted == 0
-    assert prepared.pages_visited == 0
+    assert prepared.pages_visited == 1  # the starting page, counted at creation
     events = supervised_sessions.get_session(db, session.id).events
     assert [e.event_type for e in events] == [SupervisedSessionEventType.started]
 
@@ -418,13 +420,30 @@ def test_prepare_rejects_when_the_candidate_cap_is_already_reached(db):
 
 def test_prepare_rejects_the_page_cap_the_same_way(db):
     task = make_task(db)
+    # page_cap=2: the starting page (1, counted at creation) plus one
+    # confirmed pagination click reaches it exactly.
     session = supervised_sessions.create_session(
-        db, task_id=task.id, page_cap=1, candidate_cap=5, scroll_cap=0, tab_origin=VALID_ORIGIN
+        db, task_id=task.id, page_cap=2, candidate_cap=5, scroll_cap=0, tab_origin=VALID_ORIGIN
     )
     supervised_sessions.navigate_confirm(
         db, session.id, target="results", page_url=None, outcome="success"
     )
 
+    try:
+        supervised_sessions.navigate_prepare(db, session.id, target="results", page_url=None)
+        raised = False
+    except ValidationError:
+        raised = True
+    assert raised
+
+
+def test_prepare_rejects_the_page_cap_immediately_when_it_only_covers_the_starting_page(db):
+    """`page_cap=1` means the starting page only - no pagination click is
+    ever allowed, not even a first one."""
+    task = make_task(db)
+    session = supervised_sessions.create_session(
+        db, task_id=task.id, page_cap=1, candidate_cap=5, scroll_cap=0, tab_origin=VALID_ORIGIN
+    )
     try:
         supervised_sessions.navigate_prepare(db, session.id, target="results", page_url=None)
         raised = False
@@ -487,7 +506,7 @@ def test_confirm_success_increments_the_matching_counter_and_appends_navigated(d
     )
 
     assert updated.candidates_extracted == 1
-    assert updated.pages_visited == 0
+    assert updated.pages_visited == 1  # the starting page, unaffected by a detail confirm
     events = supervised_sessions.get_session(db, session.id).events
     assert [e.event_type for e in events] == [
         SupervisedSessionEventType.started,
@@ -505,8 +524,132 @@ def test_confirm_results_success_increments_pages_visited(db):
     updated = supervised_sessions.navigate_confirm(
         db, session.id, target="results", page_url=None, outcome="success"
     )
+    assert updated.pages_visited == 2  # starting page (1) + this confirmed pagination
+    assert updated.candidates_extracted == 0
+
+
+def test_the_starting_page_is_counted_exactly_once_at_creation(db):
+    task = make_task(db)
+    session = supervised_sessions.create_session(
+        db, task_id=task.id, page_cap=3, candidate_cap=5, scroll_cap=2, tab_origin=VALID_ORIGIN
+    )
+    assert session.pages_visited == 1
+    events = supervised_sessions.get_session(db, session.id).events
+    # No extra event for it - it is implied by the session row itself, and
+    # `started` already marks the session's creation.
+    assert [e.event_type for e in events] == [SupervisedSessionEventType.started]
+
+
+def test_confirm_scroll_success_increments_scrolls_used(db):
+    task = make_task(db)
+    session = supervised_sessions.create_session(
+        db, task_id=task.id, page_cap=3, candidate_cap=5, scroll_cap=2, tab_origin=VALID_ORIGIN
+    )
+    supervised_sessions.navigate_prepare(db, session.id, target="scroll", page_url=None)
+    updated = supervised_sessions.navigate_confirm(
+        db, session.id, target="scroll", page_url=None, outcome="success"
+    )
+    assert updated.scrolls_used == 1
     assert updated.pages_visited == 1
     assert updated.candidates_extracted == 0
+    events = supervised_sessions.get_session(db, session.id).events
+    assert events[-1].event_type == SupervisedSessionEventType.navigated
+    assert events[-1].reason == "scroll"
+
+
+def test_prepare_rejects_scroll_once_the_per_page_cap_is_reached(db):
+    task = make_task(db)
+    session = supervised_sessions.create_session(
+        db, task_id=task.id, page_cap=3, candidate_cap=5, scroll_cap=1, tab_origin=VALID_ORIGIN
+    )
+    supervised_sessions.navigate_prepare(db, session.id, target="scroll", page_url=None)
+    supervised_sessions.navigate_confirm(
+        db, session.id, target="scroll", page_url=None, outcome="success"
+    )
+    try:
+        supervised_sessions.navigate_prepare(db, session.id, target="scroll", page_url=None)
+        raised = False
+    except ValidationError:
+        raised = True
+    assert raised
+
+
+def test_scroll_cap_zero_rejects_every_scroll(db):
+    task = make_task(db)
+    session = supervised_sessions.create_session(
+        db, task_id=task.id, page_cap=3, candidate_cap=5, scroll_cap=0, tab_origin=VALID_ORIGIN
+    )
+    try:
+        supervised_sessions.navigate_prepare(db, session.id, target="scroll", page_url=None)
+        raised = False
+    except ValidationError:
+        raised = True
+    assert raised
+
+
+def test_a_confirmed_pagination_resets_the_per_page_scroll_count(db):
+    task = make_task(db)
+    session = supervised_sessions.create_session(
+        db, task_id=task.id, page_cap=3, candidate_cap=5, scroll_cap=2, tab_origin=VALID_ORIGIN
+    )
+    # Use up the whole scroll budget on the starting page.
+    supervised_sessions.navigate_prepare(db, session.id, target="scroll", page_url=None)
+    supervised_sessions.navigate_confirm(
+        db, session.id, target="scroll", page_url=None, outcome="success"
+    )
+    supervised_sessions.navigate_prepare(db, session.id, target="scroll", page_url=None)
+    supervised_sessions.navigate_confirm(
+        db, session.id, target="scroll", page_url=None, outcome="success"
+    )
+    exhausted = supervised_sessions.get_session(db, session.id)
+    assert exhausted.scrolls_used == 2
+
+    # Paginating resets it - the new page's scroll budget starts fresh.
+    supervised_sessions.navigate_prepare(db, session.id, target="results", page_url=None)
+    paginated = supervised_sessions.navigate_confirm(
+        db, session.id, target="results", page_url=None, outcome="success"
+    )
+    assert paginated.scrolls_used == 0
+    assert paginated.pages_visited == 2
+
+    # And scrolling is allowed again, up to the same per-page cap.
+    supervised_sessions.navigate_prepare(db, session.id, target="scroll", page_url=None)
+    rescrolled = supervised_sessions.navigate_confirm(
+        db, session.id, target="scroll", page_url=None, outcome="success"
+    )
+    assert rescrolled.scrolls_used == 1
+
+
+def test_a_failed_pagination_does_not_reset_the_scroll_count(db):
+    task = make_task(db)
+    session = supervised_sessions.create_session(
+        db, task_id=task.id, page_cap=3, candidate_cap=5, scroll_cap=2, tab_origin=VALID_ORIGIN
+    )
+    supervised_sessions.navigate_prepare(db, session.id, target="scroll", page_url=None)
+    supervised_sessions.navigate_confirm(
+        db, session.id, target="scroll", page_url=None, outcome="success"
+    )
+    supervised_sessions.navigate_prepare(db, session.id, target="results", page_url=None)
+    failed = supervised_sessions.navigate_confirm(
+        db, session.id, target="results", page_url=None, outcome="failed", error="no_link"
+    )
+    assert failed.scrolls_used == 1  # unchanged - the pagination never actually happened
+    assert failed.pages_visited == 1
+
+
+def test_confirm_scroll_failed_never_counts(db):
+    task = make_task(db)
+    session = supervised_sessions.create_session(
+        db, task_id=task.id, page_cap=3, candidate_cap=5, scroll_cap=2, tab_origin=VALID_ORIGIN
+    )
+    supervised_sessions.navigate_prepare(db, session.id, target="scroll", page_url=None)
+    updated = supervised_sessions.navigate_confirm(
+        db, session.id, target="scroll", page_url=None, outcome="failed", error="not_scrollable"
+    )
+    assert updated.scrolls_used == 0
+    events = supervised_sessions.get_session(db, session.id).events
+    assert events[-1].event_type == SupervisedSessionEventType.navigate_failed
+    assert events[-1].reason == "scroll:not_scrollable"
 
 
 def test_confirm_failed_appends_navigate_failed_and_never_counts(db):

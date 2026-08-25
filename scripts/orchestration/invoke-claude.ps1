@@ -130,7 +130,8 @@ For a read-only proof task, product files must remain unchanged; updating RESULT
     }
 
     if ($claudeExitCode -ne 0 -or $payload.is_error) {
-        $reason = if ($payload.result) { [string]$payload.result } else { "Claude CLI failed." }
+        $hasResult = $payload.PSObject.Properties.Name -contains "result"
+        $reason = if ($hasResult -and $payload.result) { [string]$payload.result } else { "Claude CLI failed." }
         if ($reason.Length -gt 500) { $reason = $reason.Substring(0, 500) + "..." }
         if ($isResume) {
             throw "Stored Claude session $sessionId could not be resumed or complete the task: $reason"

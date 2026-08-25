@@ -128,6 +128,9 @@ async function stopForTab(tabId, reason = 'user_stop') {
     releasePrepareLock(tabId);
     return { ok: true };
 }
+function isNavigateTarget(value) {
+    return value === 'results' || value === 'detail' || value === 'scroll';
+}
 //: In-memory (never `chrome.storage`) single-flight guard, keyed by owning
 //: tabId: a rapid double-click can fire two `jobagent:navigate-prepare`
 //: messages before the first `await` in either has a chance to run, so the
@@ -254,7 +257,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (request.type === 'jobagent:navigate-prepare') {
         const payload = message;
-        if (payload.target !== 'results' && payload.target !== 'detail') {
+        if (!isNavigateTarget(payload.target)) {
             sendResponse({ ok: false, error: 'bad_target' });
             return false;
         }
@@ -263,7 +266,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (request.type === 'jobagent:navigate-confirm') {
         const payload = message;
-        if (payload.target !== 'results' && payload.target !== 'detail') {
+        if (!isNavigateTarget(payload.target)) {
             sendResponse({ ok: false, error: 'bad_target' });
             return false;
         }

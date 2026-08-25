@@ -649,14 +649,14 @@ async def test_no_cookies_storage_or_forms_are_read(extension_code):
 
 
 @pytest.mark.asyncio
-async def test_the_extractor_never_submits_scrolls_or_navigates(extension_code):
-    """No automation beyond the one M4b-authorized card-link click below:
-    the human drives the browser everywhere else."""
+async def test_the_extractor_never_submits_or_navigates(extension_code):
+    """No automation beyond the one M4b/M4c-authorized click and the one
+    M4c-authorized bounded scroll below: the human drives the browser
+    everywhere else. `scrollTo`/`scrollBy`/`scrollIntoView` are checked by
+    the two pinned-count tests right below instead of a bare absence check,
+    now that M4c explicitly authorizes exactly one of them."""
     forbidden = (
         ".submit(",
-        "scrollTo",
-        "scrollBy",
-        "scrollIntoView",
         "location.assign",
         "location.replace",
         "window.open",
@@ -667,18 +667,35 @@ async def test_the_extractor_never_submits_scrolls_or_navigates(extension_code):
 
 
 @pytest.mark.asyncio
-async def test_the_only_click_is_the_authorized_m4b_card_link_open(extension_code):
-    """M4b (CLAUDE.md "Chrome extension - M4 supervised navigation policy",
-    explicitly authorized) permits exactly one click anywhere in the built
-    extraction code: `openCandidateLink` clicking an already-rendered
-    search-result card's own link. No other click call site may exist -
-    this pins the count, not just the presence, so a second click added
-    anywhere else fails this test."""
+async def test_the_only_click_is_the_authorized_click_primitive(extension_code):
+    """M4b/M4c (CLAUDE.md "Chrome extension - M4 supervised navigation
+    policy", explicitly authorized) permit exactly one click call site
+    anywhere in the built extraction code: `clickAnchor`, shared by
+    `openCandidateLink` (an already-rendered search-result card's own link)
+    and `activateNextPage` (a same-origin pagination control) - never a
+    second, independent click site. This pins the count, not just the
+    presence, so a second click added anywhere else fails this test."""
     assert extension_code.count(".click(") == 1, (
-        "exactly one click site is authorized (openCandidateLink); "
-        "found a different count"
+        "exactly one click site is authorized (clickAnchor, shared by "
+        "openCandidateLink and activateNextPage); found a different count"
     )
     assert "anchor.click()" in extension_code
+
+
+@pytest.mark.asyncio
+async def test_the_only_scroll_is_the_authorized_m4c_bounded_step(extension_code):
+    """M4c (CLAUDE.md "Chrome extension - M4 supervised navigation policy",
+    explicitly authorized) permits exactly one scroll call site:
+    `scrollResultsContainer`'s single, bounded `scrollBy`. No `scrollTo` or
+    `scrollIntoView` call anywhere, and no second `scrollBy` site either -
+    this pins the count, not just the presence."""
+    assert extension_code.count("scrollBy(") == 1, (
+        "exactly one scroll site is authorized (scrollResultsContainer); "
+        "found a different count"
+    )
+    assert "container.scrollBy(" in extension_code
+    assert "scrollTo(" not in extension_code
+    assert "scrollIntoView(" not in extension_code
 
 
 @pytest.mark.asyncio

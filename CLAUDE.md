@@ -679,20 +679,23 @@ automated test may ever touch zhipin.com.
 
 ### Chrome extension — M4 supervised navigation policy
 
-**Status: the user has explicitly authorized M4a and M4b.** M4a —
+**Status: the user has explicitly authorized M4a, M4b and M4c.** M4a —
 bounded-session scaffolding only, with no navigation — is implemented (a
 popup approval UI, a background service worker that is the sole owner of
 the session pointer, and an approved-tab overlay bar) and is **complete and
 live-verified** in a real, logged-in Chrome profile. M4b — bounded
 navigation to search/results/detail pages and result-card selection, one
-human click at a time via a prepare-then-confirm handshake — is also
-implemented, under the same limits in sections 1-8 below, but is **pending
-verification in a real, logged-in Chrome profile**; see
-`docs/orchestration/STATUS.md` for exactly what remains unverified. **M4c
-(scroll/pagination) remains unimplemented and separately gated**: writing
-that code still requires its own, separate, explicit user authorization,
-distinct from M4a's and M4b's. See "Implementation gate" below and
-`docs/orchestration/ROADMAP.md` M4 for the staged spec.
+human click at a time via a prepare-then-confirm handshake, plus the
+two-phase open/capture/loopback-preview flow for one candidate at a time —
+is also **complete and live-verified** in a real, logged-in Chrome profile.
+M4c — bounded scrolling and pagination within a results page, one human
+click per step, under the same limits in sections 1-8 below — is
+implemented (fixture-tested; backend session accounting, selectors,
+extraction primitives and the overlay's scroll/next-page controls and
+gating) but is **pending verification in a real, logged-in Chrome profile**;
+see `docs/orchestration/STATUS.md` for exactly what remains unverified. See
+"Implementation gate" below and `docs/orchestration/ROADMAP.md` M4 for the
+staged spec.
 
 **1. Bounded, human-started session.** Every session is started by the human,
 who explicitly approves, before anything navigates: the exact task/search
@@ -784,13 +787,14 @@ detection today.
 **Implementation gate.** This section satisfies the "explicit CLAUDE.md
 policy change" half of the M4 gate in `docs/orchestration/ROADMAP.md`. The
 other half — "separate, explicit authorization from the user" — has now
-happened twice: for M4a (the bounded-session scaffolding in section 1 —
-approval, caps, the approved tab, start/stop, the overlay bar) and,
-separately, for M4b (bounded navigation under section 2's caps — search/
-results/detail pages and result-card selection only, never scroll or
-pagination). Neither authorization extends to M4c; writing code for it
-still requires its own separate, explicit user authorization, exactly as
-before.
+happened three times: for M4a (the bounded-session scaffolding in section 1
+— approval, caps, the approved tab, start/stop, the overlay bar), for M4b
+(bounded navigation under section 2's caps — search/results/detail pages and
+result-card selection, plus the two-phase capture/preview flow), and for M4c
+(bounded scrolling and pagination under the same section 2 caps and the
+immutable ceilings in 1a). No further milestone under this policy exists yet
+in `docs/orchestration/ROADMAP.md`; any future one still requires its own
+separate, explicit user authorization, exactly like these three.
 
 ### Caching (mandatory)
 

@@ -1,8 +1,11 @@
 /**
- * M4b fixed session bar for the approved BOSS tab - task/caps/progress, a
- * Stop control, and (M4b, explicitly authorized - CLAUDE.md "Chrome
- * extension - M4 supervised navigation policy") a "下一位候选人" control that
- * opens one already-rendered search-result card at a time.
+ * M4b/M4c fixed session bar for the approved BOSS tab - task/caps/progress,
+ * a Stop control, and three explicitly-authorized human-click controls
+ * (CLAUDE.md "Chrome extension - M4 supervised navigation policy"):
+ * "下一位候选人" opens one already-rendered search-result card; "向下滚动"
+ * performs one bounded scroll step on the results container; "下一页"
+ * activates one same-origin pagination control. Every one of the three is
+ * exactly one human click - none of them chain, retry, or wait for another.
  *
  * This content script makes NO network calls and contains no backend URL:
  * MV3 content scripts cannot reliably cross-origin fetch a loopback address
@@ -13,28 +16,30 @@
  *
  * The navigation state machine is prepare-then-confirm, never click-then-
  * ask: `jobagent:navigate-prepare` must return `ok: true` *before* this
- * script clicks anything (a denial - cap reached, session stopped, wrong
- * origin - clicks nothing at all), and `jobagent:navigate-confirm` reports
- * the click's *real* outcome afterward - a failed click is confirmed as
- * `outcome: "failed"` and never advances any counter.
+ * script clicks or scrolls anything (a denial - cap reached, session
+ * stopped, wrong origin - performs nothing at all), and
+ * `jobagent:navigate-confirm` reports the step's *real* outcome afterward -
+ * a failed step is confirmed as `outcome: "failed"` and never advances any
+ * counter.
  *
  * Every applicable policy hard stop below - verification/CAPTCHA/login/
  * security/rate-limit, wrong origin/page shape, no candidates left/a
- * detected loop, a denied prepare, a failed click, or a confirm call that
- * itself failed - actually ends the session: it POSTs stop through
- * `background.ts` (which clears the pointer only after that stop is
- * confirmed), then removes the navigation controls so nothing can be
- * clicked again. None of them retry automatically; the human must start a
- * new session for another attempt. `user_stop` (the Stop button) and
- * `stale_tab` (M4a's reload/restart fail-closed path) are unchanged.
+ * detected loop (candidate or results-page), a denied prepare, a failed
+ * step, or a confirm call that itself failed - actually ends the session: it
+ * POSTs stop through `background.ts` (which clears the pointer only after
+ * that stop is confirmed), then removes the navigation controls so nothing
+ * can be clicked again. None of them retry automatically; the human must
+ * start a new session for another attempt. `user_stop` (the Stop button)
+ * and `stale_tab` (M4a's reload/restart fail-closed path) are unchanged.
  *
- * No timer, no polling, no MutationObserver. It never scrolls, paginates,
- * searches, applies (立即沟通), messages, follows/collects, or reads
- * cookies/storage/forms - the only DOM mutation it ever performs is one
- * `.click()` on an already-rendered card link, done by `boss/extract.ts`'s
- * `openCandidateLink`, never a scroll to find one. See CLAUDE.md's "Chrome
- * extension - M4 supervised navigation policy" and
- * docs/orchestration/ROADMAP.md M4b.
+ * No timer, no polling, no MutationObserver, no auto-scroll/page/chain. It
+ * never searches, applies (立即沟通), messages, follows/collects, or reads
+ * cookies/storage/forms - the only DOM mutations it ever performs are one
+ * bounded scroll (`boss/extract.ts`'s `scrollResultsContainer`) and one
+ * `.click()` on an already-rendered card link or pagination control
+ * (`openCandidateLink`/`activateNextPage`, the same single click primitive).
+ * See CLAUDE.md's "Chrome extension - M4 supervised navigation policy" and
+ * docs/orchestration/ROADMAP.md M4b/M4c.
  */
 
 ;(function () {
@@ -107,21 +112,50 @@
     preview?: { new_count: number; duplicate_count: number; incomplete_count: number }
   }
 
+  interface ScrollResult {
+    ok: boolean
+    error?: string
+  }
+
+  interface PageResult {
+    ok: boolean
+    error?: string
+  }
+
   //: Cards already opened (success) or already tried and failed this page
   //: load - the loop guard.
   const handledUrls = new Set<string>()
 
+  //: M4c's own loop guard, the same shape as `handledUrls` above but for
+  //: results pages: the URL seen right before each pagination *attempt*.
+  //: If that URL is already in the set, the tab is back on a page already
+  //: paginated from - a client-side pager that silently failed to advance,
+  //: or a genuine loop - either way, refused rather than paginated again.
+  //: This Set is wiped by a full-page pagination navigation (a fresh script
+  //: instance starts empty), so it only protects one unbroken script
+  //: lifetime - `goToNextPageStep`'s `document.referrer` check is the
+  //: reload-safe complement, catching a same-page bounce-back even then.
+  const handledPageUrls = new Set<string>()
+
   const NEXT_BTN_ID = 'jobagent-next-candidate-btn'
   const CAPTURE_BTN_ID = 'jobagent-capture-detail-btn'
+  const SCROLL_BTN_ID = 'jobagent-scroll-step-btn'
+  const PAGE_BTN_ID = 'jobagent-next-page-btn'
 
-  //: Synchronous in-flight guard against a rapid double-click starting a
-  //: second concurrent `openNextCandidate()` - set/checked before any
-  //: `await`, so two clicks in the same tick can never both pass it.
+  //: Synchronous in-flight guards against a rapid double-click starting a
+  //: second concurrent step - each set/checked before any `await`, so two
+  //: clicks in the same tick can never both pass. `anyStepInFlight()` below
+  //: additionally makes the four steps mutually exclusive: only one of
+  //: opening a candidate, capturing, scrolling or paginating may run at a
+  //: time, never two different steps interleaved.
   let navigationInFlight = false
-
-  //: Same guard, for `captureSelectedDetail()` - a rapid double-click on
-  //: "捕获详情" must do at most one read-and-send, never two.
   let captureInFlight = false
+  let scrollInFlight = false
+  let paginateInFlight = false
+
+  function anyStepInFlight(): boolean {
+    return navigationInFlight || captureInFlight || scrollInFlight || paginateInFlight
+  }
 
   //: The exact card phase one (`openNextCandidate`) just opened - the only
   //: thing phase two (`captureSelectedDetail`) is allowed to verify against
@@ -153,21 +187,55 @@
     return session.candidates_extracted < session.candidate_cap
   }
 
+  /** Whether "向下滚动" may scroll right now: same pending-capture rule as
+   * every other action button, and never at or above the per-page cap -
+   * that cap resets to 0 only on a confirmed pagination (see
+   * `services/supervised_sessions.py`'s `navigate_confirm`). */
+  function scrollAllowed(session: SessionOut | null): boolean {
+    if (!session) return false
+    if (pendingCapture) return false
+    return session.scrolls_used < session.scroll_cap
+  }
+
+  /** Whether "下一页" may paginate right now: same pending-capture rule,
+   * never at or above the page cap (which already counts the session's
+   * starting page - see `create_session`). */
+  function nextPageAllowed(session: SessionOut | null): boolean {
+    if (!session) return false
+    if (pendingCapture) return false
+    return session.pages_visited < session.page_cap
+  }
+
   function setNextButtonDisabled(disabled: boolean) {
     const btn = document.getElementById(NEXT_BTN_ID) as HTMLButtonElement | null
     if (btn) btn.disabled = disabled
   }
 
-  /** Re-derive "下一位候选人"'s disabled state from current `pendingCapture` +
-   * `lastSession`, for the moments (a capture attempt finishing) that change
-   * one of those without re-rendering the whole bar. */
-  function refreshNextButton() {
-    setNextButtonDisabled(!nextAllowed(lastSession))
-  }
-
   function setCaptureButtonDisabled(disabled: boolean) {
     const btn = document.getElementById(CAPTURE_BTN_ID) as HTMLButtonElement | null
     if (btn) btn.disabled = disabled
+  }
+
+  function setScrollButtonDisabled(disabled: boolean) {
+    const btn = document.getElementById(SCROLL_BTN_ID) as HTMLButtonElement | null
+    if (btn) btn.disabled = disabled
+  }
+
+  function setPageButtonDisabled(disabled: boolean) {
+    const btn = document.getElementById(PAGE_BTN_ID) as HTMLButtonElement | null
+    if (btn) btn.disabled = disabled
+  }
+
+  /** Re-derive every action button's disabled state from current
+   * `pendingCapture` + `lastSession`, for the moments (a capture attempt
+   * finishing, a scroll/page confirm) that change one of those without
+   * re-rendering the whole bar. The single source of truth for all three is
+   * `nextAllowed`/`scrollAllowed`/`nextPageAllowed` above - nothing here
+   * re-derives the rule a second, possibly-drifting way. */
+  function refreshActionButtons() {
+    setNextButtonDisabled(!nextAllowed(lastSession))
+    setScrollButtonDisabled(!scrollAllowed(lastSession))
+    setPageButtonDisabled(!nextPageAllowed(lastSession))
   }
 
   function currentOrigin(): string {
@@ -232,6 +300,8 @@
     const result = await askBackground<{ ok: boolean }>({ type: 'jobagent:stop-session', reason })
     if (!result.ok) {
       setNextButtonDisabled(true)
+      setScrollButtonDisabled(true)
+      setPageButtonDisabled(true)
       setStatusLine(message + '（后台未确认停止，会话可能仍在运行；请点击"停止会话"重试，不会自动重试。）')
       return
     }
@@ -242,10 +312,11 @@
 
   function progressText(session: SessionOut): string {
     return (
-      `JobAgent 受监督会话（M4b）· 任务「${session.approved_criteria.task_name}」· ` +
+      `JobAgent 受监督会话（M4b/M4c）· 任务「${session.approved_criteria.task_name}」· ` +
       `页面 ${session.pages_visited}/${session.page_cap} · ` +
+      `本页滚动 ${session.scrolls_used}/${session.scroll_cap} · ` +
       `候选人 ${session.candidates_extracted}/${session.candidate_cap} · ` +
-      `不会翻页/滚动/投递/发消息`
+      `不会自动翻页/滚动/投递/发消息`
     )
   }
 
@@ -254,6 +325,8 @@
     onStop: () => void,
     onNext: () => void,
     onCapture: () => void,
+    onScroll: () => void,
+    onNextPage: () => void,
   ) {
     lastSession = session
     removeBar()
@@ -303,6 +376,32 @@
     captureBtn.addEventListener('click', () => void onCapture())
     bar.appendChild(captureBtn)
 
+    const scrollBtn = document.createElement('button')
+    scrollBtn.type = 'button'
+    scrollBtn.id = SCROLL_BTN_ID
+    scrollBtn.textContent = '向下滚动'
+    scrollBtn.disabled = !scrollAllowed(session)
+    scrollBtn.setAttribute(
+      'style',
+      'padding:3px 12px;border-radius:4px;border:1px solid #fff;background:transparent;' +
+        'color:#fff;cursor:pointer;font:inherit;',
+    )
+    scrollBtn.addEventListener('click', () => void onScroll())
+    bar.appendChild(scrollBtn)
+
+    const pageBtn = document.createElement('button')
+    pageBtn.type = 'button'
+    pageBtn.id = PAGE_BTN_ID
+    pageBtn.textContent = '下一页'
+    pageBtn.disabled = !nextPageAllowed(session)
+    pageBtn.setAttribute(
+      'style',
+      'padding:3px 12px;border-radius:4px;border:1px solid #fff;background:transparent;' +
+        'color:#fff;cursor:pointer;font:inherit;',
+    )
+    pageBtn.addEventListener('click', () => void onNextPage())
+    bar.appendChild(pageBtn)
+
     const stopBtn = document.createElement('button')
     stopBtn.type = 'button'
     stopBtn.textContent = '停止会话'
@@ -341,9 +440,10 @@
    */
   async function openNextCandidate() {
     // Synchronous guard, checked and set before any `await`: a second click
-    // arriving while a step is already running (rapid double-click) does no
-    // fetch and no click at all - it is simply dropped.
-    if (navigationInFlight) return
+    // arriving while a step is already running (rapid double-click, or a
+    // click on a different action button) does no fetch and no click at
+    // all - it is simply dropped. See `anyStepInFlight`.
+    if (anyStepInFlight()) return
     navigationInFlight = true
     setNextButtonDisabled(true)
     try {
@@ -361,7 +461,7 @@
     // state a stray or racing click might bypass.
     if (pendingCapture) {
       setStatusLine('还有候选人等待"捕获详情"，请先完成捕获再打开下一位。')
-      refreshNextButton()
+      refreshActionButtons()
       return
     }
 
@@ -486,6 +586,8 @@
         () => void stopFromBar(),
         () => void openNextCandidate(),
         () => void captureSelectedDetail(),
+        () => void scrollOnePage(),
+        () => void goToNextPage(),
       )
     }
     setCaptureButtonDisabled(false)
@@ -500,7 +602,7 @@
    * reviews and imports separately, exactly as `popup.ts` already works.
    */
   async function captureSelectedDetail() {
-    if (captureInFlight) return
+    if (anyStepInFlight()) return
     captureInFlight = true
     setCaptureButtonDisabled(true)
     try {
@@ -594,15 +696,264 @@
 
     pendingCapture = null
     setCaptureButtonDisabled(true)
-    // Only now - capture actually sent - may Next unlock again, and then
-    // only if the approved cap has not been reached.
-    refreshNextButton()
+    // Only now - capture actually sent - may Next/scroll/page unlock again,
+    // and then only if their own approved cap has not been reached.
+    refreshActionButtons()
     const counts = sent.preview
     setStatusLine(
       counts
         ? `已发送预览：新 ${counts.new_count} / 重复 ${counts.duplicate_count}。什么都还没有保存，如需导入请另行打开弹窗操作。`
         : '已发送预览。什么都还没有保存。',
     )
+  }
+
+  /**
+   * M4c (CLAUDE.md "Chrome extension - M4 supervised navigation policy",
+   * explicitly authorized). One bounded scroll step, gated exactly like
+   * `openNextCandidateStep`: refuse outright with a candidate pending,
+   * re-check origin/page-shape/verification fresh, ask the backend to
+   * *authorize* before performing anything, then report the real outcome.
+   */
+  async function scrollOnePage() {
+    if (anyStepInFlight()) return
+    scrollInFlight = true
+    setScrollButtonDisabled(true)
+    try {
+      await scrollOnePageStep()
+    } finally {
+      scrollInFlight = false
+    }
+  }
+
+  async function scrollOnePageStep() {
+    if (pendingCapture) {
+      setStatusLine('还有候选人等待"捕获详情"，请先完成捕获再滚动。')
+      refreshActionButtons()
+      return
+    }
+    if (currentOrigin() !== REQUIRED_ORIGIN) {
+      await hardStop('wrong_origin', '当前标签页已不是 https://www.zhipin.com，会话已结束。')
+      return
+    }
+
+    const detection = BossContentScript.handle({ type: BossContentScript.DETECT }) as {
+      ok: boolean
+      result?: DetectResult
+    }
+    if (!detection.ok || !detection.result) {
+      setStatusLine('无法读取当前页面，请稍后重试。')
+      setScrollButtonDisabled(false)
+      return
+    }
+    const page = detection.result
+
+    if (page.verification) {
+      await hardStop(
+        'verification',
+        'BOSS 正在要求安全验证或提示访问过于频繁，请自行处理，会话已结束（不会重试）。',
+      )
+      return
+    }
+    if (page.page_type !== 'search') {
+      await hardStop('wrong_page', '当前不是搜索结果页，无法滚动，会话已结束。')
+      return
+    }
+
+    setStatusLine('正在申请滚动…')
+    const prepared = await askBackground<NavigateResult>({
+      type: 'jobagent:navigate-prepare',
+      target: 'scroll',
+      pageUrl: null,
+    })
+    if (!prepared.ok) {
+      // Hard stop: this page's scroll cap reached, session stopped, wrong
+      // origin, or this tab does not own the session - scroll nothing.
+      await hardStop(
+        'prepare_denied',
+        '未获得授权，不会滚动，会话已结束：' + (prepared.error || '未知原因'),
+      )
+      return
+    }
+
+    const scrolled = BossContentScript.handle({
+      type: BossContentScript.SCROLL_STEP,
+    }) as { ok: boolean; result?: ScrollResult }
+    const succeeded = !!scrolled.ok && !!scrolled.result?.ok
+
+    const confirmed = await askBackground<NavigateResult>({
+      type: 'jobagent:navigate-confirm',
+      target: 'scroll',
+      pageUrl: null,
+      outcome: succeeded ? 'success' : 'failed',
+      error: succeeded ? null : scrolled.result?.error || 'unknown',
+    })
+
+    if (!succeeded) {
+      // Hard stop: no unique scrollable container - the scroll was
+      // confirmed failed above (never counted); end the session rather than
+      // let the human keep guessing at a page that cannot be scrolled.
+      await hardStop(
+        'scroll_failed',
+        '无法唯一定位可滚动的结果容器，会话已结束（不会猜测滚动）：' +
+          (scrolled.result?.error || 'unknown'),
+      )
+      return
+    }
+    if (!confirmed.ok) {
+      await hardStop(
+        'confirm_failed',
+        '已滚动，但未能确认写入后台，会话已结束（避免上限计数失真）。',
+      )
+      return
+    }
+
+    if (confirmed.session) {
+      renderBar(
+        confirmed.session,
+        () => void stopFromBar(),
+        () => void openNextCandidate(),
+        () => void captureSelectedDetail(),
+        () => void scrollOnePage(),
+        () => void goToNextPage(),
+      )
+    }
+    setStatusLine('已滚动一步，新出现的候选人可用"下一位候选人"打开。')
+  }
+
+  /**
+   * M4c's other action: activate one same-origin "next page" control. Same
+   * gating shape as `scrollOnePageStep`, plus its own loop guard
+   * (`handledPageUrls`) - the M4b candidate loop guard has no bearing on
+   * page identity, so pagination needs its own.
+   */
+  async function goToNextPage() {
+    if (anyStepInFlight()) return
+    paginateInFlight = true
+    setPageButtonDisabled(true)
+    try {
+      await goToNextPageStep()
+    } finally {
+      paginateInFlight = false
+    }
+  }
+
+  async function goToNextPageStep() {
+    if (pendingCapture) {
+      setStatusLine('还有候选人等待"捕获详情"，请先完成捕获再翻页。')
+      refreshActionButtons()
+      return
+    }
+    if (currentOrigin() !== REQUIRED_ORIGIN) {
+      await hardStop('wrong_origin', '当前标签页已不是 https://www.zhipin.com，会话已结束。')
+      return
+    }
+
+    const detection = BossContentScript.handle({ type: BossContentScript.DETECT }) as {
+      ok: boolean
+      result?: DetectResult
+    }
+    if (!detection.ok || !detection.result) {
+      setStatusLine('无法读取当前页面，请稍后重试。')
+      setPageButtonDisabled(false)
+      return
+    }
+    const page = detection.result
+
+    if (page.verification) {
+      await hardStop(
+        'verification',
+        'BOSS 正在要求安全验证或提示访问过于频繁，请自行处理，会话已结束（不会重试）。',
+      )
+      return
+    }
+    if (page.page_type !== 'search') {
+      await hardStop('wrong_page', '当前不是搜索结果页，无法翻页，会话已结束。')
+      return
+    }
+
+    const currentUrl = document.location.href
+
+    // Reload-safe loop guard, checked first: a full-page pagination
+    // navigation destroys this whole script instance and re-injects a
+    // fresh one, wiping `handledPageUrls` below along with every other
+    // in-memory Set here - but `document.referrer` is set by the browser
+    // itself from the actual previous page, so it survives that reload
+    // untouched. A page whose own referrer is itself means the navigation
+    // this session just performed went nowhere - a bounce-back loop caught
+    // even when no in-memory state carried over. Privacy-safe: only the
+    // URL shape already read elsewhere, never a token or page content.
+    if (document.referrer && document.referrer === currentUrl) {
+      await hardStop('loop_detected', '检测到翻页后又回到同一结果页，会话已结束（不会重复翻页）。')
+      return
+    }
+    // Same-instance loop guard: a page URL this session has already
+    // paginated *from* being reached again (client-side pagination that
+    // never actually reloads, so this Set persists across the attempt)
+    // means either a pager that silently failed to advance, or a genuine
+    // loop - refuse rather than paginate into the same content twice.
+    if (handledPageUrls.has(currentUrl)) {
+      await hardStop('loop_detected', '检测到重复的搜索结果页，会话已结束（不会重复翻页）。')
+      return
+    }
+
+    setStatusLine('正在申请翻页…')
+    const prepared = await askBackground<NavigateResult>({
+      type: 'jobagent:navigate-prepare',
+      target: 'results',
+      pageUrl: null,
+    })
+    if (!prepared.ok) {
+      await hardStop(
+        'prepare_denied',
+        '未获得授权，不会翻页，会话已结束：' + (prepared.error || '未知原因'),
+      )
+      return
+    }
+
+    handledPageUrls.add(currentUrl)
+
+    const paged = BossContentScript.handle({
+      type: BossContentScript.NEXT_PAGE,
+    }) as { ok: boolean; result?: PageResult }
+    const succeeded = !!paged.ok && !!paged.result?.ok
+
+    const confirmed = await askBackground<NavigateResult>({
+      type: 'jobagent:navigate-confirm',
+      target: 'results',
+      pageUrl: null,
+      outcome: succeeded ? 'success' : 'failed',
+      error: succeeded ? null : paged.result?.error || 'unknown',
+    })
+
+    if (!succeeded) {
+      // Hard stop: no unique/enabled/same-origin next-page control - the
+      // click was confirmed failed above (never counted).
+      await hardStop(
+        'click_failed',
+        '无法唯一定位可用的翻页控件，会话已结束（不会猜测点击）：' +
+          (paged.result?.error || 'unknown'),
+      )
+      return
+    }
+    if (!confirmed.ok) {
+      await hardStop(
+        'confirm_failed',
+        '已翻页，但未能确认写入后台，会话已结束（避免上限计数失真）。',
+      )
+      return
+    }
+
+    if (confirmed.session) {
+      renderBar(
+        confirmed.session,
+        () => void stopFromBar(),
+        () => void openNextCandidate(),
+        () => void captureSelectedDetail(),
+        () => void scrollOnePage(),
+        () => void goToNextPage(),
+      )
+    }
+    setStatusLine('已翻页，本页滚动次数已重置，可用"下一位候选人"打开新出现的候选人。')
   }
 
   async function init() {
@@ -615,6 +966,8 @@
         () => void stopFromBar(),
         () => void openNextCandidate(),
         () => void captureSelectedDetail(),
+        () => void scrollOnePage(),
+        () => void goToNextPage(),
       )
     }
     // 'other_tab' | 'none' | 'unreachable' -> show nothing this pass.
@@ -635,6 +988,8 @@
           () => void stopFromBar(),
           () => void openNextCandidate(),
           () => void captureSelectedDetail(),
+          () => void scrollOnePage(),
+          () => void goToNextPage(),
         )
         sendResponse({ ok: true })
         return false

@@ -187,7 +187,15 @@ async function stopForTab(
   return { ok: true }
 }
 
-type NavigateTarget = 'results' | 'detail'
+//: 'scroll' is M4c (CLAUDE.md "Chrome extension - M4 supervised navigation
+//: policy", explicitly authorized): one bounded scroll step on the current
+//: results page, bounded by scroll_cap and reset on every confirmed
+//: 'results' navigation - see supervised_sessions.py.
+type NavigateTarget = 'results' | 'detail' | 'scroll'
+
+function isNavigateTarget(value: unknown): value is NavigateTarget {
+  return value === 'results' || value === 'detail' || value === 'scroll'
+}
 type NavigateOutcome = 'success' | 'failed'
 
 interface NavigateResult {
@@ -352,7 +360,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (request.type === 'jobagent:navigate-prepare') {
     const payload = message as { target?: NavigateTarget; pageUrl?: string | null }
-    if (payload.target !== 'results' && payload.target !== 'detail') {
+    if (!isNavigateTarget(payload.target)) {
       sendResponse({ ok: false, error: 'bad_target' })
       return false
     }
@@ -369,7 +377,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       outcome?: NavigateOutcome
       error?: string | null
     }
-    if (payload.target !== 'results' && payload.target !== 'detail') {
+    if (!isNavigateTarget(payload.target)) {
       sendResponse({ ok: false, error: 'bad_target' })
       return false
     }

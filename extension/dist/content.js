@@ -5,12 +5,13 @@
  * It sits idle on a BOSS page and does exactly nothing until the popup or
  * `overlay.ts` asks it a question. There is no timer, no MutationObserver,
  * no scroll handler and no automatic capture: a detection happens only
- * because a human clicked 检测当前页面, and the one click this script can
- * perform (`OPEN_CANDIDATE`, M4b, explicitly authorized) only happens after
- * `overlay.ts` has already gotten a per-click authorization from the backend.
+ * because a human clicked 检测当前页面, and the one click/scroll this script
+ * can perform (`OPEN_CANDIDATE` and M4c's `NEXT_PAGE`/`SCROLL_STEP` -
+ * explicitly authorized) only happens after `overlay.ts` has already gotten
+ * a per-step authorization from the backend.
  *
- * Beyond that one authorized click, it never navigates, submits, scrolls, or
- * writes to the page - it only reads the DOM and replies.
+ * Beyond that one authorized step, it never navigates, submits, or writes to
+ * the page - it only reads the DOM and replies.
  */
 // eslint-disable-next-line no-var
 var BossContentScript = (function () {
@@ -26,6 +27,12 @@ var BossContentScript = (function () {
     //: the card `OPEN_CANDIDATE` was told to click. Same isolated-world direct
     //: call as `OPEN_CANDIDATE`, not a `chrome.runtime` message.
     const CAPTURE_DETAIL = 'jobagent:capture-detail';
+    //: M4c (CLAUDE.md "Chrome extension - M4 supervised navigation policy",
+    //: explicitly authorized). Same isolated-world direct-call pattern as
+    //: `OPEN_CANDIDATE`/`CAPTURE_DETAIL` - `overlay.ts` calls these only after
+    //: its own backend-authorized prepare step succeeds.
+    const SCROLL_STEP = 'jobagent:scroll-step';
+    const NEXT_PAGE = 'jobagent:next-page';
     function handle(message) {
         const request = (message || {});
         if (request.type === PING) {
@@ -57,6 +64,16 @@ var BossContentScript = (function () {
                 result: BossExtract.captureAndMerge(document, document.location.href, request.canonicalUrl, request.cachedCard),
             };
         }
+        if (request.type === SCROLL_STEP) {
+            // One bounded scroll step on the results container (or the page
+            // itself as fallback). See `boss/extract.ts`.
+            return { ok: true, result: BossExtract.scrollResultsContainer(document) };
+        }
+        if (request.type === NEXT_PAGE) {
+            // Activate exactly one same-origin, non-disabled "next page" control.
+            // See `boss/extract.ts`.
+            return { ok: true, result: BossExtract.activateNextPage(document) };
+        }
         return { ok: false, error: 'unknown_request' };
     }
     // Guard against a double registration if the script is ever injected twice
@@ -76,5 +93,5 @@ var BossContentScript = (function () {
             return false; // responded synchronously
         });
     }
-    return { handle, PING, DETECT, DIAGNOSE, OPEN_CANDIDATE, CAPTURE_DETAIL };
+    return { handle, PING, DETECT, DIAGNOSE, OPEN_CANDIDATE, CAPTURE_DETAIL, SCROLL_STEP, NEXT_PAGE };
 })();

@@ -1,4 +1,5 @@
-"""M4a/M4b supervised-session schemas - bounded navigation, no scroll/pagination.
+"""M4a/M4b/M4c supervised-session schemas - bounded navigation, scroll and
+pagination.
 
 Caps are bounded here by the immutable POC ceilings (page/candidate/scroll)
 as a first line of defense; ``services/supervised_sessions.py`` re-checks
@@ -40,6 +41,12 @@ from app.models.enums import SupervisedSessionEventType, SupervisedSessionStatus
 #: element (ambiguous or missing selector) and was confirmed failed.
 #: "confirm_failed": the click happened but the backend could not be told,
 #: so the session stops rather than risk an unaccounted-for navigation.
+#: "identity_mismatch": M4b's captured detail pane did not match the exact
+#: candidate card that was opened - never guessed, never sent.
+#:
+#: M4c (scroll/pagination, explicitly authorized) adds:
+#: "scroll_failed": the results container did not resolve to exactly one
+#: scrollable element (ambiguous or missing) and no scroll was performed.
 StopReason = Literal[
     "user_stop",
     "stale_tab",
@@ -51,6 +58,8 @@ StopReason = Literal[
     "prepare_denied",
     "click_failed",
     "confirm_failed",
+    "identity_mismatch",
+    "scroll_failed",
 ]
 
 
@@ -68,13 +77,16 @@ class SessionStopRequest(BaseModel):
     reason: StopReason = "user_stop"
 
 
-#: "results": the human-approved tab navigated to (or is confirmed on) a
-#: BOSS search-results page for this task - bounded by ``page_cap``.
+#: "results": one results-page visit - the session's starting page (counted
+#: once at creation, never via this endpoint) plus every confirmed
+#: pagination click after it - bounded by ``page_cap``.
 #: "detail": the extension opened one candidate's detail page by clicking
-#: its own already-rendered card link - bounded by ``candidate_cap``. M4b's
-#: extension UI only ever sends "detail"; "results" exists for completeness
-#: and for M4c (pagination) to reuse without a new endpoint.
-NavigateTarget = Literal["results", "detail"]
+#: its own already-rendered card link - bounded by ``candidate_cap``.
+#: "scroll": one bounded scroll step on the current results page - bounded
+#: by ``scroll_cap``, reset to 0 on every confirmed "results" navigation
+#: (M4c, CLAUDE.md "Chrome extension - M4 supervised navigation policy",
+#: explicitly authorized).
+NavigateTarget = Literal["results", "detail", "scroll"]
 
 
 class NavigatePrepareRequest(BaseModel):
@@ -139,9 +151,12 @@ class SessionOut(BaseModel):
     scroll_cap: int
     tab_origin: str
     approved_criteria: ApprovedCriteriaSnapshot
-    #: Advanced only by a confirmed POST /navigate call - never guessed,
-    #: never advanced by a read-only check. scrolls_used stays 0: M4b never
-    #: scrolls (that is M4c, separately gated and unimplemented).
+    #: `pages_visited` starts at 1 (the session's starting page, counted
+    #: exactly once at creation - see `create_session`) and, like
+    #: `scrolls_used` and `candidates_extracted`, is advanced only by a
+    #: confirmed POST /navigate call afterward - never guessed, never
+    #: advanced by a read-only check. `scrolls_used` resets to 0 on every
+    #: confirmed "results" navigation (M4c, explicitly authorized).
     pages_visited: int
     candidates_extracted: int
     scrolls_used: int

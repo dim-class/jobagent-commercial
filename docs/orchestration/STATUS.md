@@ -1,5 +1,29 @@
 # JobAgent Orchestration Status
 
+- Current (2026-08-31): 商用基线已在本地分支 `commercial` 提交（`b7ed135`），**未推送**——
+  仓库没有配置任何 git remote，按要求不猜测地址、不推送。`main` 分支未被改动。
+- P1 候选阶段筛选经审查后**已完整**，未重复造轮子：`job_eligibility.evaluate_early_career_policy`
+  提供 exclude/include/only；`search_plan` 给每个新 SearchPlan 任务快照 `early_career_policy`；
+  `extension_intake.early_career_policy_for_task(db, task_id)` 让预览与单条导入按任务快照判定。
+  已核实 `only` 不按标题预筛卡片（`background.ts` 仅在 `exclude` 下允许标题拒绝，注释说明
+  详情页 JD 才是 `only` 的证据来源），符合 TASK.md 要求。未新增第二套 Job 持久化或去重管线。
+- 运行测试时发现并修复三类既有缺陷（均非 P1 逻辑本身，但其中一类由 P1 引入）：
+  (1) `0021_candidate_stage_policy` 给 `job_search_tasks` 增加了 `early_career_policy`，但
+  `test_migrations_search_plan` / `_orchestration_events` / `_supervised_sessions` 三处的
+  「精确新增列集合」断言未同步 → 已补入期望集合；
+  (2) `test_analytics_api` 用冻结的 `NOW=2026-08-21` 造数据却调用使用真实时钟的 HTTP 路由，
+  20 天前的事件在 2026-08-31 正好掉出默认 30 天窗口，**无任何代码改动就开始失败**，且此后每天
+  都会失败。`applied_job` 与 `strong_hangzhou` 增加可选 `now` 参数，API 测试改为锚定真实时钟；
+  单元测试仍用冻结 NOW（它们同时把 NOW 传给 `compute_analytics`）。
+- 个人/商用分离已就位：`config/career_strategy.yaml` 为空模板（`preferred_roles: []` 等），
+  个人策略只存在于已 gitignore 的 `data/career_strategy.yaml`。新增忽略 `data/acceptance/`
+  （84 个 pytest 临时 .db 与一次性验收脚本）。提交前审计：暂存区 `data/` 下 0 文件，
+  无 `.env`/密钥/数据库/日志/简历；内容扫描命中的 `securityId=TOKEN`、`sk-test-not-a-real-key`
+  等全部是显式假值测试夹具。个人数据文件在磁盘上原样保留，未删除未覆盖。
+- 验收：完整后端 pytest（`--basetemp=.tmp/pytest-commercial`）退出码 0；扩展 build EXIT 0 +
+  298/298；前端 build EXIT 0 + 31/31。
+- 下一步：用户提供 Git 仓库地址后再执行 `git remote add` 与推送；不使用 force push，不改动 `main`。
+
 - Current (2026-08-31): “任何人可用”产品化 P0 第一段已离线实现。新增 `/setup` 个人设置页，
   新用户可上传本地简历、从后端声明的受支持城市中多选，并保存自己的岗位方向/技能；缺少简历、
   城市或岗位方向时搜索 fail closed 并引导完成设置。新增只读 loopback

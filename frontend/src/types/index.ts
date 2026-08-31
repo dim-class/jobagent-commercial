@@ -1010,6 +1010,28 @@ export interface StrategyDiff {
   description: string
 }
 
+export interface KeywordCohort {
+  keyword: string
+  cities: string[]
+  jobs: number
+  recommended: number
+  average_score: number | null
+  recommend_rate: number | null
+  interval_low: number | null
+  interval_high: number | null
+  confidence: 'insufficient' | 'low' | 'moderate' | 'strong'
+  actionable: boolean
+}
+
+export interface SearchKeywordAnalytics {
+  cohorts: KeywordCohort[]
+  analyzed_jobs: number
+  attributed_jobs: number
+  unattributed_jobs: number
+  coverage: number | null
+  observations: string[]
+}
+
 export interface CareerAnalyticsResult {
   window: TimeWindow
   generated_at: string

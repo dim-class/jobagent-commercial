@@ -6,6 +6,7 @@
 import type {
   SearchPlanTask,
   SalaryBackfillPlan,
+  SearchKeywordAnalytics,
   SalaryBackfillRun,
   QuickSearchPrepareResponse,
   SearchPlanOptions,
@@ -234,6 +235,9 @@ export const api = {
     request<QuickSearchPrepareResponse>('/api/tasks/search-plan/quick-prepare', {
       method: 'POST', body: JSON.stringify({ cities, target_count: targetCount }),
     }),
+  // Free: a local aggregate over analyses you already paid for.
+  searchKeywordAnalytics: () =>
+    request<SearchKeywordAnalytics>('/api/analytics/search-keywords'),
   getSalaryBackfillPlan: () => request<SalaryBackfillPlan>('/api/jobs/salary-backfill/plan'),
   getActiveSalaryBackfillRun: () =>
     request<SalaryBackfillRun | null>('/api/jobs/salary-backfill/runs/active'),

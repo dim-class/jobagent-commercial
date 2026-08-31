@@ -5,7 +5,7 @@ import { Alert, Card, Modal } from '@/components/ui'
 import { assessConsoleConnection, ConsoleConnectionError, consoleExtension,
   DEFAULT_BATCH_CANDIDATE_CAP, selectBoundedPendingTasks } from '@/pages/consoleExtension'
 import type { ConsoleAction, ConsoleReply } from '@/pages/consoleExtension'
-import type { SearchPlanOptions, SearchPlanTask } from '@/types'
+import type { SearchKeywordAnalytics, SearchPlanOptions, SearchPlanTask } from '@/types'
 
 function taskStatusLabel(task: SearchPlanTask): string {
   if (task.state === 'paused_login_required' || task.paused_reason === 'login_required') return '需要登录 BOSS'
@@ -26,6 +26,7 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
   const [batchSize, setBatchSize] = useState(2)
   const [batchCap, setBatchCap] = useState(DEFAULT_BATCH_CANDIDATE_CAP)
   const [tasks, setTasks] = useState<SearchPlanTask[]>([])
+  const [keywordStats, setKeywordStats] = useState<SearchKeywordAnalytics | null>(null)
   const [selected, setSelected] = useState<number | null>(null)
   const [connection, setConnection] = useState<ConsoleReply | null>(null)
   const [backendReady, setBackendReady] = useState(false)
@@ -106,6 +107,16 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     setChecking(false)
     setCheckedAt(new Date().toLocaleTimeString())
     setError('')
+  }, [])
+
+  // Free, local, read-only: it aggregates analyses that already exist, so it
+  // costs nothing to show next to the keyword picker. No model call.
+  useEffect(() => {
+    let alive = true
+    void api.searchKeywordAnalytics()
+      .then(value => { if (alive) setKeywordStats(value) })
+      .catch(() => { if (alive) setKeywordStats(null) })
+    return () => { alive = false }
   }, [])
 
   // Only status reads on mount/visibility or an explicit refresh. No task auto-start.
@@ -321,6 +332,42 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
         <button className="btn btn-secondary" onClick={() => onSelect(task.id)}>查看候选岗位</button>
       </div>
     </div> : <p className="small faint mt-1">只需选择城市和数量；岗位方向来自当前简历与职业策略，一次最多 5 个「城市 × 方向」组合（城市越多，每个城市分到的方向越少）。</p>}
+
+    {keywordStats && keywordStats.cohorts.some(c => c.actionable) ? (
+      <div className="card-block mt-1">
+        <div><strong>搜索方向表现</strong>
+          <span className="small faint"> · 本地统计，不消耗 AI 额度</span>
+        </div>
+        <table className="mt-1">
+          <thead>
+            <tr><th>方向</th><th>岗位</th><th>均分</th><th>推荐率（95% 区间）</th></tr>
+          </thead>
+          <tbody>
+            {keywordStats.cohorts.filter(c => c.actionable).map(c => (
+              <tr key={c.keyword}>
+                <td>{c.keyword}</td>
+                <td className="nowrap">{c.jobs}</td>
+                <td className="nowrap">{c.average_score ?? '—'}</td>
+                <td className="nowrap">
+                  {c.recommend_rate === null
+                    ? '—'
+                    : `${c.recommended}/${c.jobs} · ${(c.recommend_rate * 100).toFixed(0)}%`}
+                  {c.interval_low !== null && c.interval_high !== null ? (
+                    <span className="small faint">
+                      {' '}[{(c.interval_low * 100).toFixed(0)}–{(c.interval_high * 100).toFixed(0)}%]
+                    </span>
+                  ) : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {keywordStats.observations.map(line => (
+          <p key={line} className="small faint mt-1">{line}</p>
+        ))}
+      </div>
+    ) : null}
+
 
     <button type="button" className="btn-sm mt-1" aria-expanded={showAdvanced}
       onClick={() => setShowAdvanced(current => !current)}>

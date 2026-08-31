@@ -1,5 +1,34 @@
 # JobAgent Orchestration Status
 
+- Current (2026-09-01): **P2B 远程验收 PASS**。`b5be113` 已推送到 `origin/commercial`，
+  「Windows portable candidate」workflow 在 GitHub Actions 上完整跑通并产出可下载的未签名候选包。
+  P2B 仍是**未签名候选**，不是最终商用安装器；签名、安装/卸载 UX 与无工具链干净 Windows 验收属 P2C。
+- 首次远程构建（run 33412956626）**失败在 upload-artifact**，而构建本身是成功的：
+  「Build and audit unsigned candidate」与「Verify artifact files」都通过，verify 步骤日志里列出了
+  100,651,837 字节的 ZIP 和 SHA256SUMS.txt。原因是 `.artifacts` 以点开头，`actions/upload-artifact@v4`
+  默认把点开头路径视为隐藏并跳过（verify 用的是 `Get-ChildItem -Force` 所以看得见）。
+  修复提交 `a1e5612` 增加 `include-hidden-files: true`。
+- 重跑（run 33413375056）**全部步骤 success**：clean checkout / backend packaging install /
+  frontend + extension npm ci / PyInstaller build + release audit / Verify artifact files / upload-artifact。
+- 产物核验：远程下载 `JobAgent-Windows-x64-0.1.0-3.zip`（100,651,775 字节），SHA256 与
+  `SHA256SUMS.txt` 声明的 `a54220c5ca733ffb5d292ff72e920923d8e73286967d346eabe9f001c0fa5ebb`
+  **逐字符一致**。发现一个小缺陷：`SHA256SUMS.txt` 是 CRLF 行尾，Linux/git-bash 的 `sha256sum -c`
+  无法直接校验（需先转 LF）；未修，记录待 P2C 处理。
+- 包内隐私核查：解压后仅 `runtime/config/career_strategy.yaml` 命中敏感文件名，比对确认它与仓库
+  中性模板**去掉 CR 后逐字节相同**（`preferred_roles: []`），与用户个人策略不同。无数据库、无 .env、
+  无简历、无 browser_profiles。`release_audit.py` 本身也会拒绝打包 data/uploads/browser_profiles/logs。
+- 隔离目录运行验收：`--doctor` **PASS**（data_directory / data_directory_writable / strategy_file /
+  database_parent / frontend_bundle 全 OK，OpenAI 未配置为 INFO），退出码 0。
+- **一个假阳性被抓住**：首次启动 portable 时 8000 端口被上一轮遗留的开发后端占用，portable 绑定失败
+  退出码 3，而此时 curl `/health` 返回的 200 来自**开发服务器**而非 portable。改用
+  `--port 8123 --no-open --data-dir <临时目录>` 重跑，才是真实验收：`/health` 返回
+  `status=ok` + `database=ok`，根页面 `HTTP 200`（470 字节）。
+- `--stop` 验收：停止前 PID 25592 存在，执行后进程消失、`runtime-process.json` 被删除、
+  端口 8123 释放、无残留 JobAgent.exe 进程，退出码 0。
+- 用户数据未被触碰：运行前后 `data/jobagent.db` 与 `data/career_strategy.yaml` 的 size+mtime 指纹
+  **完全一致**；portable 把库写在自己的 `--data-dir` 与 `%LOCALAPPDATA%\JobAgent`，测试产物已清理。
+- 本轮未发布 GitHub Release、未签名、未控制 Chrome/BOSS、未调用任何 AI、未改动产品范围。
+
 - Current (2026-09-01): “任何人可用”P2B **未签名 Windows x64 便携候选**已在本机完成真实产物
   验收。锁定 PyInstaller 6.22.2；ZIP 约 102 MB，含冻结 Python 后端、编译前端、迁移、中性策略
   和扩展 0.1.20。3222 文件审计：missing 0 / forbidden 0 / `direct_url.json` 0；ZIP SHA-256 与

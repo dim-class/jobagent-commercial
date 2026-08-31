@@ -55,3 +55,26 @@ and removed its PID record. Full backend pytest reached 100% with exit 0.
 
 Remote clean-checkout Windows artifact build, code signing, installer/uninstall
 UX, and a genuinely toolchain-free Windows VM acceptance remain separate gates.
+
+## P2B remote acceptance (2026-09-01)
+
+Pushed `b5be113`, ran **Windows portable candidate** on GitHub Actions and
+verified the artifact end to end. Still an **unsigned candidate**, not the
+final commercial installer - signing, install/uninstall UX and a clean
+toolchain-free Windows acceptance remain P2C.
+
+- First remote run failed only at `upload-artifact`: the build and the audit
+  succeeded and the verify step listed a 100 MB ZIP, but `.artifacts` is
+  dot-prefixed and v4 skips hidden paths. Fixed in `a1e5612` with
+  `include-hidden-files: true`; the rerun passed every step.
+- Downloaded ZIP matches the declared SHA256 exactly. `SHA256SUMS.txt` is CRLF,
+  so `sha256sum -c` cannot consume it directly - noted for P2C.
+- Bundle carries the neutral strategy template only; no database, `.env`,
+  résumé or browser profile.
+- `--doctor` PASS. Running on an isolated port and data dir: `/health` returns
+  `status=ok` and `database=ok`, the root page returns HTTP 200, and `--stop`
+  removes the process, the PID record and the port binding.
+- A first attempt produced a false positive - the portable failed to bind port
+  8000 because a leftover dev backend held it, and the healthy `/health` came
+  from that dev server. Re-verified on `--port 8123`.
+- User data untouched: `data/` fingerprints identical before and after.

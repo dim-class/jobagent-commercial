@@ -64,3 +64,27 @@ favorites, or recruiter inboxes.
 
 User explicitly requested product-neutral onboarding and candidate-stage
 filtering, then requested this handoff to the persistent Claude worker.
+
+## Result (2026-08-31)
+
+**P1 is complete and shipped on `commercial`.** Review found the
+implementation already substantially on disk and did not duplicate it:
+
+- `job_eligibility.evaluate_early_career_policy` provides exclude/include/only;
+- `search_plan` snapshots `early_career_policy` onto every new SearchPlan task;
+- `extension_intake.early_career_policy_for_task(db, task_id)` resolves preview
+  and single import from that task's snapshot;
+- `only` deliberately does not title-prefilter cards - `background.ts` allows a
+  title-based reject under `exclude` only, so detail JD evidence can decide;
+- no second Job persistence or dedup pipeline, no browser/apply/message/paid
+  model behaviour was added.
+
+Gaps found and closed while completing it:
+
+- migration `0021` added `early_career_policy` to `job_search_tasks`, but three
+  migration tests asserted an exact added-column set that no longer matched;
+- the policy only applied at *intake*, so the 130 jobs already in the library
+  were unaffected - a 76-point 【2027届秋招】posting sat in the daily queue
+  under an `exclude` strategy. The queue now applies the live policy as a view
+  rule (never touching `Job.status`), reports how many it hid, and can reveal
+  them on request.

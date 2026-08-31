@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socket
 import shutil
 import sqlite3
 import sys
@@ -137,6 +138,27 @@ def _rollback_failed_start(data_dir: Path, backup: Path | None) -> None:
     _restore_backup(data_dir, backup)
 
 
+def _port_available(port: int, host: str = "127.0.0.1") -> bool:
+    """Whether we could actually bind this port right now.
+
+    Checked *before* anything else happens, because the launcher used to write
+    its PID record, take an upgrade backup and start the browser poller first
+    and only then let uvicorn try to bind. When the bind failed the process
+    exited 3 - but by then `_open_when_ready` was already polling `/health`, and
+    if the port was held by *another JobAgent* it saw that healthy response,
+    wrote runtime-version.json, set `ready` (which suppresses the upgrade
+    rollback) and opened a browser onto the other process's UI. A failed start
+    looked like a successful one.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        # No SO_REUSEADDR: we want the same "is it taken" answer uvicorn gets.
+        try:
+            probe.bind((host, port))
+        except OSError:
+            return False
+    return True
+
+
 def _is_healthy_payload(payload: object) -> bool:
     return (
         isinstance(payload, dict)
@@ -191,6 +213,18 @@ def main(argv: list[str] | None = None) -> int:
 
     existing_record = _read_json(pid_file) or {}
     existing = _same_process(existing_record)
+    if existing is None and not _port_available(args.port):
+        # Something else holds the port. Refuse before writing a PID record,
+        # taking a backup or opening a browser - the previous behaviour made
+        # another process's UI look like a successful launch.
+        print(
+            f"端口 {args.port} 已被其他程序占用，JobAgent 没有启动。\n"
+            "  · 如果另一个 JobAgent 正在运行，先用 JobAgent.exe --stop 停止它；\n"
+            "  · 或用 JobAgent.exe --port <其他端口> 启动。\n"
+            f"注意：浏览器里 127.0.0.1:{args.port} 上的页面属于那个程序，"
+            "不是本次启动的 JobAgent。"
+        )
+        return 4
     url = f"http://127.0.0.1:{args.port}/"
     if existing is not None:
         recorded_port = existing_record.get("port")

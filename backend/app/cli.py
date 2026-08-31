@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socket
 import sys
 from pathlib import Path
 
@@ -64,6 +65,16 @@ def _cmd_info(_: argparse.Namespace) -> int:
     return 0
 
 
+def _port_is_free(host: str, port: int) -> bool:
+    """Whether the configured port can be bound right now."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        try:
+            probe.bind((host, port))
+        except OSError:
+            return False
+    return True
+
+
 def _cmd_doctor(args: argparse.Namespace) -> int:
     """Check the local runtime without revealing configuration values."""
     cfg = get_settings()
@@ -78,6 +89,10 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         "frontend_bundle": (cfg.frontend_dist_path / "index.html").is_file()
         if cfg.serve_frontend
         else True,
+        # The port the runtime would actually bind. A doctor that says PASS
+        # while the port is taken sends the user to whatever else is serving
+        # it - which is exactly how a failed start once looked healthy.
+        "port_available": _port_is_free(cfg.app_host, cfg.app_port),
     }
     payload = {
         "ok": all(checks.values()),

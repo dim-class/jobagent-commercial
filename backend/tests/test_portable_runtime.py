@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import sqlite3
 from pathlib import Path
 
@@ -75,3 +76,60 @@ def test_import_phase_failure_uses_the_same_upgrade_rollback(tmp_path):
     portable._rollback_failed_start(tmp_path, backup)
     with sqlite3.connect(database) as connection:
         assert connection.execute("SELECT value FROM proof").fetchone()[0] == "safe"
+
+
+# --------------------------------------------------------------------------
+# A port already in use must stop the launch, not adopt whoever holds it
+# --------------------------------------------------------------------------
+
+
+def _busy_port() -> tuple[socket.socket, int]:
+    """Hold a real loopback port for the duration of a test."""
+    holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    holder.bind(("127.0.0.1", 0))
+    holder.listen(1)
+    return holder, holder.getsockname()[1]
+
+
+def test_a_free_port_is_reported_free_and_a_held_one_is_not():
+    holder, port = _busy_port()
+    try:
+        assert portable._port_available(port) is False
+    finally:
+        holder.close()
+    # Once released the same port is usable again.
+    assert portable._port_available(port) is True
+
+
+def test_starting_on_a_busy_port_writes_no_pid_file_and_takes_no_backup(tmp_path, capsys):
+    """The real failure: the launcher wrote its PID record, took an upgrade
+    backup and started the browser thread *before* uvicorn tried to bind. When
+    the bind failed it exited 3, and anything already serving that port looked
+    like a successful start."""
+    holder, port = _busy_port()
+    database = tmp_path / "jobagent.db"
+    database.write_bytes(b"existing")
+    try:
+        code = portable.main([
+            "--data-dir", str(tmp_path), "--port", str(port), "--no-open",
+        ])
+    finally:
+        holder.close()
+
+    assert code != 0, "a busy port must not report success"
+    assert not (tmp_path / "runtime-process.json").exists(), "no PID record for a launch that never ran"
+    assert not (tmp_path / "runtime-version.json").exists(), "never confirm a version we did not serve"
+    assert database.read_bytes() == b"existing", "the database must be untouched"
+    message = capsys.readouterr().out
+    assert str(port) in message, "the message must name the port"
+
+
+def test_the_doctor_reports_the_configured_port(tmp_path, capsys):
+    holder, port = _busy_port()
+    try:
+        busy = portable.main(["--data-dir", str(tmp_path), "--port", str(port), "--doctor"])
+        busy_output = capsys.readouterr().out
+    finally:
+        holder.close()
+    assert "port_available" in busy_output
+    assert busy != 0, "doctor must fail while the port it would use is taken"

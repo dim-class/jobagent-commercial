@@ -89,7 +89,12 @@ Assert-ChildPath $Zip $Repo
 if (Test-Path -LiteralPath $Zip) { Remove-Item -LiteralPath $Zip -Force }
 Compress-Archive -LiteralPath $Bundle -DestinationPath $Zip -CompressionLevel Optimal
 $Hash = (Get-FileHash -LiteralPath $Zip -Algorithm SHA256).Hash.ToLowerInvariant()
-Set-Content -LiteralPath (Join-Path $OutputRoot 'SHA256SUMS.txt') -Encoding ascii `
-    -Value "$Hash  $([System.IO.Path]::GetFileName($Zip))"
+# LF, not CRLF: `sha256sum -c` (shipped with Git for Windows, and the usual way
+# anyone checks this file) cannot read a CRLF line - it looks for a file whose
+# name ends in a carriage return and reports FAILED. Written with WriteAllText
+# rather than Set-Content because Set-Content appends the platform newline.
+$SumsLine = "$Hash  $([System.IO.Path]::GetFileName($Zip))`n"
+[System.IO.File]::WriteAllText(
+    (Join-Path $OutputRoot 'SHA256SUMS.txt'), $SumsLine, [System.Text.UTF8Encoding]::new($false))
 Write-Host "Portable candidate: $Zip"
 Write-Host "SHA256: $Hash"

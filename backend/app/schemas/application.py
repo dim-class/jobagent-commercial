@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -96,6 +96,11 @@ class ApplicationProposal(BaseModel):
     city: str | None = None
     salary_text: str | None = None
     source: str = "manual"
+    #: The posting's own page, already query-stripped by `canonical_url()` at
+    #: intake. The queue offers it so applying is "open, paste, send" instead of
+    #: hunting for the job again - opening a page decides nothing. The separate
+    #: M6 gate is the only code path that may attempt one confirmed application.
+    source_url: str | None = None
 
     overall_score: int
     verdict: Verdict
@@ -168,6 +173,75 @@ class MarkAppliedRequest(BaseModel):
         if self.resume_usage is ResumeUsage.used and self.resume_id is None:
             raise ValueError("选择了「使用简历」但没有指定是哪一份。")
         return self
+
+
+# --------------------------------------------------------------------------
+# M6 per-job confirmation gate
+# --------------------------------------------------------------------------
+
+
+class ApplicationApprovalCreate(BaseModel):
+    """One readable human decision for one already-named job."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    resume_id: int = Field(gt=0)
+    answers_text: str = Field(default="", max_length=0)
+    answers_source: Literal["boss_dynamic_unverified"]
+    confirmed: bool = False
+
+
+class ApplicationApprovalOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    job_id: int
+    company: str
+    title: str
+    canonical_url: str
+    external_id: str
+    resume_id: int
+    resume_hash: str
+    answers_text: str
+    answers_hash: str
+    answers_source: str
+    state: str
+    invalidated_reason: str | None = None
+    outcome: str | None = None
+    outcome_detail: str | None = None
+    consumed_at: datetime | None = None
+    attempt_started_at: datetime | None = None
+    applied_event_id: int | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ApplicationApprovalCheckRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    observed_url: str = Field(min_length=1, max_length=1024)
+    observed_external_id: str = Field(min_length=1, max_length=128)
+
+
+class ApplicationApprovalCheckOut(BaseModel):
+    ok: bool
+    reason: str | None = None
+    approval: ApplicationApprovalOut
+
+
+class ApplicationApprovalAbandonRequest(BaseModel):
+    """Human closes out an attempt whose result never came back.
+
+    There is deliberately no ``outcome`` field: this can only ever record
+    ``unknown``, so no caller can turn a lost attempt into a success.
+    """
+
+    confirmed: bool = Field(default=False, description="必须明确确认")
+
+
+class ApplicationApprovalOutcomeRequest(ApplicationApprovalCheckRequest):
+    outcome: str = Field(pattern="^(applied|unknown|failed)$")
+    detail: str | None = Field(default=None, max_length=256)
 
 
 class AttributeResumeRequest(BaseModel):

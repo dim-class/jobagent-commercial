@@ -1,4 +1,4 @@
-"""Load / save the editable career strategy (``config/career_strategy.yaml``).
+"""Load / save the per-user career strategy (``data/career_strategy.yaml``).
 
 The strategy is *data*, never code. It is cached in-process and reloaded when
 the file's mtime changes, so editing the YAML by hand takes effect on the next
@@ -26,27 +26,25 @@ _cache_mtime: float | None = None
 
 DEFAULT_STRATEGY: dict[str, Any] = {
     "version": 1,
-    "target_cities": ["北京", "上海", "广州", "杭州"],
+    # Generic first-run default: do not silently hide either candidate stage.
+    # Existing users who previously relied on the experienced-track filter
+    # have an explicit ``exclude`` value in their gitignored data file.
+    "early_career_policy": "include",
+    "target_cities": [],
     "remote_ok": True,
-    "preferred_roles": [
-        "Cloud Engineer",
-        "DevOps Engineer",
-        "SRE",
-        "Platform Engineer",
-        "云计算工程师",
-    ],
-    "relevant_skills": ["AWS", "Linux", "Docker", "Kubernetes", "Python"],
+    "preferred_roles": [],
+    "relevant_skills": [],
     "skill_aliases": {},
-    "excluded_keywords": ["Helpdesk", "Desktop Support", "桌面运维", "销售"],
-    "excluded_soft_override_skills": ["AWS", "Kubernetes", "Terraform"],
+    "excluded_keywords": [],
+    "excluded_soft_override_skills": [],
     "experience_policy": {
-        "preferred_min_years": 1,
-        "preferred_max_years": 3,
-        "hard_reject_above_years": 8,
+        "preferred_min_years": 0,
+        "preferred_max_years": 5,
+        "hard_reject_above_years": 20,
         "flexibility": "balanced",
         "notes": "",
     },
-    "salary": {"min_monthly_cny": 15000, "ideal_monthly_cny": 25000, "hard_filter": False},
+    "salary": {"min_monthly_cny": 0, "ideal_monthly_cny": 0, "hard_filter": False},
     "scoring": {
         "bands": {"strong_apply": 90, "apply": 80, "apply_with_gaps": 70, "maybe": 60},
         "excluded_role_score_cap": 45,
@@ -56,6 +54,7 @@ DEFAULT_STRATEGY: dict[str, Any] = {
 }
 
 _REQUIRED_LIST_KEYS = ("target_cities", "preferred_roles", "relevant_skills", "excluded_keywords")
+EARLY_CAREER_POLICIES = frozenset({"exclude", "include", "only"})
 
 
 def strategy_path() -> Path:
@@ -72,6 +71,11 @@ def _validate(data: Any) -> dict[str, Any]:
             raise ValidationError(f"career strategy field '{key}' must be a list of strings")
     if not isinstance(merged.get("skill_aliases", {}), dict):
         raise ValidationError("career strategy field 'skill_aliases' must be a mapping")
+    policy = merged.get("early_career_policy")
+    if not isinstance(policy, str) or policy not in EARLY_CAREER_POLICIES:
+        raise ValidationError(
+            "career strategy field 'early_career_policy' must be one of: exclude, include, only"
+        )
     # Nested dicts get merged one level deep so a partial PUT keeps defaults.
     for key in ("experience_policy", "salary", "scoring", "preferences"):
         base = DEFAULT_STRATEGY[key]

@@ -75,6 +75,27 @@ class BatchAnalyzeRequest(BaseModel):
     use_smart_model: bool = False
 
 
+class BatchAnalyzePlanRequest(BaseModel):
+    """Ask what analyzing an explicit set of jobs would cost. Reads only."""
+
+    job_ids: list[int] = Field(description="要分析的岗位 id（顺序即批次处理顺序）")
+
+
+class BatchAnalyzePlanResponse(BaseModel):
+    """The exact numbers a human must see before confirming any spend."""
+
+    selected: int = Field(description="选中的岗位数量（去重并去掉不存在的 id 后）")
+    limit: int = Field(description="当前批次上限 MAX_ANALYSES_PER_RUN")
+    in_batch: int = Field(description="本批次实际会处理的岗位数量")
+    deferred: int = Field(description="超出批次上限、本次不会处理的岗位数量")
+    cached: int = Field(description="本批次中已命中缓存、不消耗 API 的数量")
+    pending: int = Field(description="本批次中预计新增的 AI 调用数量")
+    model: str = Field(description="将要使用的模型（始终是快速模型）")
+    resume_id: int
+    resume_name: str
+    missing_job_ids: list[int] = Field(default_factory=list, description="数据库中不存在的 id")
+
+
 class BatchAnalyzeItem(BaseModel):
     job_id: int
     ok: bool

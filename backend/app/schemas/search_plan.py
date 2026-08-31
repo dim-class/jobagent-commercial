@@ -1,0 +1,159 @@
+"""M4e/M4f SearchPlan + bounded automatic runner schemas - loopback only,
+same posture as ``schemas/extension.py`` and ``schemas/supervised_session.py``.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from pydantic import BaseModel, Field
+
+
+class SearchPlanGenerateRequest(BaseModel):
+    #: Omitted -> ``services.search_plan.DEFAULT_CITIES`` /
+    #: ``DEFAULT_KEYWORDS``. An unknown city rejects the whole call.
+    cities: list[str] | None = None
+    keywords: list[str] | None = None
+
+
+class QuickSearchPrepareRequest(BaseModel):
+    cities: list[str] = Field(min_length=1, max_length=4)
+    target_count: int = Field(ge=1, le=20, strict=True)
+
+
+class MatchApprovalRequest(BaseModel):
+    confirmed: bool = Field(default=False, strict=True)
+    cap: int = Field(ge=1, le=3, strict=True)
+    fingerprint: str = Field(min_length=64, max_length=64)
+
+
+class StartRunRequest(BaseModel):
+    match_approval: MatchApprovalRequest | None = None
+
+
+class MatchStepRequest(BaseModel):
+    job_id: int = Field(gt=0)
+    canonical_url: str = Field(max_length=512)
+
+
+class AutoMatchReviewItem(BaseModel):
+    job_id: int
+    title: str
+    company: str
+    score: int | None
+    verdict: str | None
+    state: str
+    cached: bool
+    error: str | None
+    bucket: str
+    review_reasons: list[str]
+    summary: str
+
+
+class AutoMatchReview(BaseModel):
+    task_id: int
+    enabled: bool
+    state: str | None = None
+    cap: int = 0
+    used: int = 0
+    completed: int = 0
+    failed: int = 0
+    uncertain: int = 0
+    resume_id: int | None = None
+    model: str | None = None
+    items: list[AutoMatchReviewItem]
+
+
+class SearchPlanGenerateResponse(BaseModel):
+    created: int
+    skipped: int
+    total: int
+
+
+class SearchPlanTaskOut(BaseModel):
+    id: int
+    max_candidates: int | None = None
+    name: str
+    city: str | None = None
+    city_id: str | None = None
+    keywords: str | None = None
+    early_career_policy: str
+    #: The exact, deterministic, same-origin BOSS search URL for this task's
+    #: (city_id, keyword) - ``services.boss_search_url.build_search_url`` -
+    #: so the extension never re-implements city/keyword -> URL logic
+    #: itself. ``None`` for a manual task (no city_id/keyword pair to build
+    #: one from).
+    search_url: str | None = None
+    run_status: str | None = None
+    run_started_at: datetime | None = None
+    run_stopped_at: datetime | None = None
+    observed_count: int
+    new_count: int
+    duplicate_count: int
+    no_new_rounds: int
+    last_error: str | None = None
+    #: M4f runner observability - see ``services.search_task_runner.report_state``.
+    current_url: str | None = None
+    scroll_round: int
+    visible_jobs: int
+    imported_jobs: int
+    current_candidate: str | None = None
+    last_action: str | None = None
+    paused_reason: str | None = None
+    updated_at: datetime
+
+    # --- Delta: exact public observability names requested alongside the
+    # existing `id`/`run_status`/`*_count` fields above (kept for backward
+    # compatibility) - never a second source of truth, just an alias
+    # computed from the same task row. See CLAUDE.md M4f observability
+    # delta item 3.
+    task_id: int
+    state: str | None = None
+    keyword: str | None = None
+    observed_jobs: int
+    new_jobs: int
+    duplicate_jobs: int
+
+
+class SearchPlanTaskListResponse(BaseModel):
+    items: list[SearchPlanTaskOut]
+
+
+class QuickSearchPrepareResponse(BaseModel):
+    tasks: list[SearchPlanTaskOut]
+    active_resume_name: str
+    keyword_source: str = "career_strategy"
+
+
+class SearchPlanOptionsResponse(BaseModel):
+    """Public, non-secret capabilities for the local search setup UI."""
+
+    supported_cities: list[str]
+    max_selected_cities: int
+    max_batch_tasks: int
+
+
+class FailRunRequest(BaseModel):
+    error: str = Field(max_length=256)
+
+
+class PauseRunRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=64)
+
+
+class RecordRoundRequest(BaseModel):
+    observed: int = Field(ge=0)
+    new: int = Field(ge=0)
+    duplicate: int = Field(ge=0)
+    no_new_round_threshold: int = Field(default=3, ge=1)
+
+
+class ReportStateRequest(BaseModel):
+    #: Every field optional and independently applied - see
+    #: ``services.search_task_runner.report_state``.
+    current_url: str | None = Field(default=None, max_length=512)
+    scroll_round: int | None = Field(default=None, ge=0)
+    visible_jobs: int | None = Field(default=None, ge=0)
+    imported_jobs: int | None = Field(default=None, ge=0)
+    current_candidate: str | None = Field(default=None, max_length=256)
+    last_action: str | None = Field(default=None, max_length=128)

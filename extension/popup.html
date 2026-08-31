@@ -23,9 +23,7 @@
         <select id="session-task"></select>
       </label>
       <div id="session-criteria" class="sub"></div>
-      <label class="checkbox">页数上限（≤3）
-        <input id="session-page-cap" type="number" min="1" max="3" value="1" />
-      </label>
+      <p class="sub">BOSS 搜索结果为连续滚动列表，没有翻页控件，因此没有页数上限设置。</p>
       <label class="checkbox">候选人上限（≤20）
         <input id="session-candidate-cap" type="number" min="1" max="20" value="5" />
       </label>
@@ -40,6 +38,40 @@
       <div id="session-status" class="status status-info"></div>
       <div id="session-progress" class="sub"></div>
       <div id="session-history"></div>
+    </div>
+
+    <div class="card">
+      <h3>自动运行（M4e/M4f · 有上限、可暂停/取消）</h3>
+      <p class="tagline">
+        选择一个搜索计划任务后点「开始自动运行」：会自动打开该任务的搜索页、滚动收集、
+        逐个候选人预览+导入，直到达到上限、连续多轮无新增、遇到验证或你点「暂停/取消」为止。
+        不会翻页、投递、打招呼或收藏。
+        启动或恢复成功后弹窗会自动关闭，请在 BOSS 顶部查看进度；需要暂停/取消时可重新打开扩展。
+      </p>
+      <label class="checkbox">搜索计划任务
+        <select id="runner-task"></select>
+      </label>
+      <label class="checkbox">本次候选上限（1–20，恢复时不重置）
+        <input id="runner-candidate-cap" type="number" min="1" max="20" step="1" value="3" />
+      </label>
+      <p class="sub">失败或身份不匹配的尝试也占用名额。不会为了凑够导入数量而超出上限。</p>
+      <label class="checkbox"><input id="runner-auto-match" type="checkbox" />
+        搜索后逐个匹配简历（可选，最多 3 个；启动前确认 AI 费用）
+      </label>
+      <p class="sub">结果在本机任务控制台查看；有信息冲突的岗位进入待确认。不自动投递。</p>
+      <div class="actions">
+        <button id="runner-generate" type="button">生成搜索计划</button>
+        <button id="runner-refresh" type="button">刷新状态</button>
+      </div>
+      <div class="actions">
+        <button id="runner-start" class="btn-primary" type="button" disabled>开始自动运行</button>
+        <button id="runner-pause" type="button" disabled>暂停</button>
+        <button id="runner-resume" type="button" disabled>恢复</button>
+        <button id="runner-cancel" type="button" disabled>取消</button>
+        <button id="runner-retry-terminal" type="button" disabled>重试结束</button>
+      </div>
+      <div id="runner-status" class="status status-info"></div>
+      <div id="runner-counters" class="sub"></div>
     </div>
 
     <div class="actions">
@@ -59,7 +91,8 @@
       </div>
       <p class="tagline">
         只读取标题 / 薪资 / 详情容器附近的少量节点：标签名、class、极短文本样本。
-        不发送到任何地方，仅显示在这里。
+        同时只读检查“立即沟通”控件的数量、可见性及非敏感结构；不读取链接/令牌值，
+        不点击、不导航、不发送到任何地方，仅显示在这里。
       </p>
       <pre id="diagnostic-output" class="diagnostic-output"></pre>
     </div>
@@ -69,11 +102,13 @@
 
     <footer>
       预览与导入都发送到本机 <code>127.0.0.1:8000</code>，不经过任何外部服务。
+      薪资文本不可读时，仅截取同一岗位的可见薪资小区域进行本机 OCR；图片不保存、不外传。
     </footer>
 
     <!-- Plain classic scripts, loaded in dependency order. -->
     <script src="dist/config.js"></script>
     <script src="dist/session.js"></script>
+    <script src="dist/runner.js"></script>
     <script src="dist/popup.js"></script>
   </body>
 </html>

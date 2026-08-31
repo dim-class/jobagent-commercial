@@ -53,6 +53,33 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+#: `background.ts`'s M4e/M4f bounded-automatic-runner section - real
+#: (non-comment) tokens, so they survive being located before
+#: `_strip_comments` runs. That section (constants through its own
+#: functions, ending right before the shared `chrome.runtime.onMessage`
+#: listener every milestone's handlers are registered in) is a separately,
+#: explicitly authorized carve-out (CLAUDE.md "Chrome extension - M4
+#: supervised navigation policy" M4e/M4f amendment) from exactly the
+#: promises this M4a contract file checks: it is the one place `setTimeout`
+#: (bounded DOM-stabilization polling) and `chrome.tabs.update` (one
+#: foreground-tab navigation to a same-origin BOSS search URL) are allowed.
+#: Excising just that span - not truncating the file there - keeps the
+#: listener registration and every M4a/M4b/M4c `if` block after it (which
+#: this file also asserts against) intact; the M4f `if` blocks that remain
+#: only call the excised functions by name, so no forbidden token survives
+#: in what is left either.
+_M4F_SECTION_START_MARKER = "const RUNNER_STORAGE_KEY"
+_M4F_SECTION_END_MARKER = "chrome.runtime.onMessage.addListener"
+
+
+def _m4a_scope(raw_code: str) -> str:
+    start = raw_code.find(_M4F_SECTION_START_MARKER)
+    end = raw_code.find(_M4F_SECTION_END_MARKER)
+    if start == -1 or end == -1 or end <= start:
+        return raw_code
+    return raw_code[:start] + raw_code[end:]
+
+
 @pytest.fixture(scope="session")
 def manifest() -> dict:
     return json.loads(_read(MANIFEST_PATH))
@@ -70,7 +97,7 @@ def overlay_source() -> str:
 
 @pytest.fixture(scope="session")
 def background_source() -> str:
-    return _strip_comments(_read(BACKGROUND_TS))
+    return _strip_comments(_m4a_scope(_read(BACKGROUND_TS)))
 
 
 @pytest.fixture(scope="session")
@@ -85,7 +112,8 @@ def dist_code() -> str:
             "extension not built - run 'npm install && npm run build' in "
             f"extension/ (missing: {', '.join(missing)})"
         )
-    return _strip_comments("\n;\n".join(_read(p) for p in paths))
+    parts = [_read(SESSION_JS), _read(OVERLAY_JS), _m4a_scope(_read(BACKGROUND_JS))]
+    return _strip_comments("\n;\n".join(parts))
 
 
 @pytest.fixture(scope="session")

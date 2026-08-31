@@ -43,6 +43,7 @@ var BossExtract = (function () {
     const MAX_DIAGNOSTIC_SAMPLE_CHARS = 40;
     /** A node's own subtree must be this small before it earns a text sample. */
     const MAX_DIAGNOSTIC_SAMPLE_SUBTREE = 12;
+    const m7VisitedConversationKeys = new Set();
     // ------------------------------------------------------------------ utils
     function text(node) {
         if (!node)
@@ -64,6 +65,48 @@ var BossExtract = (function () {
                 return { value, selector };
         }
         return { value: null, selector: null };
+    }
+    function salaryRendered(node) {
+        const view = node.ownerDocument?.defaultView;
+        if (!view || typeof node.getBoundingClientRect !== 'function')
+            return false;
+        const rect = node.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0)
+            return false;
+        for (let el = node; el; el = el.parentElement) {
+            const css = view.getComputedStyle(el);
+            if (css.display === 'none' || css.visibility !== 'visible' || Number(css.opacity) === 0)
+                return false;
+        }
+        return true;
+    }
+    /** A broken first node must not mask a usable fallback in the SAME job. */
+    function pickSalary(root, selectors) {
+        if (!root)
+            return { value: null, selector: null };
+        let rejected = { value: null, selector: null };
+        let usable = null;
+        for (const selector of selectors) {
+            for (const node of Array.from(root.querySelectorAll(selector))) {
+                if (!salaryRendered(node))
+                    continue;
+                const value = text(node);
+                if (!isUsableSalary(value)) {
+                    if (!rejected.value && value)
+                        rejected = { value, selector };
+                    continue;
+                }
+                // Conflicting valid values are not a reason to guess which is current.
+                if (usable && usable.value !== value)
+                    return { value: null, selector: null };
+                usable = usable || { value, selector };
+            }
+        }
+        return usable || rejected;
+    }
+    function salaryDetailRoot(doc) {
+        const title = pickNode(doc, BossSelectors.TITLE).node;
+        return title?.closest(BossSelectors.DETAIL_ROOT.join(',')) || null;
     }
     /** Like `pick`, but hands back the matched element itself, not its text. */
     function pickNode(root, selectors) {
@@ -209,8 +252,39 @@ var BossExtract = (function () {
         }
     }
     function looksLikeVerification(doc, url) {
+        for (const node of Array.from(doc.querySelectorAll(BossSelectors.VERIFICATION_ROOT.join(',')))) {
+            if (!salaryRendered(node))
+                continue; // ignore hidden, stale challenge templates
+            const notice = text(node).slice(0, 400).toLowerCase();
+            if (BossSelectors.VERIFICATION_HINTS.some((hint) => notice.includes(hint.toLowerCase())))
+                return true;
+        }
         const haystack = (url + ' ' + text(doc.querySelector('body')).slice(0, 400)).toLowerCase();
         return BossSelectors.VERIFICATION_HINTS.some((hint) => haystack.indexOf(hint.toLowerCase()) !== -1);
+    }
+    function looksLikeLoginRequired(doc, url) {
+        const path = pathOf(url);
+        if (path === '/login' || path.indexOf('/login/') === 0)
+            return true;
+        for (const node of Array.from(doc.querySelectorAll(BossSelectors.LOGIN_ROOT.join(',')))) {
+            if (!salaryRendered(node))
+                continue;
+            const label = text(node).slice(0, 40);
+            if (BossSelectors.LOGIN_HINTS.some((hint) => label.indexOf(hint) !== -1))
+                return true;
+        }
+        return false;
+    }
+    /** M7 may not inspect the page body; only the named verification roots. */
+    function hasVisibleVerificationRoot(doc) {
+        for (const node of Array.from(doc.querySelectorAll(BossSelectors.VERIFICATION_ROOT.join(',')))) {
+            if (!salaryRendered(node))
+                continue;
+            const notice = text(node).slice(0, 400).toLowerCase();
+            if (BossSelectors.VERIFICATION_HINTS.some((hint) => notice.includes(hint.toLowerCase())))
+                return true;
+        }
+        return false;
     }
     function detectPageType(doc, url) {
         if (!isSupportedHost(url))
@@ -380,7 +454,7 @@ var BossExtract = (function () {
         const candidate = emptyCandidate();
         candidate.title = record(candidate, 'title', pick(doc, BossSelectors.TITLE));
         candidate.company = record(candidate, 'company', cleanDetailCompany(pick(doc, BossSelectors.COMPANY)));
-        const rawSalary = pick(doc, BossSelectors.SALARY);
+        const rawSalary = pickSalary(salaryDetailRoot(doc), BossSelectors.SALARY);
         const explicitSalaryUsable = isUsableSalary(rawSalary.value);
         const salaryUnusableSeen = !!rawSalary.value && !explicitSalaryUsable;
         candidate.salary_text = record(candidate, 'salary_text', explicitSalaryUsable ? rawSalary : { value: null, selector: null });
@@ -444,7 +518,14 @@ var BossExtract = (function () {
         const candidate = emptyCandidate();
         candidate.title = record(candidate, 'title', pick(card, BossSelectors.CARD_TITLE));
         candidate.company = record(candidate, 'company', pick(card, BossSelectors.CARD_COMPANY));
-        candidate.salary_text = record(candidate, 'salary_text', pick(card, BossSelectors.CARD_SALARY));
+        const rawCardSalary = pickSalary(card, BossSelectors.CARD_SALARY);
+        const cardSalaryUsable = isUsableSalary(rawCardSalary.value);
+        candidate.salary_text = record(candidate, 'salary_text', cardSalaryUsable ? rawCardSalary : { value: null, selector: null });
+        // Keep selector diagnostics truthful even when the matched node contains
+        // only unusable private-font glyphs (e.g. "-K") - see `isUsableSalary`.
+        if (rawCardSalary.value && rawCardSalary.selector && !cardSalaryUsable) {
+            candidate.matched_selectors.salary_text = rawCardSalary.selector;
+        }
         const area = pick(card, BossSelectors.CARD_AREA);
         if (area.value && area.selector)
             candidate.matched_selectors.city = area.selector;
@@ -477,8 +558,11 @@ var BossExtract = (function () {
         candidate.description = null;
         candidate.missing_fields.push('description');
         candidate.warnings.push('搜索结果卡片没有职位描述。要导入这个岗位，请先打开它的详情页再检测。');
-        if (!candidate.salary_text)
-            candidate.warnings.push('这张卡片上没有可见的薪资。');
+        if (!candidate.salary_text) {
+            candidate.warnings.push(rawCardSalary.value && !cardSalaryUsable
+                ? '这张卡片上的薪资显示异常（可能使用了特殊字体），未能可靠读出数字，需要你手动核对并补充。'
+                : '这张卡片上没有可见的薪资。');
+        }
         if (!candidate.title)
             candidate.warnings.push(`第 ${index + 1} 张卡片没能识别出职位名称。`);
         return candidate;
@@ -689,6 +773,9 @@ var BossExtract = (function () {
         return cleanDetailCompany({ value, selector: null }).value;
     }
     function captureAndMerge(doc, currentUrl, canonicalUrl, cachedCard) {
+        if (looksLikeLoginRequired(doc, currentUrl)) {
+            return { status: 'login_required', candidate: null };
+        }
         if (looksLikeVerification(doc, currentUrl)) {
             return { status: 'verification', candidate: null };
         }
@@ -708,10 +795,17 @@ var BossExtract = (function () {
         if (cachedCompany && pane.company && companyIdentity(pane.company) !== cachedCompany) {
             return { status: 'identity_mismatch', candidate: null };
         }
+        // Never trust a caller-supplied cached salary at face value - the same
+        // `isUsableSalary` rule applies here too, so stale/malformed cached
+        // state (e.g. a card captured before this fix, or any other source of
+        // `CachedCardLike`) can never override a usable pane value or smuggle
+        // PUA-glyph text into intake.
+        const cachedSalaryUsable = isUsableSalary(cachedCard.salary_text);
+        const usableCachedSalary = cachedSalaryUsable ? cachedCard.salary_text : null;
         const merged = emptyCandidate();
         merged.title = cachedCard.title;
         merged.company = cachedCard.company || pane.company;
-        merged.salary_text = cachedCard.salary_text || pane.salary_text;
+        merged.salary_text = usableCachedSalary || pane.salary_text;
         merged.city = cachedCard.city || pane.city;
         merged.experience_text = cachedCard.experience_text || pane.experience_text;
         merged.education_text = cachedCard.education_text || pane.education_text;
@@ -721,7 +815,14 @@ var BossExtract = (function () {
         merged.description = pane.description;
         // Later keys win: a field the card itself supplied keeps the card's own
         // selector attribution; only a field the card lacked shows the pane's.
-        merged.matched_selectors = { ...pane.matched_selectors, ...(cachedCard.matched_selectors || {}) };
+        // An unusable cached salary must not leave behind a selector pointing at
+        // the rejected card value while the actual merged value came from the
+        // pane (or from neither) - so its own diagnostic selector is dropped
+        // here rather than allowed to override the pane's.
+        const cachedSelectors = { ...(cachedCard.matched_selectors || {}) };
+        if (!cachedSalaryUsable)
+            delete cachedSelectors.salary_text;
+        merged.matched_selectors = { ...pane.matched_selectors, ...cachedSelectors };
         merged.missing_fields = [
             'title',
             'company',
@@ -736,6 +837,92 @@ var BossExtract = (function () {
         return { status: 'ok', candidate: merged };
     }
     // ------------------------------------------------------ dev-mode diagnostic
+    const salaryNodeIds = new WeakMap();
+    let salaryNodeSequence = 0;
+    /** Read-only screenshot proof: exact canonical card URL, or standalone detail URL.
+     * A pane is eligible only when its own job link proves the same identity.
+     * Offscreen, ambiguous, clipped or covered regions never earn a screenshot.
+     */
+    function salaryFrame(doc, currentUrl, canonicalUrl, expectedTitle) {
+        const fail = (status) => ({ status, frame: null });
+        if (looksLikeLoginRequired(doc, currentUrl))
+            return fail('login_required');
+        if (looksLikeVerification(doc, currentUrl))
+            return fail('verification');
+        const clean = cleanUrl(canonicalUrl);
+        if (!clean || clean !== canonicalUrl || !externalIdOf(clean) || !isRequiredNavOrigin(clean))
+            return fail('identity_mismatch');
+        const view = doc.defaultView;
+        if (!view || doc.visibilityState !== 'visible' || (view.visualViewport && view.visualViewport.scale !== 1))
+            return fail('not_visible');
+        const roots = [];
+        const detailRoot = salaryDetailRoot(doc);
+        if (externalIdOf(cleanUrl(currentUrl))) {
+            if (cleanUrl(currentUrl) !== canonicalUrl || pick(doc, BossSelectors.TITLE).value !== expectedTitle)
+                return fail('identity_mismatch');
+            if (detailRoot)
+                roots.push(detailRoot);
+        }
+        else {
+            const found = findCardRoots(doc);
+            for (let i = 0; i < found.nodes.length; i++) {
+                const card = found.nodes[i];
+                const urls = new Set(Array.from(card.querySelectorAll(BossSelectors.DETAIL_JOB_LINK.join(',')))
+                    .map((el) => cleanUrl(el.getAttribute('href'))).filter(Boolean));
+                if (urls.size === 1 && urls.has(canonicalUrl) && pick(card, BossSelectors.CARD_TITLE).value === expectedTitle)
+                    roots.push(card);
+            }
+            if (roots.length > 1)
+                return fail('ambiguous');
+            if (detailRoot && pick(doc, BossSelectors.TITLE).value === expectedTitle) {
+                const urls = new Set(Array.from(detailRoot.querySelectorAll(BossSelectors.DETAIL_JOB_LINK.join(',')))
+                    .map((el) => cleanUrl(el.getAttribute('href'))).filter(Boolean));
+                if (urls.size === 1 && urls.has(canonicalUrl))
+                    roots.push(detailRoot);
+            }
+        }
+        for (const root of roots) {
+            const nodes = Array.from(root.querySelectorAll(BossSelectors.SALARY_NODE.join(',')))
+                .filter(salaryRendered);
+            if (nodes.length !== 1)
+                continue;
+            const node = nodes[0];
+            const raw = text(node);
+            // Text hint guards units/suffixes; no glyph-to-number mapping is attempted.
+            if (!raw || raw.length > 40 || !/[Kk万]/.test(raw))
+                continue;
+            const r = node.getBoundingClientRect();
+            if (r.width < 6 || r.height < 4 || r.width > 400 || r.height > 80 || r.left < 2 || r.top < 2 || r.right > view.innerWidth - 2 || r.bottom > view.innerHeight - 2)
+                continue;
+            if (node.scrollWidth > node.clientWidth + 1 && node.clientWidth > 0)
+                continue;
+            let covered = false;
+            for (const [x, y] of [[r.left + 1, r.top + 1], [r.right - 1, r.top + 1], [r.left + 1, r.bottom - 1], [r.right - 1, r.bottom - 1], [r.left + r.width / 2, r.top + r.height / 2]]) {
+                const hit = doc.elementFromPoint(x, y);
+                if (!hit || !(hit === node || node.contains(hit)))
+                    covered = true;
+            }
+            // Reject overflow clipping even if the center happens to be visible.
+            for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+                const css = view.getComputedStyle(parent);
+                const pr = parent.getBoundingClientRect();
+                if ((css.overflowX !== 'visible' && (r.left < pr.left || r.right > pr.right)) ||
+                    (css.overflowY !== 'visible' && (r.top < pr.top || r.bottom > pr.bottom)))
+                    covered = true;
+            }
+            if (covered)
+                continue;
+            if (!salaryNodeIds.has(node))
+                salaryNodeIds.set(node, ++salaryNodeSequence);
+            return { status: 'ok', frame: {
+                    canonicalUrl, title: expectedTitle, raw, nodeId: salaryNodeIds.get(node),
+                    pageUrl: cleanUrl(currentUrl), x: r.left, y: r.top, width: r.width, height: r.height,
+                    viewportWidth: view.innerWidth, viewportHeight: view.innerHeight,
+                    scrollX: view.scrollX, scrollY: view.scrollY,
+                } };
+        }
+        return fail('no_safe_region');
+    }
     //
     // A developer-mode-only, explicit-click aid for tuning `selectors.ts` on a
     // *live* page. Company, city, experience, education and description are
@@ -899,6 +1086,7 @@ var BossExtract = (function () {
             page_type: 'unsupported',
             url: cleanUrl(url) || '',
             anchors: [],
+            application_control: diagnoseApplicationControl(doc),
             truncated: false,
             warnings: [],
             errors: [],
@@ -944,12 +1132,294 @@ var BossExtract = (function () {
         }
         return result;
     }
+    /**
+     * Read only one narrowly named control selector.  Values that may carry a
+     * session/security token (`href`, `redirect-url`, `data-url`) never leave
+     * the page; only their presence is reported.  The BOSS account's configured
+     * greeting is not assumed from a button click and stays explicitly unknown.
+     */
+    function diagnoseApplicationControl(doc) {
+        for (const selector of BossSelectors.APPLICATION_CONTROL) {
+            let nodes = [];
+            try {
+                nodes = Array.prototype.slice.call(doc.querySelectorAll(selector));
+            }
+            catch {
+                continue;
+            }
+            if (!nodes.length)
+                continue;
+            const states = nodes.map((node) => {
+                const view = doc.defaultView;
+                const rect = node.getBoundingClientRect();
+                const style = view ? view.getComputedStyle(node) : null;
+                const disabled = node.disabled === true
+                    || node.getAttribute('aria-disabled') === 'true';
+                const visible = rect.width > 0 && rect.height > 0
+                    && style?.display !== 'none' && style?.visibility !== 'hidden';
+                return { node, disabled, visible };
+            });
+            const visibleUsableCount = states.filter(({ disabled, visible }) => visible && !disabled).length;
+            return {
+                selector,
+                count: nodes.length,
+                visible_usable_count: visibleUsableCount,
+                unique_visible_usable_control: visibleUsableCount === 1,
+                controls: states.slice(0, 3).map(({ node, disabled, visible }) => {
+                    const label = sanitizeSample(text(node).slice(0, 40));
+                    const dataset = node.dataset || {};
+                    return {
+                        tag: node.tagName.toLowerCase(),
+                        classes: sanitizeClasses(node),
+                        text: label,
+                        disabled,
+                        visible,
+                        redirect_url_present: node.hasAttribute('redirect-url'),
+                        data_url_present: node.hasAttribute('data-url'),
+                        is_friend: dataset.isfriend === 'true' ? true
+                            : dataset.isfriend === 'false' ? false : null,
+                    };
+                }),
+                confirmed_message_text: null,
+                blocker: 'BOSS 首次招呼语正文未在该控件中得到可核实证据；禁止据此执行。',
+            };
+        }
+        return {
+            selector: null,
+            count: 0,
+            visible_usable_count: 0,
+            unique_visible_usable_control: false,
+            controls: [],
+            confirmed_message_text: null,
+            blocker: '未找到唯一、可核实的立即沟通控件；禁止执行。',
+        };
+    }
+    /** Resolve the one initial-contact control without reading its URL-bearing attributes. */
+    function applicationControl(doc) {
+        const all = [];
+        for (const selector of BossSelectors.APPLICATION_CONTROL) {
+            try {
+                all.push(...Array.from(doc.querySelectorAll(selector)));
+            }
+            catch { /* fail below */ }
+        }
+        if (!all.length)
+            return { ok: false, status: 'control_missing' };
+        const visible = all.filter((node) => salaryRendered(node));
+        if (visible.length !== 1)
+            return { ok: false, status: 'control_ambiguous' };
+        const node = visible[0];
+        if (node.disabled === true || node.getAttribute('aria-disabled') === 'true') {
+            return { ok: false, status: 'control_disabled' };
+        }
+        // M6 is the first application/greeting only. An existing-friend/ongoing
+        // chat control is a different account action and must never be clicked.
+        if (text(node) !== '立即沟通' || node.dataset.isfriend !== 'false') {
+            return { ok: false, status: 'control_wrong_state' };
+        }
+        return { ok: true, node };
+    }
+    /** Pure-read, exact-identity M6 preflight. */
+    function preflightConfirmedApplication(doc, currentUrl, expected) {
+        if (looksLikeLoginRequired(doc, currentUrl))
+            return { status: 'login_required' };
+        if (looksLikeVerification(doc, currentUrl))
+            return { status: 'verification' };
+        if (detectPageType(doc, currentUrl) !== 'detail')
+            return { status: 'wrong_page' };
+        const observedUrl = cleanUrl(currentUrl);
+        const observedExternalId = externalIdOf(observedUrl);
+        if (!observedUrl || observedUrl !== expected.canonical_url
+            || observedExternalId !== expected.external_id)
+            return { status: 'identity_mismatch' };
+        const observedTitle = pick(doc, BossSelectors.TITLE).value;
+        const observedCompany = cleanDetailCompany(pick(doc, BossSelectors.COMPANY)).value;
+        if (observedTitle !== expected.title || observedCompany !== expected.company) {
+            return { status: 'identity_mismatch' };
+        }
+        const control = applicationControl(doc);
+        if (!control.ok)
+            return { status: control.status };
+        return { status: 'ok', observed_url: observedUrl, observed_external_id: observedExternalId };
+    }
+    /** The only M6 page mutation: repeat preflight and perform exactly one click. */
+    function executeConfirmedApplication(doc, currentUrl, expected) {
+        const preflight = preflightConfirmedApplication(doc, currentUrl, expected);
+        if (preflight.status !== 'ok')
+            return preflight;
+        const control = applicationControl(doc);
+        if (!control.ok)
+            return { status: control.status };
+        control.node.click();
+        return {
+            status: 'clicked',
+            observed_url: preflight.observed_url,
+            observed_external_id: preflight.observed_external_id,
+        };
+    }
+    /** M7: one bounded, pure read of the already-selected foreground chat. */
+    function scanCurrentBossConversation(doc, currentUrl) {
+        let parsed;
+        try {
+            parsed = new URL(currentUrl);
+        }
+        catch {
+            return { status: 'wrong_page' };
+        }
+        if (parsed.origin !== REQUIRED_NAV_ORIGIN || parsed.pathname !== '/web/geek/chat') {
+            return { status: 'wrong_page' };
+        }
+        if (looksLikeLoginRequired(doc, currentUrl))
+            return { status: 'login_required' };
+        if (hasVisibleVerificationRoot(doc))
+            return { status: 'verification' };
+        const roots = pickAll(doc, BossSelectors.CHAT_CONVERSATION).nodes.filter(salaryRendered);
+        if (!roots.length)
+            return { status: 'conversation_missing' };
+        if (roots.length !== 1)
+            return { status: 'conversation_ambiguous' };
+        const lists = pickAll(roots[0], BossSelectors.CHAT_MESSAGE_LIST).nodes.filter(salaryRendered);
+        if (lists.length !== 1)
+            return { status: lists.length ? 'conversation_ambiguous' : 'conversation_missing' };
+        const items = Array.from(lists[0].querySelectorAll(BossSelectors.CHAT_MESSAGE_ITEM.join(',')));
+        if (items.length > 100)
+            return { status: 'too_many_messages' };
+        const messages = [];
+        for (const item of items) {
+            const textNode = pickNode(item, BossSelectors.CHAT_MESSAGE_TEXT).node;
+            if (!textNode)
+                continue; // cards/system notices are not text messages
+            const body = text(textNode);
+            if (!body)
+                continue;
+            if (body.length > 10000)
+                return { status: 'message_too_large' };
+            const sourceId = (item.getAttribute('data-mid') || '').trim();
+            if (!sourceId || sourceId.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(sourceId)) {
+                return { status: 'message_identity_missing' };
+            }
+            const mine = item.classList.contains('item-myself');
+            const friend = item.classList.contains('item-friend');
+            if (mine === friend)
+                return { status: 'message_direction_ambiguous' };
+            messages.push({
+                source_message_id: sourceId,
+                direction: mine ? 'user' : 'recruiter',
+                text: body,
+                source_message_time_text: pick(item, BossSelectors.CHAT_MESSAGE_TIME).value,
+            });
+        }
+        if (!messages.length)
+            return { status: 'no_text_messages' };
+        const recruiter = pick(roots[0], BossSelectors.CHAT_HEADER_RECRUITER).value;
+        const company = pick(roots[0], BossSelectors.CHAT_HEADER_COMPANY).value;
+        const position = pick(roots[0], BossSelectors.CHAT_HEADER_POSITION).value;
+        const jobLink = pickNode(roots[0], BossSelectors.CHAT_HEADER_JOB_LINK).node;
+        const sourceUrl = cleanUrl(jobLink?.getAttribute('href'));
+        const externalId = externalIdOf(sourceUrl);
+        return {
+            status: 'ok',
+            page_url: parsed.origin + parsed.pathname,
+            recruiter_name: recruiter,
+            company,
+            title: position,
+            source_url: externalId ? sourceUrl : null,
+            external_id: externalId,
+            messages,
+        };
+    }
+    /** Select the next not-yet-visited rendered chat-list item, once. */
+    function selectNextBossConversation(doc, currentUrl) {
+        let parsed;
+        try {
+            parsed = new URL(currentUrl);
+        }
+        catch {
+            return { status: 'wrong_page' };
+        }
+        if (parsed.origin !== REQUIRED_NAV_ORIGIN || parsed.pathname !== '/web/geek/chat') {
+            return { status: 'wrong_page' };
+        }
+        if (looksLikeLoginRequired(doc, currentUrl))
+            return { status: 'login_required' };
+        if (hasVisibleVerificationRoot(doc))
+            return { status: 'verification' };
+        const lists = pickAll(doc, BossSelectors.CHAT_LIST).nodes.filter(salaryRendered);
+        if (lists.length !== 1)
+            return { status: lists.length ? 'list_ambiguous' : 'list_missing' };
+        const items = Array.from(lists[0].querySelectorAll(BossSelectors.CHAT_LIST_ITEM.join(',')))
+            .filter(salaryRendered);
+        for (const item of items) {
+            const controls = pickAll(item, BossSelectors.CHAT_LIST_CONTROL).nodes.filter(salaryRendered);
+            if (controls.length !== 1)
+                return { status: controls.length ? 'control_ambiguous' : 'control_missing' };
+            const recruiter = pick(item, BossSelectors.CHAT_LIST_RECRUITER).value;
+            const company = pick(item, BossSelectors.CHAT_LIST_COMPANY).value;
+            const identityBox = text(item.querySelector('.name-box')).slice(0, 256);
+            const key = `${recruiter || ''}\u0000${company || ''}\u0000${identityBox}`;
+            if (!recruiter || m7VisitedConversationKeys.has(key))
+                continue;
+            m7VisitedConversationKeys.add(key);
+            controls[0].click();
+            return { status: 'selected', recruiter_name: recruiter, company };
+        }
+        return { status: 'exhausted' };
+    }
+    /** One bounded scroll of the unique rendered conversation list. */
+    function scrollBossConversationList(doc, currentUrl) {
+        let parsed;
+        try {
+            parsed = new URL(currentUrl);
+        }
+        catch {
+            return { status: 'wrong_page' };
+        }
+        if (parsed.origin !== REQUIRED_NAV_ORIGIN || parsed.pathname !== '/web/geek/chat') {
+            return { status: 'wrong_page' };
+        }
+        if (looksLikeLoginRequired(doc, currentUrl))
+            return { status: 'login_required' };
+        if (hasVisibleVerificationRoot(doc))
+            return { status: 'verification' };
+        const lists = pickAll(doc, BossSelectors.CHAT_LIST).nodes.filter(salaryRendered);
+        if (lists.length !== 1)
+            return { status: lists.length ? 'list_ambiguous' : 'list_missing' };
+        const list = lists[0];
+        const before = list.scrollTop;
+        const step = Math.max(120, Math.min(list.clientHeight || 600, 800));
+        list.scrollTop = Math.min(list.scrollHeight, before + step);
+        return { status: list.scrollTop > before ? 'scrolled' : 'end' };
+    }
+    /** Start one new human-confirmed traversal and return the list to its top. */
+    function resetBossConversationTraversal(doc, currentUrl) {
+        let parsed;
+        try {
+            parsed = new URL(currentUrl);
+        }
+        catch {
+            return { status: 'wrong_page' };
+        }
+        if (parsed.origin !== REQUIRED_NAV_ORIGIN || parsed.pathname !== '/web/geek/chat') {
+            return { status: 'wrong_page' };
+        }
+        if (looksLikeLoginRequired(doc, currentUrl))
+            return { status: 'login_required' };
+        if (hasVisibleVerificationRoot(doc))
+            return { status: 'verification' };
+        const lists = pickAll(doc, BossSelectors.CHAT_LIST).nodes.filter(salaryRendered);
+        if (lists.length !== 1)
+            return { status: lists.length ? 'list_ambiguous' : 'list_missing' };
+        m7VisitedConversationKeys.clear();
+        lists[0].scrollTop = 0;
+        return { status: 'reset' };
+    }
     // ------------------------------------------------------------------- api
     function detect(doc, url) {
         const result = {
             page_type: 'unsupported',
             url: cleanUrl(url) || '',
             verification: false,
+            login_required: false,
             candidates: [],
             warnings: [],
             errors: [],
@@ -965,6 +1435,10 @@ var BossExtract = (function () {
         if (looksLikeVerification(doc, url)) {
             result.verification = true;
             result.warnings.push('BOSS 正在显示安全验证页面。请你自己在浏览器里完成验证 —— 本扩展不会、也不应该替你处理验证。');
+        }
+        if (looksLikeLoginRequired(doc, url)) {
+            result.login_required = true;
+            result.warnings.push('BOSS 登录状态已失效。请你自己在浏览器里完成登录，本扩展不会读取或填写账号、密码、短信码。');
         }
         try {
             result.page_type = detectPageType(doc, url);
@@ -999,6 +1473,13 @@ var BossExtract = (function () {
         scrollResultsContainer,
         activateNextPage,
         captureAndMerge,
+        preflightConfirmedApplication,
+        executeConfirmedApplication,
+        scanCurrentBossConversation,
+        selectNextBossConversation,
+        scrollBossConversationList,
+        resetBossConversationTraversal,
+        salaryFrame,
         MAX_DESCRIPTION_CHARS,
         MAX_CARDS,
         MAX_DIAGNOSTIC_NODES,

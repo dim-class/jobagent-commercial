@@ -4,10 +4,17 @@
 // the backend only. Requests go to the Vite dev proxy (/api -> 127.0.0.1:8000).
 
 import type {
+  SearchPlanTask,
+  SalaryBackfillPlan,
+  SalaryBackfillRun,
+  QuickSearchPrepareResponse,
+  SearchPlanOptions,
+  AutoMatchReview,
   AnalysisResponse,
   AppSettings,
   ApplyProposalResponse,
   ApplicationEventOut,
+  ApplicationApprovalOut,
   ApplicationMetrics,
   ConversationActionOut,
   ConversationDetailOut,
@@ -16,6 +23,7 @@ import type {
   CaptureResponse,
   ConfirmResponse,
   CurrentPage,
+  BatchAnalyzePlan,
   BatchAnalyzeResponse,
   CareerAnalyticsResult,
   CareerStrategy,
@@ -90,6 +98,10 @@ import type {
   TaskCandidateListResponse,
   TaskCreatePayload,
   TaskListResponse,
+  TaskMatchPlanOut,
+  TaskMatchRunResponse,
+  CrossTaskMatchPlanOut,
+  CrossTaskMatchRunResponse,
   TaskOut,
   TimeWindow,
   Verdict,
@@ -202,13 +214,39 @@ export interface JobFilters {
   status?: JobStatus | ''
   keyword?: string
   analyzed?: boolean
+  early_career_cleanup?: boolean
   sort?: 'score' | 'created_at' | 'company'
   limit?: number
   offset?: number
 }
 
 export const api = {
-  health: () => request<HealthResponse>('/health'),
+  health: (signal?: AbortSignal) => request<HealthResponse>('/health', { signal }),
+  listSearchPlan: (signal?: AbortSignal) => request<{ items: SearchPlanTask[] }>('/api/tasks/search-plan', { signal }),
+  getSearchPlanOptions: (signal?: AbortSignal) =>
+    request<SearchPlanOptions>('/api/tasks/search-plan/options', { signal }),
+  generateSearchPlan: (city: string, keyword: string) =>
+    request<{ created: number; skipped: number; total: number }>('/api/tasks/search-plan/generate', {
+      method: 'POST', body: JSON.stringify({ cities: [city], keywords: [keyword] }),
+    }),
+  prepareResumeSearch: (cities: string[], targetCount: number) =>
+    request<QuickSearchPrepareResponse>('/api/tasks/search-plan/quick-prepare', {
+      method: 'POST', body: JSON.stringify({ cities, target_count: targetCount }),
+    }),
+  getSalaryBackfillPlan: () => request<SalaryBackfillPlan>('/api/jobs/salary-backfill/plan'),
+  getActiveSalaryBackfillRun: () =>
+    request<SalaryBackfillRun | null>('/api/jobs/salary-backfill/runs/active'),
+  createSalaryBackfillRun: (plan: SalaryBackfillPlan) =>
+    request<SalaryBackfillRun>('/api/jobs/salary-backfill/runs', {
+      method: 'POST', body: JSON.stringify({ confirmed: true, fingerprint: plan.fingerprint,
+        job_ids: plan.items.map(item => item.job_id) }),
+    }),
+  getSalaryBackfillRun: (id: number) =>
+    request<SalaryBackfillRun>(`/api/jobs/salary-backfill/runs/${id}`),
+  authorizeSalaryBackfillRemaining: (id: number) =>
+    request<SalaryBackfillRun>(`/api/jobs/salary-backfill/runs/${id}/authorize-remaining`, {
+      method: 'POST', body: JSON.stringify({ confirmed: true }),
+    }),
 
   // --- jobs ---
   listJobs: (filters: JobFilters = {}) => request<JobListResponse>(`/api/jobs${query(filters)}`),
@@ -234,10 +272,20 @@ export const api = {
       method: 'POST',
     }),
   getAnalysis: (id: number) => request<AnalysisResponse>(`/api/jobs/${id}/analysis`),
-  analyzeBatch: (force = false) =>
+  // Read-only: what analyzing this exact selection would cost. Spends nothing.
+  analyzeBatchPlan: (jobIds: number[]) =>
+    request<BatchAnalyzePlan>('/api/jobs/analyze-batch/plan', {
+      method: 'POST',
+      body: JSON.stringify({ job_ids: jobIds }),
+    }),
+  analyzeBatch: (force = false, jobIds?: number[]) =>
     request<BatchAnalyzeResponse>('/api/jobs/analyze-batch', {
       method: 'POST',
-      body: JSON.stringify({ force, use_smart_model: false }),
+      body: JSON.stringify({
+        force,
+        use_smart_model: false,
+        ...(jobIds ? { job_ids: jobIds } : {}),
+      }),
     }),
 
   // --- resumes ---
@@ -336,6 +384,22 @@ export const api = {
   applicationMetrics: () => request<ApplicationMetrics>('/api/application-queue/metrics'),
   applicationEvents: (jobId: number) =>
     request<ApplicationEventOut[]>(`/api/jobs/${jobId}/application-events`),
+  createApplicationApproval: (jobId: number, resumeId: number) =>
+    request<ApplicationApprovalOut>(`/api/application-approvals/jobs/${jobId}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        resume_id: resumeId,
+        answers_source: 'boss_dynamic_unverified',
+        confirmed: true,
+      }),
+    }),
+  applicationApproval: (approvalId: number) =>
+    request<ApplicationApprovalOut>(`/api/application-approvals/${approvalId}`),
+  abandonApplicationAttempt: (approvalId: number) =>
+    request<ApplicationApprovalOut>(`/api/application-approvals/${approvalId}/abandon`, {
+      method: 'POST',
+      body: JSON.stringify({ confirmed: true }),
+    }),
   // The resume passed here is the one the user says they actually submitted.
   // Leaving it undefined records `unknown` - the backend never substitutes the
   // active analysis resume.
@@ -746,6 +810,39 @@ export const api = {
     request<OrchestrationEventOut>(`/api/tasks/${taskId}/events`, {
       method: 'POST',
       body: JSON.stringify(payload),
+    }),
+
+  // --- M5a: explicit, task-scoped candidate matching + human review ---
+  // Planning is a pure read (never calls a model, never writes a row);
+  // running is an explicit, confirmed action that shows the exact pending
+  // call count first. Never triggered on load or on task completion.
+  getTaskMatchPlan: (taskId: number) =>
+    request<TaskMatchPlanOut>(`/api/tasks/${taskId}/match-plan`),
+  getAutoMatchReview: (taskId: number) =>
+    request<AutoMatchReview>(`/api/tasks/${taskId}/auto-match/review`),
+  runTaskMatch: (taskId: number, confirmed: boolean) =>
+    request<TaskMatchRunResponse>(`/api/tasks/${taskId}/match-run`, {
+      method: 'POST',
+      body: JSON.stringify({ confirmed }),
+    }),
+
+  // --- M5b: one exact, finite set of completed SearchPlan tasks ---
+  // The plan is read-only. The run sends back the exact fingerprint and
+  // exact whole-batch new-call count shown to the human (never above 3).
+  getCrossTaskMatchPlan: (taskIds: number[]) =>
+    request<CrossTaskMatchPlanOut>('/api/task-match-batches/plan', {
+      method: 'POST',
+      body: JSON.stringify({ task_ids: taskIds }),
+    }),
+  runCrossTaskMatch: (plan: CrossTaskMatchPlanOut) =>
+    request<CrossTaskMatchRunResponse>('/api/task-match-batches/run', {
+      method: 'POST',
+      body: JSON.stringify({
+        task_ids: plan.task_ids,
+        confirmed: true,
+        fingerprint: plan.fingerprint,
+        max_new_calls: plan.max_new_calls,
+      }),
     }),
 
   dismissProposal: (signature: string, note?: string) =>

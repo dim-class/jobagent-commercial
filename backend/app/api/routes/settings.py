@@ -45,7 +45,7 @@ def read_career_strategy() -> CareerStrategyResponse:
 
 @router.put("/career-strategy", response_model=CareerStrategyResponse)
 def update_career_strategy(payload: CareerStrategy) -> CareerStrategyResponse:
-    """Persist the strategy back to ``config/career_strategy.yaml``.
+    """Persist the strategy back to gitignored ``data/career_strategy.yaml``.
 
     Changing the strategy changes the analysis cache key, so previously
     analyzed jobs will be re-analyzed on their next 分析 click.

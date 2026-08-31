@@ -58,7 +58,10 @@
   const $ = (id: string) => document.getElementById(id) as HTMLElement
   const taskSelect = $('session-task') as HTMLSelectElement
   const criteriaEl = $('session-criteria')
-  const pageCapInput = $('session-page-cap') as HTMLInputElement
+  // BOSS's results are one continuous scroll list with no pagination
+  // control (real logged-in Chrome verification) - there is no page-cap
+  // input to show or edit. `page_cap: 1` is still sent to the backend below
+  // for schema compatibility only; it is never presented as adjustable.
   const candidateCapInput = $('session-candidate-cap') as HTMLInputElement
   const scrollCapInput = $('session-scroll-cap') as HTMLInputElement
   const tabConfirmEl = $('session-tab-confirm')
@@ -107,10 +110,8 @@
   }
 
   function clampCaps() {
-    pageCapInput.max = String(CEILING.pageCap)
     candidateCapInput.max = String(CEILING.candidateCap)
     scrollCapInput.max = String(CEILING.scrollCap)
-    if (Number(pageCapInput.value) > CEILING.pageCap) pageCapInput.value = String(CEILING.pageCap)
     if (Number(candidateCapInput.value) > CEILING.candidateCap) {
       candidateCapInput.value = String(CEILING.candidateCap)
     }
@@ -191,11 +192,10 @@
     startBtn.classList.add('hidden')
     stopBtn.classList.remove('hidden')
     taskSelect.disabled = true
-    pageCapInput.disabled = true
     candidateCapInput.disabled = true
     scrollCapInput.disabled = true
     progressEl.textContent =
-      `会话进行中 · 页面 ${session.pages_visited}/${session.page_cap} · ` +
+      `会话进行中 · 连续滚动列表（无翻页）· ` +
       `候选人 ${session.candidates_extracted}/${session.candidate_cap} · ` +
       `本页滚动 ${session.scrolls_used}/${session.scroll_cap}`
     renderHistory(session.events)
@@ -205,7 +205,6 @@
     startBtn.classList.remove('hidden')
     stopBtn.classList.add('hidden')
     taskSelect.disabled = false
-    pageCapInput.disabled = false
     candidateCapInput.disabled = false
     scrollCapInput.disabled = false
     progressEl.textContent = ''
@@ -230,7 +229,9 @@
         method: 'POST',
         body: {
           task_id: taskId,
-          page_cap: Number(pageCapInput.value),
+          // Always 1: BOSS's results are one continuous scroll list with no
+          // pagination control to bound - see the module docstring above.
+          page_cap: 1,
           candidate_cap: Number(candidateCapInput.value),
           scroll_cap: Number(scrollCapInput.value),
           tab_origin: origin,
@@ -327,7 +328,7 @@
 
   startBtn.addEventListener('click', () => void startSession())
   stopBtn.addEventListener('click', () => void stopSession('user_stop'))
-  ;[pageCapInput, candidateCapInput, scrollCapInput].forEach((input) =>
+  ;[candidateCapInput, scrollCapInput].forEach((input) =>
     input.addEventListener('change', clampCaps),
   )
 

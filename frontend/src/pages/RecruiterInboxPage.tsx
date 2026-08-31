@@ -154,8 +154,8 @@ export default function RecruiterInboxPage() {
         <div>
           <h1>HR沟通</h1>
           <p>
-            把收到的招聘方消息复制到这里，JobAgent 帮你整理对方的问题并起草回复。
-            <strong>它不会连接任何收件箱，也不会替你发送消息。</strong>
+            这里保留人工粘贴的沟通记录。
+            <strong>BOSS 对话扫描已因站点风控暂停，不会打开消息页、后台监控或发送消息。</strong>
           </p>
         </div>
         <div className="page-actions">
@@ -381,6 +381,7 @@ export default function RecruiterInboxPage() {
           </div>
         </Modal>
       ) : null}
+
     </>
   )
 }

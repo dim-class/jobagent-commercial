@@ -6,10 +6,11 @@ Why these live outside ``ApplicationEvent``:
 * ``RecruiterMessage`` records the **communication content** itself.
 
 An event may point at a message through its ``metadata_json``, but message
-bodies are never copied into the event trail.
+    bodies are never copied into the event trail.
 
-Nothing here is transmitted anywhere. Every row is content the human pasted or
-uploaded, stored locally; JobAgent has no inbox access and sends nothing.
+Nothing here is transmitted anywhere. Rows are either content the human pasted
+or uploaded, or an M7 foreground scan of one explicitly selected BOSS chat.
+JobAgent sends nothing.
 """
 
 from __future__ import annotations
@@ -102,6 +103,9 @@ class RecruiterMessage(Base):
     #: twice **within one conversation** (never globally: "好的，谢谢" is not a
     #: duplicate across unrelated threads).
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    #: Stable BOSS DOM identity used only by the explicit M7 incremental scan.
+    #: Never a security/session token and never read from a URL.
+    source_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     #: Whatever timestamp the recruiter's UI displayed, verbatim. Not parsed.
     source_message_time_text: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
@@ -123,6 +127,11 @@ class RecruiterMessage(Base):
             "direction",
             "content_hash",
             name="uq_recruiter_messages_conversation_content",
+        ),
+        UniqueConstraint(
+            "conversation_id",
+            "source_message_id",
+            name="uq_recruiter_messages_conversation_source_id",
         ),
     )
 

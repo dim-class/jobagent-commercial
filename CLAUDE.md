@@ -39,13 +39,17 @@ HUMAN weights + HUMAN 1-5 ratings -> deterministic offer score
                      HUMAN decides -> DecisionSnapshot (frozen)
 ```
 
-Explicitly **not** implemented: automatic application, automatic recruiter
-messaging, search-result crawling, mass scraping.
+Explicitly **not** implemented: unattended or bulk application, automatic
+recruiter messaging, search-result crawling, mass scraping. Executing a single
+application that the human has explicitly confirmed for one specific job is
+defined by "M6 — human-confirmed single application execution" below. Its
+entry point remains feature-gated and each job still needs its own final human
+confirmation; the feature flag never authorizes a job.
 
 ## Architecture
 
 ```
-config/career_strategy.yaml   the definition of "a good job" - DATA, never code
+data/career_strategy.yaml     per-user definition of "a good job" (gitignored DATA)
 data/jobagent.db              SQLite (gitignored)
 
 backend/app/
@@ -89,6 +93,7 @@ alembic/                      migration scripts; alembic.ini at backend/
     recruiter_conversations.py conversation persistence + human decisions
     recruiter_message_analyzer.py context, cache, grounding guard
     timezones.py              local-day helpers (Asia/Tokyo reporting)
+    task_matching.py          task-scoped candidate matching plan + the cost gate (M5a)
     seed.py                   fictional demo jobs
   agents/
     prompts.py                SYSTEM_PROMPT + PROMPT_VERSION (part of the cache key)
@@ -145,7 +150,9 @@ Rules for anything under `job_sources/`:
 - **no** CAPTCHA solving, anti-bot evasion, stealth flags or fingerprint
   spoofing - if a site blocks automation, report that and stop;
 - no search-result crawling, no pagination, no bulk collection;
-- never click 立即沟通 / apply / send. Collection only.
+- never click 立即沟通 / apply / send. Collection only. This applies to
+  `job_sources/` without exception: the M6 human-confirmed application gate
+  belongs to the Chrome extension alone and never to this Playwright browser.
 - **all selectors live in `job_sources/boss/selectors.py`** - never inline a
   site selector anywhere else;
 - automated tests must **never** touch live zhipin.com. Use the HTML fixtures
@@ -679,6 +686,105 @@ automated test may ever touch zhipin.com.
 
 ### Chrome extension — M4 supervised navigation policy
 
+#### Local console launch amendment (user authorized 2026-08-28)
+
+The normal Chrome localhost console may explicitly start/pause/resume/cancel ONE existing
+SearchTask through a narrow MV3 content-script bridge. Only top-frame
+http://127.0.0.1:5173/#/console or http://localhost:5173/#/console is trusted; the worker
+rechecks sender and current tab URL. Page load/status refresh never starts or resumes work.
+Only explicit human activation sends mutations. The console supplies task id/candidate cap,
+never arbitrary URLs, script, browser identifiers or paid approvals.
+The existing worker loads the backend-owned search URL, creates one visible tab in the same
+foreground normal Chrome window on start, and reselects only its owned BOSS tab on resume.
+No second browser, driver, job store, intake path or task queue. No automatic task chaining.
+Exact BOSS and localhost:5173 host access is allowed for this handoff; no all-sites permission.
+No background browsing or window activation: existing foreground/identity/verification and
+20-candidate/5-scroll caps still apply. This entry is search-only; it cannot start paid matching
+or resume a paid run. A completed task is never silently reset by plan generation or start.
+Console clicks do not grant activeTab to the created BOSS tab. Screenshot OCR may therefore
+remain unavailable; do not broaden permissions to all websites to hide this limitation.
+This supersedes only conflicting old popup-only/no-tab-create clauses. Offline fixture
+acceptance does not authorize a real task start or certify live Chrome compatibility.
+
+#### Local salary OCR amendment (user authorized 2026-08-28)
+
+On missing salary, explicit detail Detect or an approved foreground runner candidate may
+use `tabs.captureVisibleTab` with the existing `activeTab` grant. The full bitmap remains
+transiently in the extension worker; only an exact-identity, visible, unobstructed salary
+crop (maximum 800x160 PNG pixels / 256 KiB) reaches the loopback OCR endpoint. No image
+is saved, logged or sent externally. Windows-local OCR is not a browser controller or paid AI.
+Two scale readings must agree on a strict salary parse; reject lost units/month suffixes.
+Record OCR provenance for human checking in the existing intake creation note.
+Recheck identity, foreground tab/window, region and cancellation before/after capture/OCR.
+Verification or changed context discards the result. Hidden/ambiguous regions stay unknown:
+no extra scrolling, retries, navigation or budget expansion for OCR. Bounded request
+deadlines are permitted, not passive polling. Existing intake and forbidden-action rules remain.
+
+#### M4e/M4f authorized amendment (2026-08-25)
+
+The user has explicitly authorized M4e deterministic SearchPlan and M4f bounded automatic search
+runner. This amendment supersedes only the conflicting M4a-M4d clauses below; every privacy,
+origin, extraction, intake and forbidden-action rule remains in force.
+
+- Reuse `JobSearchTask`, `TaskCandidate`, `SupervisedSession`, the MV3 extension, loopback FastAPI
+  and `extension_intake.py -> job_intake.save_posting()`. No second job/task persistence or dedup
+  pipeline.
+- SearchPlan deterministically expands configurable city x keyword inputs and creates no duplicate
+  pair. Ordinary combinations never call an AI model.
+- A human starts or resumes the selected SearchTask. After that explicit action, one foreground
+  Chrome tab may sequentially navigate to its allowlisted BOSS search URL, collect rendered cards,
+  open/capture new candidates through the existing right-side detail panel, and continue bounded
+  scrolling without another click per step. Only one SearchTask and one browser operation may run
+  at a time; it never advances to another task without a separately visible runner decision/state.
+- BOSS results are one continuous list. Pagination and page controls are forbidden. Identity is the
+  query-stripped `https://www.zhipin.com/job_detail/<id>.html` URL/external id.
+- Bounded DOM-stabilization waits are allowed inside the running foreground task. They must have
+  configuration-owned timeouts and termination counters; no unbounded polling, background/hidden
+  execution, 24/7 scheduler, random anti-detection timing or concurrent navigation.
+- Existing immutable ceilings remain: one session/task, one foreground tab, at most 20 processed
+  candidates and at most 5 scroll rounds per SearchTask. Config and human approval may lower, never
+  raise, these limits. Consecutive no-new rounds is configurable and bounded (default 3).
+- Task states are `PENDING`, `RUNNING`, `PAUSED`, `PAUSED_VERIFICATION`, `COMPLETED`, `FAILED`, and
+  `CANCELLED`, with persisted timestamps, observed/new/duplicate/no-new counters and last error.
+- Human pause/stop, caps, no-new threshold and normal completion stop all browser actions. Login,
+  CAPTCHA, verification, security/risk-control or rate-limit signals transition to
+  `PAUSED_VERIFICATION` and stop all browser actions; only an explicit human resume may continue.
+  There is no bypass or automatic retry. Wrong origin, ambiguous identity/selector and
+  unrecoverable navigation/extraction errors fail closed.
+- Automatic apply, favorite/follow, recruiter messaging, OpenAI scoring orchestration, `/wapi/`,
+  cookies/storage/auth tokens, `securityId`, Playwright/CDP, hidden tabs, stealth, fingerprint
+  spoofing and CAPTCHA solving remain unconditionally forbidden. "Automatic apply" means exactly
+  that: no search runner, batch, timer or model result may reach an application. The separate M6
+  gate is not automatic - it requires one explicit human confirmation per job - and it is never
+  reachable from a search run.
+- Automated tests remain fixture-only. Code acceptance requires one minimal real logged-in Chrome
+  verification before M4e/M4f may be marked live-compatible.
+
+#### M4g bounded SearchPlan batch amendment (user authorized 2026-08-29)
+
+The user explicitly authorized one finite SearchPlan batch from the local console. This supersedes
+only the M4 clauses that prohibit advancing to another task after the already-approved task completes.
+All privacy, foreground, verification, extraction, intake and forbidden-action rules remain in force.
+
+- One explicit in-page confirmation names an ordered list of at most five already-created `pending`
+  SearchPlan task ids and one per-task candidate cap. The worker re-reads and validates every task;
+  the page never supplies a URL, tab id, script or paid approval.
+- The extension runs one task and one browser operation at a time in one owned, visible foreground
+  BOSS tab. Only normal completion may advance to the next approved pending task. Failure,
+  cancellation, verification, login/risk control, foreground loss, identity ambiguity or an invalid
+  next task stops or pauses the whole batch without starting another task.
+- Existing per-task ceilings remain unchanged: at most 20 candidate attempts and five scroll rounds.
+  Batch size is an additional hard ceiling of five; callers may lower but never raise any ceiling.
+- The batch pointer may use trusted `chrome.storage.session` and contains only task ids, order,
+  counters/status and the owned tab id. It is not a second backend task/job queue or persistence path.
+  A service-worker/browser/extension restart never auto-resumes browser work; an explicit visible
+  console confirmation is required and all remaining task/candidate/scroll budgets are preserved.
+- No clock/timer start, scheduler, 24/7/background/hidden run, terminal-task reset, automatic retry,
+  paid AI/matching, apply/favorite/follow/message, credential/token/storage extraction, `/wapi/`,
+  stealth, CAPTCHA bypass, fingerprint spoofing, Playwright or CDP is authorized.
+- Fixture-only code acceptance precedes a separately confirmed live run of at most two tasks with
+  candidate cap one. A live run is not started merely by this implementation authorization.
+
 **Status: the user has explicitly authorized M4a, M4b and M4c.** M4a —
 bounded-session scaffolding only, with no navigation — is implemented (a
 popup approval UI, a background service worker that is the sole owner of
@@ -747,7 +853,11 @@ only mechanism a future M4 build may use.
 for emphasis.** Never apply, never click 立即沟通, never send or follow up on
 a message, never follow/collect a candidate or company, never change account
 state, and never report or log that any of those happened. This is not part
-of the gated exception; no version of M4 changes it.
+of the gated exception; **no version of M4 changes it** — an M4 session
+navigates and reads, and may never submit anything. The one narrow exception
+anywhere in this file is M6, which lives outside M4 entirely: it needs its own
+per-job human confirmation, and no M4 supervised session, batch or runner may
+ever reach it.
 
 **6. Hard stops — any one of these ends the session immediately, with no
 retry and no workaround:** a CAPTCHA, identity/phone verification, a login
@@ -796,6 +906,379 @@ immutable ceilings in 1a). No further milestone under this policy exists yet
 in `docs/orchestration/ROADMAP.md`; any future one still requires its own
 separate, explicit user authorization, exactly like these three.
 
+### M5a — task-scoped candidate matching + human review (explicitly authorized, implemented)
+
+#### Bounded search-to-match amendment (user authorized 2026-08-28)
+
+Codex may implement and offline-test an opt-in search -> intake -> fast-model matching ->
+ranked human review flow. Runtime requires a fresh explicit cost confirmation naming the
+resume, model and maximum candidate/call budget (at most 3; failures consume a slot).
+This supersedes only conflicting prohibitions on automatic scoring orchestration elsewhere in this file.
+Reuse TaskCandidate, job_matcher and JobAnalysis; persist approval/claims on the existing
+SearchTask. No automatic retry after uncertain paid results; pause/cancel stops subsequent
+calls, cannot undo an already dispatched call. Resume never replenishes approval/budget.
+Information/location/currency conflicts are marked 待确认, not direct recommendations.
+No automatic human status, application, favorite or message. Implementation authorization
+does not authorize paid live calls: this milestone's acceptance is offline with mock models.
+
+`services/task_matching.py` is the only new service for this milestone. It scores a
+`JobSearchTask`'s existing `TaskCandidate` associations against the **active** analysis resume and
+the **fast** model — it never calls the smart model automatically, never creates a job or
+association, and never touches `Job.status`. It reuses `job_matcher.compute_cache_key`/
+`find_cached`/`analyze_job` verbatim (the same cache table, the same guardrails) — there is no
+parallel persistence or scoring pipeline.
+
+Two operations, the same "plan then confirm" shape `resume_comparison.py` already established:
+
+- `plan_task_match` — pure read. Reports, for every candidate, whether it is already cached, plus
+  the active resume, the model, and the exact pending/cap counts. Calling it spends nothing.
+- `run_task_match` — the one place that spends money, and only with `confirmed=true`. Rejects
+  outright (writes nothing) if there is unconfirmed pending work. Bounded by
+  `settings.max_analyses_per_run` (read fresh from config every call — never hard-coded); a task
+  with more pending candidates than the cap needs another confirmed click. Each candidate is
+  analyzed independently inside its own `try/except` — one bad job never aborts the rest of the run,
+  and every outcome (cached / freshly scored / errored) is reported back.
+
+Routes: `GET /api/tasks/{id}/match-plan`, `POST /api/tasks/{id}/match-run`.
+
+Console UI rules that are load-bearing:
+
+- the plan/confirm action is never triggered on page load or when a task is otherwise viewed —
+  only an explicit "生成匹配计划" click reads it, and only an explicit "确认分析" click spends
+  anything;
+- associating a new candidate into the task invalidates the currently displayed plan (it is cleared,
+  not silently left stale) — a stale plan's pending/cap numbers must never be confirmed against a
+  candidate set that has since changed;
+- once a plan exists, every candidate's shown score/verdict/cached status comes from *that plan's*
+  active-resume + fast-model result, never an unrelated "latest analysis" that might be a different
+  resume variant or the smart model; before a plan exists, an existing analysis is still shown, but
+  labeled honestly as not being this plan's own result;
+- candidates sort score-descending with unanalyzed candidates last, and the task's `min_score` — if
+  set — is an optional visible filter, never an invisible one;
+- reviewed/dismissed counts derive each candidate's **latest** `reviewed`/`dismissed` event (events
+  are stored oldest-first) — a task-level event (`job_id` absent) never counts toward any candidate,
+  and clicking "标记已复核"/"标记已忽略" more than once never inflates the count past one per
+  candidate.
+
+Existing M1 (`TaskCandidate`) and M3 (`OrchestrationEvent`/`reviewed`/`dismissed`) surfaces are
+reused unmodified. This section covers M5a; the bounded amendment above separately authorizes
+the opt-in search-to-match implementation/offline tests. Apply,
+favorite, message, any browser/site action, and automatic smart-model use remain forbidden
+regardless, the same as every earlier milestone.
+
+### M5b — bounded cross-task matching + unified human review (explicitly authorized 2026-08-29)
+
+Codex may implement and offline-test one backend + localhost-console coordinator over an exact,
+finite selection of completed SearchPlan tasks. It resolves only their existing `TaskCandidate`
+associations, deduplicates by canonical `job_id`, and reuses the active analysis resume, fast model,
+`job_matcher`, `JobAnalysis` and existing cache. It must not create another Job, score, candidate,
+deduplication or persistence pipeline.
+
+Planning is read-only and must bind the exact task/candidate/resume/model snapshot. Before any
+uncached work, the UI must separately confirm the exact cached/pending counts and a whole-batch cap
+of at most three new fast-model calls. Failed or uncertain calls consume a slot and are never
+automatically retried; cached results cost zero. A stale snapshot must fail before a model call.
+
+The output is one score-sorted human-review surface. Missing or contradictory location, salary,
+education or experience stays `待确认`; an AI score never records a review decision or mutates
+`Job.status`. M5b never controls Chrome, starts a search, changes canonical intake, uses the smart
+model automatically, applies, favorites, messages, schedules work, reads credentials or bypasses
+verification. Offline acceptance must mock the model and stop before any paid live call.
+
+### M6 — human-confirmed single application execution (policy authorized 2026-08-30)
+
+This section first defined the policy boundary. The user separately authorized
+its implementation on 2026-08-30 and authorized the unknown-dynamic-greeting
+amendment on 2026-08-31 after the first live attempt disproved the manually
+entered expected-text assumption. Neither implementation authorization nor the feature flag is an
+approval for any job; every real action still requires the two per-job human
+confirmations below.
+
+M6 defines the one narrow circumstance in which the foreground Chrome extension
+may submit an application on a recruitment site: **after the user has explicitly
+confirmed that one specific job and explicitly accepted that BOSS will choose an
+unknown dynamic first greeting which JobAgent cannot preview, verify or
+control.** JobAgent must never ask the human to guess that text, present a guess
+as site-verified, or imply that the text shown by an AI will be sent.
+
+The authorized action has a name, fixed by the user's ruling of 2026-08-30:
+**a human-confirmed single application action with an inseparable initial
+greeting.** On BOSS, 立即沟通 and the first 招呼语 it sends are one indivisible
+action, so M6 covers both halves of it - and nothing beyond them.
+
+**This amendment supersedes only conflicting earlier clauses, and only for the
+per-job, human-confirmed, single application execution defined here.** Every
+other prohibition in this file stays in force, unchanged.
+
+#### 1. The gate - one job, one human confirmation
+
+- **AI recommends; it never decides.** No `JobAnalysis.verdict`, `overall_score`,
+  queue position, ranking or any other model output may initiate, schedule or
+  pre-approve an application. There is no code path from an analysis result to an
+  application execution, and a test asserts it.
+- **Every job is confirmed on its own.** One confirmation authorizes exactly one
+  application to exactly one job. There is no batch confirmation, no "approve
+  all", no "apply to the top N", no select-all-then-apply, and no bulk-apply
+  endpoint.
+- Each confirmation is a record that **binds, at minimum**:
+  - `job_id`;
+  - `company`;
+  - `title` (the role);
+  - `canonical_url` **and** `external_id`;
+  - `resume_id` **and** `resume_hash` (the variant's content at confirmation time);
+  - the fixed `boss_dynamic_unverified` greeting mode. For schema compatibility
+    its text field is deliberately empty and its hash binds that empty marker;
+    neither is a claim about the text BOSS will send.
+- **BOSS unknown-dynamic-greeting mode (authorized 2026-08-31):** because the
+  foreground BOSS page does not expose the greeting before the application
+  action, the final confirmation must state prominently that JobAgent cannot
+  preview, independently verify or control the first greeting and that BOSS may
+  choose different text dynamically. The human must explicitly accept that
+  uncertainty for this one job.
+- The mode must never ask for, auto-generate, infer, copy from an AI analysis,
+  select, remember or silently prefill an expected greeting. Any non-empty
+  greeting value makes the approval invalid. One acceptance applies to one
+  approval only and is not reusable authority for another job.
+- The user must be shown all of the above **before** confirming. A confirmation
+  the user could not read in full is not a confirmation.
+- **A final confirmation screen is shown again immediately before the attempt**,
+  displaying that same bound snapshot and the unknown/uncontrolled greeting
+  warning. Confirming once in a queue days earlier is not enough: the last thing
+  before the browser acts is a human looking at the exact job and resume and
+  accepting the unknown dynamic first greeting.
+- A confirmation authorizes **one attempt** and is consumed by that attempt,
+  whatever its outcome.
+
+#### 2. What an approved execution may do
+
+Only after such a confirmation, and only then: the extension may, in the
+**visible foreground tab**, open that one job's canonical detail page, fill in
+site-exposed confirmed answers where applicable, and submit that one
+application. Under the BOSS unknown-dynamic-greeting mode, it must not write,
+fill or claim to control BOSS's hidden greeting configuration. Nothing else.
+
+#### 3. Unconditionally still forbidden under M6
+
+- no unattended, scheduled, timed, queued or background application - **no timer,
+  cron, poll loop, `MutationObserver` or any other unattended trigger** may reach
+  an application; M4 section 4 applies here in full;
+- no hidden tab, background tab, minimised window or non-foreground execution;
+- no bulk, mass or repeated application, and no automatic retry after any
+  failure, timeout or uncertain result - a retry is a new human confirmation;
+- no automatic recruiter messaging: no follow-up message, no second message, no
+  answer to a recruiter's reply, no auto-reply, no scheduled or unattended
+  message of any kind. **The one exception, and it is not "messaging":** on BOSS
+  the application *is* 立即沟通, and clicking it inseparably sends the first
+  greeting (招呼语). Sending that one greeting, as the indivisible other half of
+  a single human-confirmed application action, is inside M6 - it is a
+  *human-confirmed single application action with an inseparable initial
+  greeting*, not automatic recruiter messaging. Everything after that first
+  greeting is a message, is not part of an application, and stays forbidden;
+- no CAPTCHA solving or bypass, no anti-bot evasion, no stealth, no fingerprint
+  spoofing, no altered timing to look human;
+- no credential, cookie, `localStorage`, `sessionStorage`, form-value or
+  auth-header reading, and no `securityId` / `/wapi/` use;
+- no Playwright, no CDP, no native messaging host - the extension's own content
+  script remains the only mechanism;
+- no account-state change beyond the one confirmed application: no favourite, no
+  follow, no collect, no profile edit, no settings change.
+
+#### 4. Approval goes stale, and a stale approval fails closed
+
+A confirmation is invalidated - and the execution must refuse rather than
+proceed - when any of these has changed since it was given:
+
+- the page identity: the loaded page's canonical URL / external job id does not
+  match the confirmed one **exactly**;
+- the job row (`company`, `title`, or the canonical URL / external id);
+- the selected resume variant, or that variant's content;
+- the application answers, or the fixed unknown-dynamic-greeting mode/source;
+- the site presents a different form than the one described to the user.
+
+For the BOSS unknown-dynamic-greeting mode, JobAgent can re-check only the fixed
+mode/source and empty compatibility marker; it **cannot** claim to know what
+BOSS's hidden dynamic greeting will be. That limitation must remain visible on
+the final confirmation and in the recorded attempt result. It never permits
+reading settings, form values, cookies, tokens or storage to try to discover the
+hidden text.
+
+Identity is re-checked immediately before submitting, not only at confirmation
+time. Any mismatch stops and hands control back to the user.
+
+#### 5. Hard stops - stop and return control, never work around
+
+A CAPTCHA, a login prompt, identity/phone verification, a security or
+risk-control interstitial, a rate-limit response, loss of foreground, a closed or
+navigated-away tab, an ambiguous selector, or a wrong origin (anything whose
+scheme+host is not exactly `https://www.zhipin.com`) **ends the attempt
+immediately**. No bypass, no retry, no workaround, no stealth. The user is told
+what happened and decides what to do next.
+
+#### 6. Recording the outcome - never assume success
+
+- `Job.status = applied` may be written **only** after the recruitment site has
+  been observed, on the page, to have accepted the submission, and only by
+  calling the existing `application_workflow.mark_applied`. A click is not an
+  application, and a sent greeting is not by itself proof of one.
+- When the result cannot be verified - navigation interrupted, ambiguous
+  response, timeout, unclear confirmation UI - the outcome is recorded as
+  **`application_result_unknown`**. It is never upgraded to `applied` by
+  guessing, and it is never silently discarded; the user resolves it.
+- The greeting is not known or site-verified merely because the click occurred.
+  The attempt record must preserve that its mode/source was
+  `boss_dynamic_unverified`; only an independent, visible application-success
+  state may still justify `applied` under the preceding rule.
+- A verified submission produces **exactly one** `applied` event. A repeated or
+  retried attempt must not produce a second one.
+- Unchanged: `Job.status` still moves only through
+  `services/application_workflow.py`, and the event trail stays append-only.
+
+#### 7. What M6 does *not* touch
+
+M6 is one application submission, and on BOSS that action indivisibly carries
+its first greeting (see section 3). It ends there.
+
+Everything past that first greeting remains forbidden exactly as before:
+automatic recruiter messaging, follow-ups, answering a recruiter's reply,
+auto-reply, inbox access and message polling. So do unattended application, bulk
+application, mass application, timed application, AI-triggered application,
+automatic retry, favourite/follow/collect and any other account-state change,
+CAPTCHA/risk-control bypass, stealth, fingerprint spoofing, background browsing
+and credential/token/storage access. M6 supersedes none of those.
+
+The boundary in one line: **M6 may send the greeting that *is* the application;
+it may never send a message that *follows* one.**
+
+#### 8. The architecture principle is unchanged
+
+```
+AI verdict   = a recommendation      (JobAnalysis.verdict)
+Job.status   = what the HUMAN did    (applied / skipped / replied / ...)
+```
+
+M6 does not weaken this by one inch. A verdict, a score or a recommendation may
+never write `Job.status` and may never trigger a browser action. What M6 adds is
+that a *human decision, expressed per job*, may be **executed** by the foreground
+extension instead of retyped by hand.
+
+#### 9. Feature flag
+
+There is no global auto-apply mode. If the implementation needs an entry-point
+flag it is `HUMAN_CONFIRMED_APPLY_ENABLED`, and it **only exposes the feature**.
+It is never, under any circumstance, evidence that a particular job has been
+approved: the per-job confirmation record is the sole authority, and a flag that
+is on with no confirmation authorizes nothing.
+
+#### 10. Implementation gate
+
+This policy is implemented only behind the feature gate. Every material change
+to its scope still requires explicit user authorization.
+
+Before any M6 implementation may be accepted, automated tests (fixture-only; no
+automated test may ever touch live zhipin.com) must at minimum prove:
+
+- with no explicit confirmation, execution never happens;
+- a confirmation binds exactly one job and cannot be reused for another;
+- a stale confirmation is refused before any browser action;
+- changing the resume variant or the application answers/mode invalidates the
+  confirmation;
+- the BOSS confirmation asks for or contains greeting text, is silently
+  prefilled, is reused across jobs, lacks the unknown/uncontrolled warning, or
+  can proceed without the per-job acceptance checkbox;
+- a legacy manually-attested expected-text approval is refused;
+- a job-identity mismatch at submit time stops the attempt;
+- a CAPTCHA / login / verification / risk-control state stops the attempt;
+- an uncertain result is recorded as `application_result_unknown`, never as
+  `applied`;
+- one verified submission produces exactly one `applied` event;
+- no bulk-apply endpoint and no batch-confirmation path exists;
+- no code path leads from an AI score/verdict to an application execution.
+
+Live-site compatibility is never asserted by an automated test; it stays a manual
+claim the user makes after checking it themselves, exactly as
+`extension/README.md` already says for detection.
+
+### M7 — BOSS conversation scan (suspended after live risk-control, 2026-08-31)
+
+The user has withdrawn this runtime feature after the live attempt triggered or
+coincided with a BOSS account restriction. The local HR沟通 UI and the extension
+console bridge must expose no command that opens, activates, traverses or scans
+the BOSS chat page. The implementation below is retained only as historical
+design context and inert fixture-tested code; it is not a current capability.
+Re-enabling any part requires a separate policy decision and implementation
+milestone. Manual paste remains available and no HR reply synchronization is in
+scope.
+
+M7 authorizes one explicit confirmation in the local HR沟通 page to open or
+activate exactly one foreground `/web/geek/chat` tab and scan its rendered
+BOSS conversation list. If no chat tab exists in the confirmed console window,
+the extension may create one new active tab at the fixed, query-free
+`https://www.zhipin.com/web/geek/chat` URL. It never reuses or overwrites an
+unrelated BOSS/search/detail tab. If exactly one chat tab already exists it is
+activated; multiple chat tabs fail closed.
+The extension may sequentially select a visible conversation-list item and read
+only its rendered header and text-message rows. One run is bounded to at most
+50 distinct conversations, five conversation-list scroll steps and 100 text
+messages per conversation. It imports only previously unseen messages into the
+existing `RecruiterConversation` / `RecruiterMessage` persistence.
+
+The human no longer selects a Job before scanning. The backend associates a
+conversation only when its header exposes a canonical
+`/job_detail/<external_id>.html` identity that resolves to exactly one existing
+applied BOSS Job, or when normalized company + title resolve uniquely. An
+unmatched or ambiguous conversation is skipped and counted; it is never
+guessed, attached to a newly-created Job, or persisted as a second job pipeline.
+
+The extension may create or activate the single chat tab, perform bounded
+readiness checks within that same human-triggered operation, click only a unique
+visible `li[role=listitem]` conversation control, and perform only the bounded
+scrolls above. Selecting a conversation may cause BOSS itself to mark that
+conversation read; the final confirmation UI must disclose this inseparable
+side effect. Apart from opening the fixed chat URL above, it may not navigate a
+tab, expand message history, touch an input/send control, or make any other
+account-state change. Login,
+verification, wrong origin/path, multiple candidate chat tabs, foreground
+loss, missing message identity, or ambiguous DOM all fail closed. A scan is
+sequential and has no automatic retry.
+
+M7 remains an explicit foreground snapshot, never background inbox access: no
+timer, unattended polling, `MutationObserver`, scheduled scan, hidden-tab read or
+unattended trigger. It performs no AI analysis and never generates, fills,
+sends, replies to or follows up on a message. It never reads cookies, tokens,
+storage, form values, `securityId`, `data-url`, `redirect-url` or `/wapi/`.
+Message bodies must not appear in structured logs or scan summaries. Automated
+acceptance is fixture-only and must prove exact chat path/origin, foreground
+enforcement, unique-list-item selection, bounded traversal, text-message-only
+extraction, exact/unique job association, `data-mid` incremental deduplication,
+zero-AI import and absence of any input/send primitive.
+
+### Historical salary backfill (explicitly authorized 2026-08-30)
+
+Codex may implement a one-time, human-confirmed maintenance plan over the current finite set of
+existing BOSS Jobs whose salary is missing and whose canonical URL is exactly
+`https://www.zhipin.com/job_detail/<external_id>.html`. The extension may visit those visible
+detail pages in normal logged-in Chrome, verify exact job identity, use the existing bounded local
+salary OCR fallback when needed, and enrich only the same existing Job through
+`extension_intake -> job_intake`. There is no second Job/dedup persistence path.
+
+The whole plan is persistent and observable and limited to at most 100 jobs. It automatically
+pauses after at most three processed detail pages, and each next batch requires a fresh explicit
+resume click.
+
+**Session-cap amendment (user authorized 2026-08-30, extended same day).** One explicit,
+per-run human confirmation naming the exact remaining count may raise that run's session cap
+from the default 3 to the whole remaining plan (never above the 100-job plan ceiling). The
+confirmation is available both on a paused run and on a created-but-not-yet-started run, so an
+18-job plan can be authorized as one continuous session instead of six three-job batches. The
+cap is stored on the run (`salary_backfill_runs.session_cap`) and applies to that run only - the
+default stays 3 for every other run, and nothing raises a cap without a fresh human click. Every
+stop condition below is unchanged: a larger cap buys continuity, never permission.
+
+Login, verification, foreground loss or worker error pauses closed; it never logs in, reads
+credentials, bypasses verification, retries invisibly or runs after a worker restart. It never
+searches, scrolls, applies, favorites or messages. Offline implementation acceptance does not
+authorize starting the real maintenance run; that remains a separate human action in the console.
+
 ### Caching (mandatory)
 
 `analysis_cache_key = sha256(resume_hash, strategy_hash, jd_hash, model, prompt_version)`
@@ -803,6 +1286,16 @@ separate, explicit user authorization, exactly like these three.
 A repeat click never costs money. Changing the resume, the career strategy, the
 JD, the model, or `PROMPT_VERSION` all invalidate the cache automatically.
 `force=true` bypasses it and **replaces** the cached row.
+
+`job_hash` is `Job.content_hash` - company + title + normalized description.
+It deliberately excludes salary/city/experience so dedup stays stable, but
+`services/scoring.py` *does* read `salary_text`. A job scored while its salary
+was unknown would therefore keep serving that score after a later backfill
+filled it in, because the key never moved. So the one place a salary is filled
+in after the fact - `job_intake.save_posting`'s `enrich_missing_salary` branch -
+drops that job's cached analyses and says so in the appended event. It is
+scoped to the one job whose input actually changed: a job whose salary was
+already known is never re-billed.
 
 Bump `PROMPT_VERSION` in `agents/prompts.py` whenever you change the prompt.
 
@@ -849,9 +1342,13 @@ Unique indexes that matter: `jobs.content_hash`, `(jobs.source, external_id)`,
   Never put it in React, never commit it, never log it, never return it from an
   API, never store it in SQLite. `core/logging.py` has a redaction filter as a
   backstop — it scrubs credential *values*, not mentions of the variable name.
-- `AUTO_APPLY` is false and there is no code path that flips it. AI recommends,
-  a human approves, and only later (v0.4+) does a browser execute. v0.2 added a
-  browser that **reads** pages; it must never gain the ability to apply.
+- **There is no global `AUTO_APPLY` mode.** Application execution is permitted
+  only through the M6 per-job explicit human confirmation gate. AI recommends,
+  a human approves *one named job at a time*, and only then may the foreground
+  extension execute that single application. Any entry-point flag
+  (`HUMAN_CONFIRMED_APPLY_ENABLED`) exposes the feature and nothing more - it is
+  never evidence that a job was approved. The `job_sources/` capture browser
+  **reads** pages and must never gain the ability to apply, M6 included.
 - No CAPTCHA solving, no anti-bot evasion, no stealth fingerprinting, no
   bypassing rate limits or login protection. If a future job-source adapter
   cannot be written without one of those, do not write it.
@@ -892,19 +1389,29 @@ Unique indexes that matter: `jobs.content_hash`, `(jobs.source, external_id)`,
 - Never rewrite a DecisionSnapshot. Later edits must not reach it.
 - Never claim JobAgent sent a message. Drafts are copied by the user and
   sent elsewhere; only an explicit confirmation records candidate_reply.
-- Never add inbox access, message polling or auto-reply. AUTO_APPLY stays
-  false and there is no AUTO_REPLY.
-- Never let the Chrome extension apply, click 立即沟通, send or follow up on a
-  message, follow/collect a candidate or company, or change any account
-  state on a recruitment site — for any reason, under any mode. **No gate,
-  no future milestone, and no user instruction ever authorizes this**; it is
-  not part of what M4 defines an exception for.
+- Never add automatic/background inbox access, message polling or auto-reply.
+  M7 is the only exception: one explicit human click may perform the bounded,
+  foreground-only BOSS conversation scan defined above; it is not a mailbox
+  connection and cannot run unattended.
+  There is no
+  `AUTO_REPLY`, and no global auto-apply mode - see the M6 gate above for the
+  only permitted, per-job, human-confirmed application execution.
+- **Except for the narrowly scoped M6 human-confirmed single-application
+  workflow, the extension must not apply or change recruitment-site account
+  state.** Outside that gate it may never apply, click 立即沟通, send or follow
+  up on a message, or follow/collect a candidate or company - for any reason,
+  under any mode. **Inside** M6 the boundary is: the one confirmed application,
+  including the first greeting that 立即沟通 indivisibly sends, is authorized;
+  any message *after* that greeting, and every other account-state change
+  (favourite, follow, collect, profile, settings), stay forbidden. It is not
+  part of what M4 defines an exception for.
 - As of M1-M3 (current, shipped behavior), the Chrome extension also never
   scrolls, paginates, or navigates to a job on its own — it reads only the
   page a human already opened, when a human clicks 检测当前页面. A precisely
   bounded exception to *that* part (navigation only, never the apply/message
   rule above) is documented under "Chrome extension — M4 supervised
-  navigation policy" below. That section is a **policy definition only**: it
+  navigation policy" below; application execution is a separate matter defined
+  only by M6. That section is a **policy definition only**: it
   does not by itself authorize writing the code. Implementing it requires a
   second, separate, explicit user authorization that references that section
   — see "Implementation gate" at the end of it.

@@ -33,6 +33,7 @@ from app.models import (
 )
 from app.models.enums import OPEN_CONVERSATION_STATUSES
 from app.schemas.recruiter import (
+    BossChatScanIn,
     CloseRequest,
     ConversationCreate,
     ConversationUpdate,
@@ -258,6 +259,158 @@ def add_message(
         chars=len(body),
     )
     return message, False
+
+
+def import_boss_chat_scan(
+    db: Session, payload: BossChatScanIn
+) -> tuple[RecruiterConversation, int, int]:
+    """Import one foreground-rendered BOSS conversation without AI.
+
+    The job selection is the human's explicit thread association. Every row is
+    validated before the first write so an identity conflict fails atomically.
+    ``data-mid`` is scoped to this one conversation and is never logged.
+    """
+    job = db.get(Job, payload.job_id)
+    if job is None:
+        raise NotFoundError(f"岗位 {payload.job_id} 不存在", detail={"job_id": payload.job_id})
+    if job.source != "boss" or job.status is not JobStatus.applied:
+        raise ValidationError("M7 只允许关联已投递的 BOSS 岗位。")
+    if payload.page_url != "https://www.zhipin.com/web/geek/chat":
+        raise ValidationError("扫描来源不是受支持的 BOSS 当前对话页。")
+    total_chars = sum(len(item.text) for item in payload.messages)
+    if total_chars > 100_000:
+        raise ValidationError("当前对话快照过大，未导入任何消息。")
+    incoming_ids = [item.source_message_id for item in payload.messages]
+    if len(incoming_ids) != len(set(incoming_ids)):
+        raise ValidationError("当前对话包含重复的消息身份，未导入任何消息。")
+
+    existing_conversations = list(
+        db.scalars(
+            select(RecruiterConversation).where(
+                RecruiterConversation.job_id == job.id,
+                RecruiterConversation.source == RecruiterSource.boss,
+            )
+        )
+    )
+    if len(existing_conversations) > 1:
+        raise ValidationError("该岗位存在多个 BOSS 沟通记录，请先人工整理后再扫描。")
+    conversation = existing_conversations[0] if existing_conversations else None
+    existing_by_source: dict[str, RecruiterMessage] = {}
+    if conversation is not None:
+        existing_by_source = {
+            m.source_message_id: m
+            for m in conversation.messages
+            if m.source_message_id is not None
+        }
+
+    # A reused data-mid with changed direction/body is not a duplicate; it is
+    # an integrity mismatch and the entire scan must fail before writes.
+    for item in payload.messages:
+        previous = existing_by_source.get(item.source_message_id)
+        if previous is None:
+            continue
+        if previous.direction is not item.direction or previous.raw_text != item.text.strip():
+            raise ValidationError("BOSS 消息身份与已有内容冲突，未导入任何消息。")
+
+    if conversation is None:
+        conversation = RecruiterConversation(
+            job_id=job.id,
+            source=RecruiterSource.boss,
+            recruiter_name=payload.recruiter_name,
+            company=payload.company or job.company,
+            title=payload.title or job.title,
+            status=ConversationStatus.needs_reply,
+        )
+        db.add(conversation)
+        db.flush()
+    else:
+        if payload.recruiter_name and not conversation.recruiter_name:
+            conversation.recruiter_name = payload.recruiter_name
+
+    imported = 0
+    for item in payload.messages:
+        if item.source_message_id in existing_by_source:
+            continue
+        body = item.text.strip()
+        # Keep manual-paste body hashes unchanged. Scanned rows bind the stable
+        # source id too, so two real repeated messages remain two real rows.
+        message = RecruiterMessage(
+            conversation_id=conversation.id,
+            direction=item.direction,
+            raw_text=body,
+            content_hash=hash_text(
+                f"boss:{item.source_message_id}:{normalize_for_hash(body)}"
+            ),
+            source_message_id=item.source_message_id,
+            source_message_time_text=item.source_message_time_text,
+            captured_at=_utcnow(),
+            created_at=_utcnow(),
+        )
+        db.add(message)
+        conversation.last_message_at = message.captured_at
+        if item.direction is MessageDirection.recruiter:
+            conversation.status = ConversationStatus.needs_reply
+            conversation.next_action_at = None
+        elif conversation.status is ConversationStatus.needs_reply:
+            conversation.status = ConversationStatus.waiting_recruiter
+        imported += 1
+
+    db.commit()
+    log_event(
+        logger,
+        "recruiter.boss_chat_scanned",
+        conversation_id=conversation.id,
+        job_id=job.id,
+        observed=len(payload.messages),
+        imported=imported,
+    )
+    return load_conversation(db, conversation.id), imported, len(payload.messages) - imported
+
+
+def resolve_boss_chat_job(db: Session, payload: BossChatScanIn) -> Job | None:
+    """Resolve one chat header to exactly one applied BOSS job, never guess."""
+    if payload.job_id is not None:
+        job = db.get(Job, payload.job_id)
+        if job is None:
+            raise NotFoundError(f"岗位 {payload.job_id} 不存在", detail={"job_id": payload.job_id})
+        return job
+
+    candidates: list[Job] = []
+    if payload.source_url and payload.external_id:
+        from app.services.urls import canonical_url
+
+        expected = f"https://www.zhipin.com/job_detail/{payload.external_id}.html"
+        if canonical_url(payload.source_url) != expected:
+            return None
+    if payload.external_id:
+        candidates = list(db.scalars(select(Job).where(
+            Job.source == "boss",
+            Job.status == JobStatus.applied,
+            Job.external_id == payload.external_id,
+        )))
+        return candidates[0] if len(candidates) == 1 else None
+    if payload.source_url:
+        from app.services.urls import canonical_url
+
+        exact_url = canonical_url(payload.source_url)
+        candidates = list(db.scalars(select(Job).where(
+            Job.source == "boss",
+            Job.status == JobStatus.applied,
+            Job.source_url == exact_url,
+        )))
+        return candidates[0] if len(candidates) == 1 else None
+    if payload.company and payload.title:
+        normalize = lambda value: "".join(value.casefold().split())
+        company = normalize(payload.company)
+        title = normalize(payload.title)
+        candidates = [
+            job for job in db.scalars(select(Job).where(
+                Job.source == "boss", Job.status == JobStatus.applied,
+            ))
+            if normalize(job.company) == company and normalize(job.title) == title
+        ]
+        return candidates[0] if len(candidates) == 1 else None
+    return None
 
 
 def add_text_intake(
@@ -494,6 +647,7 @@ def is_open(conversation: RecruiterConversation, *, now: datetime | None = None)
 __all__ = [
     "MessageIntake",
     "add_message",
+    "import_boss_chat_scan",
     "add_text_intake",
     "close_conversation",
     "conversations_for_job",

@@ -114,6 +114,9 @@
         if (detection.verification) {
             summary.appendChild(el('div', 'warn', 'BOSS 正在要求安全验证 —— 请你自己在浏览器里完成，本扩展不会处理验证。'));
         }
+        if (detection.login_required) {
+            summary.appendChild(el('div', 'warn', 'BOSS 尚未登录或登录已过期。请你在当前标签页完成登录后再恢复任务。'));
+        }
         for (const warning of detection.warnings)
             summary.appendChild(el('div', 'warn', warning));
         for (const error of detection.errors)
@@ -127,7 +130,7 @@
     function renderPreview(response) {
         const card = el('section', 'card summary');
         card.appendChild(el('h3', undefined, '本地 JobAgent 预览结果'));
-        card.appendChild(el('div', 'count', `检测 ${response.detected} · 新岗位 ${response.new_count} · 已存在 ${response.duplicate_count} · 信息不足 ${response.incomplete_count}`));
+        card.appendChild(el('div', 'count', `检测 ${response.detected} · 新岗位 ${response.new_count} · 已存在 ${response.duplicate_count} · 信息不足 ${response.incomplete_count} · 已排除 ${response.excluded_count ?? 0}`));
         card.appendChild(el('div', 'sub', response.message));
         for (const warning of response.warnings)
             card.appendChild(el('div', 'warn', warning));
@@ -197,6 +200,7 @@
                     page_type: 'unsupported',
                     url: url.split('?')[0],
                     verification: false,
+                    login_required: false,
                     candidates: [],
                     warnings: [],
                     errors: ['当前页面不是 BOSS 直聘（www.zhipin.com）。请先手动打开一个职位或搜索页面。'],
@@ -207,6 +211,19 @@
                 return;
             }
             detection = await callContentScript(tab.id, { type: 'jobagent:detect' });
+            // Background owns screenshots and localhost OCR; the popup never handles images.
+            if (detection.page_type === 'detail' && !detection.verification && detection.candidates.some((c) => !c.salary_text)) {
+                setStatus('正在尝试本机局部薪资识别…');
+                detection = await new Promise((resolve, reject) => {
+                    chrome.runtime.sendMessage({ type: 'jobagent:detect-with-salary' }, (reply) => {
+                        const response = reply;
+                        if (chrome.runtime.lastError || !response?.ok || !response.result)
+                            reject(new Error(response?.error || '本机识别暂不可用。'));
+                        else
+                            resolve(response.result);
+                    });
+                });
+            }
             render();
             updateDiagnosticAvailability();
             if (detection.errors.length)

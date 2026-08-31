@@ -24,7 +24,8 @@ from alembic.runtime.migration import MigrationContext
 from sqlalchemy import inspect
 from sqlalchemy.engine import Engine
 
-from app.core.logging import get_logger, log_event
+from app.core.config import get_settings
+from app.core.logging import get_logger, log_event, setup_logging
 from app.core.paths import BACKEND_DIR
 
 logger = get_logger(__name__)
@@ -53,6 +54,18 @@ def has_legacy_tables(engine: Engine) -> bool:
     return _LEGACY_MARKER_TABLE in set(inspect(engine).get_table_names())
 
 
+def _restore_app_logging() -> None:
+    """Alembic's own ``env.py`` calls ``fileConfig(...)`` for every command
+    below, which reconfigures the root logger's handlers/formatter from
+    ``alembic.ini`` regardless of ``disable_existing_loggers`` - silently
+    dropping this app's structured, redacted formatter (and the root level)
+    back to a plain ``Formatter`` at ``WARNING``. Reapplied immediately after
+    every Alembic invocation, before this module's own ``log_event`` calls,
+    so a migration's own log lines - and everything logged for the rest of
+    the process - keep their structured fields and redaction."""
+    setup_logging(get_settings().log_level, force=True)
+
+
 def ensure_schema_current(engine: Engine) -> str:
     """Bring the database to the latest revision. Returns what happened."""
     from app import models  # noqa: F401  - register mappers
@@ -63,6 +76,7 @@ def ensure_schema_current(engine: Engine) -> str:
 
     if revision is not None:
         command.upgrade(cfg, "head")
+        _restore_app_logging()
         log_event(logger, "db.migrated", frm=revision, to="head")
         return "upgraded"
 
@@ -71,10 +85,12 @@ def ensure_schema_current(engine: Engine) -> str:
         # that and let Alembic apply only the newer revisions.
         command.stamp(cfg, BASELINE_REVISION)
         command.upgrade(cfg, "head")
+        _restore_app_logging()
         log_event(logger, "db.migrated_legacy", frm=BASELINE_REVISION, to="head")
         return "adopted_legacy"
 
     Base.metadata.create_all(bind=engine)
     command.stamp(cfg, "head")
+    _restore_app_logging()
     log_event(logger, "db.created", tables=len(Base.metadata.tables))
     return "created"

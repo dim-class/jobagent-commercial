@@ -27,9 +27,14 @@ from app.schemas.task import (
     TaskCandidateOut,
     TaskCreate,
     TaskListResponse,
+    TaskMatchCandidateOut,
+    TaskMatchOutcomeOut,
+    TaskMatchPlanOut,
+    TaskMatchRunRequest,
+    TaskMatchRunResponse,
     TaskOut,
 )
-from app.services import orchestration_events, task_console
+from app.services import orchestration_events, task_console, task_matching
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -186,4 +191,73 @@ def list_events(task_id: int, db: Session = Depends(get_db)) -> OrchestrationEve
     events = orchestration_events.list_events(db, task_id)
     return OrchestrationEventListResponse(
         items=[_event_out(e) for e in events], total=len(events)
+    )
+
+
+# --------------------------------------------------------------------------
+# M5a: explicit, task-scoped candidate matching + human review
+# --------------------------------------------------------------------------
+
+
+def _match_candidate_out(plan: "task_matching.CandidateMatchPlan") -> TaskMatchCandidateOut:
+    analysis = plan.cached
+    return TaskMatchCandidateOut(
+        job_id=plan.job.id,
+        title=plan.job.title,
+        company=plan.job.company,
+        cached=analysis is not None,
+        overall_score=analysis.overall_score if analysis else None,
+        verdict=analysis.verdict if analysis else None,
+    )
+
+
+@router.get("/{task_id}/match-plan", response_model=TaskMatchPlanOut)
+def match_plan(task_id: int, db: Session = Depends(get_db)) -> TaskMatchPlanOut:
+    """Read-only: exact candidate/cache/cost/model information. Calls no
+    model and writes nothing - see `services/task_matching.py`."""
+    task, resume, model, plans = task_matching.plan_task_match(db, task_id)
+    pending_total = task_matching.pending_call_count(plans)
+    cap = task_matching.max_analyses_per_run()
+    return TaskMatchPlanOut(
+        task_id=task.id,
+        min_score=task.min_score,
+        active_resume_id=resume.id,
+        active_resume_name=resume.display_name,
+        model=model,
+        candidates=[_match_candidate_out(p) for p in plans],
+        total_candidates=len(plans),
+        pending_analyses=min(pending_total, cap),
+        pending_total=pending_total,
+        cap=cap,
+    )
+
+
+@router.post("/{task_id}/match-run", response_model=TaskMatchRunResponse)
+async def match_run(
+    task_id: int,
+    payload: TaskMatchRunRequest = Body(default=TaskMatchRunRequest()),
+    db: Session = Depends(get_db),
+) -> TaskMatchRunResponse:
+    """Explicit, confirmed execution - rejects pending paid work unless
+    `confirmed=true`. Each candidate fails independently."""
+    task, outcomes = await task_matching.run_task_match(db, task_id, confirmed=payload.confirmed)
+    results = [
+        TaskMatchOutcomeOut(
+            job_id=o.job_id,
+            cached=o.cached,
+            overall_score=o.analysis.overall_score if o.analysis else None,
+            verdict=o.analysis.verdict if o.analysis else None,
+            error=o.error,
+            category=o.category,
+            http_status=o.http_status,
+            error_code=o.error_code,
+            request_id=o.request_id,
+        )
+        for o in outcomes
+    ]
+    return TaskMatchRunResponse(
+        task_id=task.id,
+        results=results,
+        analyzed=sum(1 for o in outcomes if not o.cached and o.analysis is not None),
+        failed=sum(1 for o in outcomes if o.error is not None),
     )

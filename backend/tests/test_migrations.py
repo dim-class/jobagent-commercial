@@ -189,6 +189,34 @@ def test_migration_is_idempotent(v03_db):
         engine.dispose()
 
 
+def test_upgrade_clears_only_unreadable_salaries(v03_db):
+    """0017: obfuscated-font placeholders become NULL; real salaries survive."""
+    boxed = "-K"
+    con = sqlite3.connect(v03_db)
+    try:
+        for index, salary in enumerate((boxed, "16-19K", "面议", None), start=2):
+            con.execute(
+                "INSERT INTO jobs (source, company, title, salary_text, raw_description,"
+                " normalized_description, content_hash, status) VALUES (?,?,?,?,?,?,?,?)",
+                ("boss", "公司", "岗位", salary, "JD", "JD", f"{index}" * 64, "new"),
+            )
+        con.commit()
+    finally:
+        con.close()
+
+    engine = create_engine(f"sqlite:///{v03_db.as_posix()}")
+    try:
+        ensure_schema_current(engine)
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text("SELECT id, salary_text FROM jobs ORDER BY id")
+            ).fetchall()
+    finally:
+        engine.dispose()
+
+    assert [row[1] for row in rows] == [None, None, "16-19K", "面议", None]
+
+
 def test_a_fresh_database_is_created_and_stamped(tmp_path):
     path = tmp_path / "fresh.db"
     engine = create_engine(f"sqlite:///{path.as_posix()}")
@@ -539,3 +567,48 @@ def test_running_migrations_does_not_disable_application_logging():
         "app.services.interview_pipeline",
     ):
         assert logging.getLogger(name).disabled is False, f"{name} was disabled"
+
+
+def test_running_migrations_preserves_structured_redacted_logging():
+    """Regression guard for a second, subtler defect than the one above:
+    Alembic's own ``env.py`` calls ``fileConfig(...)`` for every command it
+    runs, which reconfigures the *root* logger's handlers/formatter from
+    ``alembic.ini`` regardless of ``disable_existing_loggers`` - the loggers
+    stay enabled (the guard above), but a plain root ``Formatter`` at
+    ``WARNING`` silently replaces this app's structured, redacted one. A
+    ``log_event`` after that point would "succeed" (no exception) while
+    quietly losing its ``key=value`` fields and its secret redaction. This
+    must be exercised through the real post-migration logging configuration,
+    not by calling the formatter directly.
+    """
+    import io
+    import logging
+
+    from app.core.logging import get_logger, log_event
+    from app.db.session import init_db
+
+    init_db()  # runs the real Alembic migration path, exactly like startup
+
+    root = logging.getLogger()
+    assert root.handlers, "no handler installed on the root logger after init_db()"
+    handler = root.handlers[0]
+
+    buffer = io.StringIO()
+    original_stream = handler.stream
+    handler.stream = buffer
+    try:
+        logger = get_logger("app.test_migrations")
+        log_event(
+            logger,
+            "test.post_migration_event",
+            level=logging.WARNING,
+            job_id=42,
+            api_key="sk-live-abcdef0123456789",
+        )
+    finally:
+        handler.stream = original_stream
+
+    output = buffer.getvalue()
+    assert "job_id=42" in output, f"structured kv fields were lost after migration: {output!r}"
+    assert "sk-live-abcdef0123456789" not in output, "a secret survived redaction after migration"
+    assert "***redacted***" in output

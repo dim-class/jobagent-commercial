@@ -10,8 +10,10 @@
  * explicitly authorized) only happens after `overlay.ts` has already gotten
  * a per-step authorization from the backend.
  *
- * Beyond that one authorized step, it never navigates, submits, or writes to
- * the page - it only reads the DOM and replies.
+ * Beyond those named paths it only reads the DOM and replies. M6 adds one
+ * separate mutation: after a per-job approval has been atomically claimed
+ * and exact page identity is rechecked, `jobagent:m6-execute` may click the
+ * single visible "立即沟通" control once. It never retries or follows up.
  */
 // eslint-disable-next-line no-var
 var BossContentScript = (function () {
@@ -33,10 +35,19 @@ var BossContentScript = (function () {
     //: its own backend-authorized prepare step succeeds.
     const SCROLL_STEP = 'jobagent:scroll-step';
     const NEXT_PAGE = 'jobagent:next-page';
+    const M6_PREFLIGHT = 'jobagent:m6-preflight';
+    const M6_EXECUTE = 'jobagent:m6-execute';
+    const M7_SCAN_CURRENT_CHAT = 'jobagent:m7-scan-current-chat';
+    const M7_SELECT_NEXT_CHAT = 'jobagent:m7-select-next-chat';
+    const M7_SCROLL_CHAT_LIST = 'jobagent:m7-scroll-chat-list';
+    const M7_RESET_CHAT_LIST = 'jobagent:m7-reset-chat-list';
     function handle(message) {
         const request = (message || {});
         if (request.type === PING) {
             return { ok: true, ready: true };
+        }
+        if (request.type === 'jobagent:salary-frame' && typeof request.canonicalUrl === 'string' && typeof request.expectedTitle === 'string') {
+            return { ok: true, result: BossExtract.salaryFrame(document, document.location.href, request.canonicalUrl, request.expectedTitle) };
         }
         if (request.type === DETECT) {
             // `document.location.href` rather than anything cached: the user may
@@ -47,6 +58,30 @@ var BossContentScript = (function () {
             // Developer-mode only, explicit-click structural diagnostic. See
             // `boss/extract.ts` - it never sends anything anywhere by itself.
             return { ok: true, result: BossExtract.diagnoseDetail(document, document.location.href) };
+        }
+        if (request.type === M6_PREFLIGHT && request.applicationIdentity) {
+            return {
+                ok: true,
+                result: BossExtract.preflightConfirmedApplication(document, document.location.href, request.applicationIdentity),
+            };
+        }
+        if (request.type === M6_EXECUTE && request.applicationIdentity) {
+            return {
+                ok: true,
+                result: BossExtract.executeConfirmedApplication(document, document.location.href, request.applicationIdentity),
+            };
+        }
+        if (request.type === M7_SCAN_CURRENT_CHAT) {
+            return { ok: true, result: BossExtract.scanCurrentBossConversation(document, document.location.href) };
+        }
+        if (request.type === M7_SELECT_NEXT_CHAT) {
+            return { ok: true, result: BossExtract.selectNextBossConversation(document, document.location.href) };
+        }
+        if (request.type === M7_SCROLL_CHAT_LIST) {
+            return { ok: true, result: BossExtract.scrollBossConversationList(document, document.location.href) };
+        }
+        if (request.type === M7_RESET_CHAT_LIST) {
+            return { ok: true, result: BossExtract.resetBossConversationTraversal(document, document.location.href) };
         }
         if (request.type === OPEN_CANDIDATE && typeof request.index === 'number') {
             // The one navigation primitive: click an already-rendered card's own
@@ -93,5 +128,7 @@ var BossContentScript = (function () {
             return false; // responded synchronously
         });
     }
-    return { handle, PING, DETECT, DIAGNOSE, OPEN_CANDIDATE, CAPTURE_DETAIL, SCROLL_STEP, NEXT_PAGE };
+    return { handle, PING, DETECT, DIAGNOSE, OPEN_CANDIDATE, CAPTURE_DETAIL, SCROLL_STEP,
+        NEXT_PAGE, M6_PREFLIGHT, M6_EXECUTE, M7_SCAN_CURRENT_CHAT,
+        M7_SELECT_NEXT_CHAT, M7_SCROLL_CHAT_LIST, M7_RESET_CHAT_LIST };
 })();

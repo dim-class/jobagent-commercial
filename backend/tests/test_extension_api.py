@@ -15,7 +15,7 @@ import pytest
 from sqlalchemy import select
 
 from app.core.errors import ValidationError
-from app.models import ApplicationEvent, EventType, Job, JobStatus
+from app.models import ApplicationEvent, EventType, Job, JobSearchTask, JobStatus
 from app.schemas.extension import ExtensionJobCandidate
 from app.services import extension_intake
 
@@ -49,18 +49,24 @@ def candidate(**overrides) -> dict:
     return payload
 
 
-def preview(client, *candidates, page_type: str = "detail") -> dict:
+def preview(client, *candidates, page_type: str = "detail", task_id: int | None = None) -> dict:
     response = client.post(
         "/api/extension/jobs/preview",
-        json={"page_type": page_type, "page_url": DETAIL_URL, "candidates": list(candidates)},
+        json={
+            "page_type": page_type,
+            "page_url": DETAIL_URL,
+            "candidates": list(candidates),
+            "task_id": task_id,
+        },
     )
     assert response.status_code == 200, response.text
     return response.json()
 
 
-def import_one(client, payload: dict, *, confirmed: bool = True):
+def import_one(client, payload: dict, *, confirmed: bool = True, task_id: int | None = None):
     return client.post(
-        "/api/extension/jobs/import", json={"confirmed": confirmed, "candidate": payload}
+        "/api/extension/jobs/import",
+        json={"confirmed": confirmed, "candidate": payload, "task_id": task_id},
     )
 
 
@@ -78,6 +84,64 @@ def test_preview_reports_a_new_job(client):
     assert body["rows"][0]["status"] == "new"
     assert body["rows"][0]["status_label"] == "新岗位"
     assert body["rows"][0]["existing_job_id"] is None
+
+
+@pytest.mark.parametrize("title", ["2027届云计算工程师", "云平台工程师（校招）", "运维实习生"])
+def test_preview_excludes_early_career_tracks(client, title):
+    body = preview(client, candidate(title=title))
+    assert body["new_count"] == 0
+    assert body["excluded_count"] == 1
+    assert body["rows"][0]["status"] == "excluded"
+    assert "应届生" in body["rows"][0]["warnings"][0]
+
+
+def test_import_cannot_bypass_early_career_exclusion(client, db):
+    response = import_one(client, candidate(title="云计算校招工程师"))
+    assert response.status_code == 422
+    assert response.json()["detail"]["reason"] == "early_career_track"
+    assert db.scalars(select(Job)).all() == []
+
+
+def test_non_restrictive_fresh_graduate_mention_is_not_excluded(client):
+    body = preview(client, candidate(description=DESCRIPTION + "\n经验不限，应届生亦可，有经验者优先。"))
+    assert body["rows"][0]["status"] == "new"
+
+
+def _plan_task(db, policy: str) -> JobSearchTask:
+    task = JobSearchTask(
+        name=f"policy-{policy}", is_search_plan=True, early_career_policy=policy
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+def test_task_snapshot_can_include_early_career_jobs(client, db):
+    task = _plan_task(db, "include")
+    body = preview(client, candidate(title="云平台工程师（校招）"), task_id=task.id)
+    assert body["rows"][0]["status"] == "new"
+
+
+def test_task_snapshot_can_keep_only_early_career_jobs(client, db):
+    task = _plan_task(db, "only")
+    early = preview(client, candidate(title="运维实习生"), task_id=task.id)
+    experienced = preview(client, candidate(title="高级云平台工程师"), task_id=task.id)
+    assert early["rows"][0]["status"] == "new"
+    assert experienced["rows"][0]["status"] == "excluded"
+    assert "只保留" in experienced["rows"][0]["warnings"][0]
+
+
+def test_task_snapshot_controls_import_and_unknown_task_fails_closed(client, db):
+    task = _plan_task(db, "include")
+    accepted = import_one(client, candidate(title="云计算校招工程师"), task_id=task.id)
+    assert accepted.status_code == 200
+    rejected = client.post(
+        "/api/extension/jobs/preview",
+        json={"page_type": "detail", "page_url": DETAIL_URL,
+              "candidates": [candidate()], "task_id": 999999},
+    )
+    assert rejected.status_code == 404
 
 
 def test_preview_saves_nothing(client, db):
@@ -104,6 +168,16 @@ def test_preview_detects_a_duplicate_by_external_id_alone(client):
 
     body = preview(client, candidate(description=DESCRIPTION + "\n补充说明：需要出差。"))
     assert body["rows"][0]["status"] == "duplicate"
+
+
+def test_duplicate_preview_marks_a_missing_salary_as_safely_enrichable(client, db):
+    assert import_one(client, candidate(salary_text=None)).status_code == 200
+
+    body = preview(client, candidate(salary_text="25-40K·14薪"))
+
+    assert body["rows"][0]["status"] == "duplicate"
+    assert body["rows"][0]["enrichable_fields"] == ["salary_text"]
+    assert db.scalars(select(Job)).one().salary_text is None, "preview must remain read-only"
 
 
 def test_a_card_without_a_description_is_incomplete_not_new(client):
@@ -195,6 +269,23 @@ def test_importing_twice_returns_the_existing_job(client, db):
     assert second["duplicate"] is True
     assert "已存在" in second["message"]
     assert len(db.scalars(select(Job)).all()) == 1
+
+
+def test_confirmed_duplicate_import_fills_only_a_previously_missing_salary(client, db):
+    first = import_one(client, candidate(salary_text=None)).json()
+    second = import_one(client, candidate(salary_text="25-40K·14薪")).json()
+
+    job = db.get(Job, first["job_id"])
+    assert second["duplicate"] is True
+    assert job.salary_text == "25-40K·14薪"
+    assert len(db.scalars(select(Job)).all()) == 1
+
+
+def test_duplicate_import_never_overwrites_an_existing_salary(client, db):
+    first = import_one(client, candidate(salary_text="20-30K")).json()
+    import_one(client, candidate(salary_text="40-50K"))
+
+    assert db.get(Job, first["job_id"]).salary_text == "20-30K"
 
 
 def test_importing_an_incomplete_candidate_is_refused(client, db):

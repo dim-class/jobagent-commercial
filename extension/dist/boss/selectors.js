@@ -53,6 +53,16 @@ var BossSelectors = {
         '/login',
         '/wapi/',
     ],
+    /** Narrow, visible logged-out affordances. Read only their label text;
+     * never inspect username/password fields or any stored session data. */
+    LOGIN_ROOT: [
+        '.nav-login',
+        '.btn-login',
+        '.login-register',
+        'a[ka="header-login"]',
+        'a[href^="/login"]',
+    ],
+    LOGIN_HINTS: ['登录', '登录/注册', '立即登录', '扫码登录'],
     // ---------------------------------------------------------------- detail
     DETAIL_ROOT: [
         '.job-detail-box',
@@ -75,6 +85,35 @@ var BossSelectors = {
         '.salary-text',
         'span.salary',
     ],
+    // Narrow same-job ROI only. Never screenshot a whole card/pane as a fallback.
+    SALARY_NODE: ['.job-salary', '.salary', '.salary-text'],
+    DETAIL_JOB_LINK: ['a[href*="/job_detail/"]'],
+    /**
+     * The M6 application control.
+     *
+     * **This selector IS clicked** - once, by `executeConfirmedApplication` in
+     * `extract.ts`, and only after a claimed one-time approval. It is the single
+     * most consequential selector in this repository.
+     *
+     * `.btn-startchat` was **verified read-only against the user's own logged-in
+     * BOSS pages on 2026-08-31**, in both states:
+     *
+     *   not yet chatted:  <a class="btn btn-startchat" data-isfriend="false">立即沟通</a>
+     *   already chatted:  <a class="btn btn-startchat" data-isfriend="true">继续沟通</a>
+     *                     wrapped in <div class="btn btn-startchat-wrap">
+     *
+     * In both, the strict selector matches 2 nodes with exactly 1 visible (BOSS
+     * renders a responsive hidden duplicate), which is why uniqueness is judged
+     * on visible nodes only. `ka` / `data-url` / `redirect-url` carry ~380-400
+     * character session tokens on the live page; only their *presence* is ever
+     * read, never their values.
+     *
+     * Still not verified: that clicking actually submits. Nothing here has ever
+     * been clicked on the live site. Every failure mode is fail-closed - a
+     * missing, ambiguous, disabled or wrong-state control refuses rather than
+     * guessing.
+     */
+    APPLICATION_CONTROL: ['.btn-startchat'],
     COMPANY: [
         '.job-boss-info .boss-info-attr',
         '.job-banner .company-info .name',
@@ -132,6 +171,12 @@ var BossSelectors = {
         '.company-name',
         '.company-info .company-name',
         'h3.company-name',
+        // Live-observed narrower card shape (real logged-in Chrome, 2026-08):
+        // `<a class="boss-info"><span class="boss-name">纳新电子</span></a>` -
+        // no `.company-name` anywhere on that card at all.
+        'a.boss-info span.boss-name',
+        '.boss-info .boss-name',
+        'span.boss-name',
     ],
     CARD_SALARY: ['.salary', '.job-salary', '.job-info .salary', 'span.salary'],
     CARD_AREA: ['.job-area', '.job-info .job-area', '.company-location'],
@@ -224,6 +269,9 @@ var BossSelectors = {
      * Anti-bot interstitials. Detected only so the human can be told to deal
      * with it themselves - this extension never attempts to solve one.
      */
+    // A challenge can appear after the JD/list, outside the bounded page-text prefix.
+    // Read only these small verification containers; never authentication form values.
+    VERIFICATION_ROOT: ['.verify-wrapper', '.verify-wrap'],
     VERIFICATION_HINTS: [
         'security-check',
         '请完成安全验证',
@@ -273,4 +321,37 @@ var BossSelectors = {
      * current standalone page, so keep it solely as an older-layout fallback.
      */
     DIAGNOSTIC_COMPANY_ROOT: ['.job-boss-info', '.job-detail-company'],
+    // M7: live-observed current-conversation structure plus the bounded M7b
+    // conversation list. `li[role=listitem]` / `.friend-content` are also
+    // corroborated by the public BossHunter implementation; execution still
+    // requires one unique visible list root/control and never touches inputs.
+    CHAT_LIST: ['.user-list', '.chat-list'],
+    CHAT_LIST_ITEM: ['li[role="listitem"]'],
+    CHAT_LIST_CONTROL: ['.friend-content'],
+    CHAT_LIST_RECRUITER: ['.name-text'],
+    CHAT_LIST_COMPANY: ['.name-box .company-name', '.name-box span:nth-of-type(2)'],
+    CHAT_CONVERSATION: ['.chat-container.page-container .chat-wrap .chat-conversation'],
+    CHAT_MESSAGE_LIST: [
+        '.message-content .chat-record .chat-message ul.im-list',
+        '.message-content .chat-record .chat-message',
+    ],
+    CHAT_MESSAGE_ITEM: ['li.message-item'],
+    CHAT_MESSAGE_TEXT: ['.text-content'],
+    CHAT_MESSAGE_TIME: ['.item-time .time'],
+    CHAT_HEADER_RECRUITER: [
+        '.top-info-content .user-info-wrap .name', '.user-info-wrap .name',
+        '.top-info-content .user-info-wrap', '.user-info-wrap',
+    ],
+    CHAT_HEADER_COMPANY: [
+        '.top-info-content .user-info-wrap .company-name', '.user-info-wrap .company-name',
+        '.top-info-content .user-info-wrap .company', '.user-info-wrap .company',
+    ],
+    CHAT_HEADER_POSITION: [
+        '.top-info-content .chat-position-content .position-main', '.chat-position-content .position-main',
+    ],
+    CHAT_HEADER_JOB_LINK: [
+        '.top-info-content .chat-position-content a[href*="/job_detail/"]',
+        '.chat-position-content a[href*="/job_detail/"]',
+        '.top-info-content a[href*="/job_detail/"]',
+    ],
 };

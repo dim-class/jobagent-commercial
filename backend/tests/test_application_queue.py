@@ -110,6 +110,78 @@ def test_maybe_is_excluded_by_default(client, make_analyzed):
     assert set(queue_ids(client, include_maybe=True)) == {apply_id, maybe_id}
 
 
+def test_queue_exposes_the_posting_url_without_its_query_string(client, make_analyzed, db):
+    """The 去投递 action needs the job's own page; intake already stripped the query.
+
+    Opening a page is not a decision: it must leave `Job.status` alone, exactly
+    like copying the greeting does.
+    """
+    from app.models import Job
+
+    job_id = make_analyzed(
+        source_url="https://www.zhipin.com/job_detail/abc123.html?lid=SECRET&securityId=TOKEN",
+    )
+    db.get(Job, job_id).external_id = "abc123"
+    db.commit()
+    item = next(
+        i for i in client.get("/api/application-queue").json()["items"] if i["job_id"] == job_id
+    )
+    assert item["source_url"] == "https://www.zhipin.com/job_detail/abc123.html"
+    assert "lid" not in item["source_url"] and "securityId" not in item["source_url"]
+    assert client.get(f"/api/jobs/{job_id}").json()["status"] == "new"
+
+
+def test_a_job_without_a_url_reports_none_rather_than_a_broken_link(client, make_analyzed):
+    job_id = make_analyzed(source_url=None)
+    item = next(
+        i for i in client.get("/api/application-queue").json()["items"] if i["job_id"] == job_id
+    )
+    assert item["source_url"] is None
+
+
+def test_a_boss_url_not_backed_by_the_row_id_is_not_offered_as_a_link(client, make_analyzed):
+    """The live-verification leftover `/job_detail/live1.html` sat first in the
+    real queue with no `external_id`; clicking it opened a page that does not
+    exist. A stored URL is not automatically a working link.
+
+    The site is read from the URL's host, so a manually pasted BOSS link gets
+    the same check even though it is stored with ``source="manual"``."""
+    job_id = make_analyzed(source_url="https://www.zhipin.com/job_detail/live1.html")
+    item = next(
+        i for i in client.get("/api/application-queue").json()["items"] if i["job_id"] == job_id
+    )
+    assert item["source_url"] is None
+
+
+def test_a_boss_url_matching_its_own_id_is_offered(client, make_analyzed, db):
+    from app.models import Job
+
+    job_id = make_analyzed(source_url="https://www.zhipin.com/job_detail/abc123XYZ.html")
+    job = db.get(Job, job_id)
+    job.external_id = "abc123XYZ"
+    db.commit()
+
+    item = next(
+        i for i in client.get("/api/application-queue").json()["items"] if i["job_id"] == job_id
+    )
+    assert item["source_url"] == "https://www.zhipin.com/job_detail/abc123XYZ.html"
+
+
+def test_the_city_menu_still_lists_every_city_while_one_is_selected(client, make_analyzed):
+    """Picking 北京 must not delete 杭州 from the dropdown - the facet is counted
+    with its own dimension excluded, so the user can switch without resetting."""
+    make_analyzed(city="北京")
+    make_analyzed(city="杭州")
+    make_analyzed(city="上海")
+
+    unfiltered = client.get("/api/application-queue").json()
+    assert set(unfiltered["facets"]["cities"]) >= {"北京", "杭州", "上海"}
+
+    filtered = client.get("/api/application-queue", params={"city": "北京"}).json()
+    assert [i["city"] for i in filtered["items"]] == ["北京"], "the rows are still filtered"
+    assert set(filtered["facets"]["cities"]) >= {"北京", "杭州", "上海"}
+
+
 def test_skip_verdict_never_enters_the_queue(client, make_analyzed):
     make_analyzed(41, "skip")
     assert queue(client)["total"] == 0

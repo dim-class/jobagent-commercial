@@ -89,15 +89,18 @@ intake → review pipeline described below.
   honesty rules (no invented rates, no derived conclusions — raw counts and
   a chronological history only). No effect on `Job.status`. Fully specified
   below.
-- **M4 — (conditional, gated) supervised read-only navigation.** Fully
-  specified below now that the required `CLAUDE.md` policy amendment
-  ("Chrome extension — M4 supervised navigation policy") exists. **The
-  policy gate is cleared; the implementation gate is not.** No code for any
-  part of this milestone may be written until the user gives a second,
-  separate, explicit authorization that names that policy section.
-  Authoring the policy text itself was not that authorization. Until it is
-  given, M4 stays unimplemented and the task configuration in M1 remains
-  configuration data only — it causes no automated action.
+- **M4 — supervised, then bounded-automatic, extension navigation. Implemented
+  and live-verified.** Every stage (M4a session scaffolding, M4b bounded
+  card/detail navigation, M4c continuous-list bounded scrolling, M4d
+  canonical incremental discovery/dedup, M4e deterministic SearchPlan
+  generation, M4f the extension-owned bounded automatic runner plus
+  `TaskCandidate` provenance) went through its own separate, explicit user
+  authorization naming the relevant `CLAUDE.md` policy section before any
+  code was written, exactly as this roadmap originally required. See
+  "Milestone 4" below for the completed scope and live evidence. **No
+  further extension milestone (M5+) is authorized.** The unconditional
+  boundaries — no apply, no message, no follow/collect, no stealth, no
+  Playwright/CDP — remain in force and are not part of any gated exception.
 
 Each milestone requires the previous one merged and tested first.
 
@@ -294,12 +297,58 @@ Frontend:
 
 - `npm run build` passes (type-checks the new controls/history).
 
-## Milestone 4 — supervised read-only navigation (full spec, implementation gated)
+## Milestone 4 — supervised, then bounded-automatic, navigation (full spec)
 
-**Implementation status: not started, and may not start until a second,
-separate, explicit user authorization names the `CLAUDE.md` policy section
-below.** This spec exists so that *if* that authorization is given, the work
-is already scoped — it is not itself the go-ahead to build it.
+**Implementation status: complete and live-verified.** Every stage below
+(M4a-M4f) received its own separate, explicit user authorization naming the
+`CLAUDE.md` "Chrome extension — M4 supervised navigation policy" section (and
+its M4e/M4f amendment) before any code for that stage was written, exactly as
+this spec originally required.
+
+Completed scope:
+
+- **M4a** — bounded-session scaffolding: human-approved criteria/caps/tab,
+  start/stop, progress indicator. No navigation yet.
+- **M4b** — bounded navigation to search/results/detail pages and result-card
+  selection, one human click at a time (prepare-then-confirm), plus the
+  two-phase open/capture/loopback-preview flow for one candidate.
+- **M4c** — bounded continuous-list scrolling within a results page, under the
+  same caps. Real logged-in Chrome verification found BOSS's `/web/geek/jobs`
+  is one continuous scroll list with no pagination control at all, so
+  pagination was removed rather than shipped permanently broken — M4 has
+  never included page-number navigation on BOSS.
+- **M4d** — canonical, query-free incremental card discovery/dedup across
+  scroll rounds (`/job_detail/<id>.html` identity only).
+- **M4e** — deterministic SearchPlan generation (city × keyword, no OpenAI
+  call) and its own loopback API/state machine.
+- **M4f** — the extension-owned bounded automatic runner: one human-started
+  SearchTask navigates, discovers cards, scrolls (still capped at 5 rounds/20
+  candidates/one foreground tab), opens and identity-checks each detail pane,
+  imports through the unchanged `extension_intake.py` -> `job_intake` path,
+  and associates each resulting job with the running `JobSearchTask` via the
+  existing `TaskCandidate` endpoint (new imports by `job_id`, global
+  duplicates by the preview's `existing_job_id` — one `Job` may belong to
+  multiple tasks). Verification/CAPTCHA/login/risk signals pause immediately
+  with no bypass; a bounded SPA detail-transition delay is tolerated by
+  retrying the identity check within the existing capture-wait ceiling before
+  skipping just that one candidate.
+- **M4g** — one explicitly confirmed finite batch of 1–5 already-created pending
+  SearchPlan tasks. It validates the full ordered list before browser work, reuses
+  one foreground tab and the unchanged M4f runner serially, and never schedules or
+  auto-resumes. Corrected implementation and cap-1 live acceptance are complete in 0.1.7.
+
+Live evidence (task #10, logged-in Chrome): 3 controlled scroll rounds, 60
+observed cards, 30 new / 30 duplicate, 14 new imports, 16 unique
+`TaskCandidate` associations (the 2 extra beyond the 14 imports are global
+duplicates linked without re-import) — every associated job carries a
+canonical query-free BOSS detail URL, an external ID, and a non-empty JD; no
+error and no unresolved pause during the run.
+
+**No post-M4 extension milestone (M5+) is authorized.** This spec, and the
+unconditional boundaries below, remain the frozen scope until a future
+milestone gets its own separate, explicit authorization — apply, 立即沟通,
+messaging, follow/collect, and any stealth/fingerprinting/Playwright/CDP
+mechanism stay forbidden regardless.
 
 ### Policy basis
 
@@ -335,29 +384,38 @@ disagree, `CLAUDE.md` wins and this file needs fixing.
   selector ambiguity, navigation loop, cap reached, user stop, or site
   blocking ends the session immediately; no bypass or stealth, ever.
 
-### Staged implementation (once the implementation gate clears)
+### Staged implementation — all stages complete and live-verified
 
-- **M4a — session scaffolding, no navigation yet.** Add the session
-  approval UI (criteria/caps/tab confirmation) and the session state
-  machine (start/running/stopped) with the stop control and progress
-  indicator wired up, but the content script still only reads on an
-  explicit per-page click exactly as it does today. This proves the bounded-
-  session mechanics and the audit trail before any navigation code exists.
-- **M4b — bounded navigation.** Add navigation to search/results/detail
+- **M4a — session scaffolding, no navigation.** Done: the session approval
+  UI, start/running/stopped state machine, stop control and progress
+  indicator.
+- **M4b — bounded navigation.** Done: navigation to search/results/detail
   pages and result-card selection, gated by the approved caps and every hard
-  stop in the contract above. Extraction still goes through the unchanged
-  `extension_intake.py` path. This is the first stage that actually moves
-  the page on the human's behalf, and the one that most needs the fixture
-  coverage below before any live check.
-- **M4c — bounded scroll/pagination.** Add scrolling and pagination within
-  a results page, bounded by the same caps, only after M4b's navigation and
-  hard-stop handling are fixture-tested and live-verified by the user.
+  stop in the contract above, extraction through the unchanged
+  `extension_intake.py` path.
+- **M4c — bounded continuous-list scrolling.** Done. Real logged-in Chrome
+  verification found BOSS's results page has no pagination control at all
+  (one continuous scroll list), so pagination was removed rather than left
+  permanently broken; scrolling stayed bounded by the same caps.
+- **M4d — canonical incremental discovery/dedup.** Done: query-free
+  `/job_detail/<id>.html` identity across scroll rounds.
+- **M4e — deterministic SearchPlan generation.** Done: city × keyword
+  expansion with its own loopback API, no OpenAI call.
+- **M4f — extension-owned bounded automatic runner + TaskCandidate
+  provenance.** Done: one human-started SearchTask runs unattended within
+  the same caps, imports through the unchanged `job_intake` path, and
+  associates every resulting job with the running task via the existing
+  `TaskCandidate` endpoint. Live-verified on task #10 (see above).
+- **M4g — bounded SearchPlan batch runner.** Offline complete: one confirmation,
+  at most five pending tasks, one tab/task at a time, advance only on normal
+  completion, and stop/pause the whole batch on every existing hard-stop signal.
+  It reuses M4f state and intake. The corrected 0.1.7 live batch ran #14 then #15 with separate
+  supervised sessions, cap=1 and one extracted candidate each; both completed without error.
 
-Each stage requires the previous one merged, fixture-tested, and — for
-anything that touches a real page — manually verified by the user in their
-own logged-in Chrome before the next stage starts, matching the existing
-`extension/README.md` posture that live compatibility is a user claim, not
-an automated one.
+Each stage was implemented, fixture-tested, and manually verified by the user in
+their own logged-in Chrome before the next stage started, matching the
+existing `extension/README.md` posture that live compatibility is a user
+claim, not an automated one. No further stage (M5+) is authorized.
 
 ### Non-goals (explicit, unconditional — no stage of M4 changes these)
 
@@ -409,3 +467,38 @@ an automated one.
 - Live BOSS compatibility is never asserted by an automated test; it is
   recorded as a manual user claim, exactly like `extension/README.md`'s
   existing detection claim.
+
+## Milestone 5a — task-scoped candidate matching + human review
+
+**Implementation status: complete.** Explicitly authorized as its own, separate delegation - distinct
+from the M4 Chrome-extension gate above ("No further extension milestone (M5+) is authorized" refers
+only to *browser automation* stages; M5a never touches the extension, a browser, or `Job.status`).
+
+### Scope
+
+- `backend/app/services/task_matching.py`: scores a task's existing `TaskCandidate` associations
+  against the active analysis resume and the fast model, reusing `job_matcher`'s cache/guardrail
+  pipeline verbatim - no parallel persistence or scoring path. `plan_task_match` is a pure read;
+  `run_task_match` is the only spending path, gated by an explicit `confirmed=true` and bounded by
+  the configured `settings.max_analyses_per_run` (never hard-coded). Each candidate analyzes
+  independently - one failure never aborts the run.
+- New routes: `GET /api/tasks/{id}/match-plan`, `POST /api/tasks/{id}/match-run`.
+- Console UI (`frontend/src/pages/ConsolePage.tsx`): an explicit "生成匹配计划" read, then an
+  explicit "确认分析" (confirmed) run - never triggered on page load or task completion. Associating
+  a new candidate invalidates the currently shown plan so a confirm click can never use a stale call
+  count. Once a plan exists, every candidate's score/verdict/cache status comes from that plan's own
+  active-resume + fast-model result, not an unrelated "latest analysis"; candidates sort
+  score-descending with unanalyzed candidates last; the task's `min_score` is an optional visible
+  filter. Reviewed/dismissed counts derive each candidate's *latest* `reviewed`/`dismissed` event
+  (M3's `OrchestrationEvent`, oldest-first) - a task-level event never counts toward a candidate, and
+  repeated clicks never inflate the count.
+
+### Non-goals (explicit, unconditional)
+
+- No apply, 立即沟通, message send, follow/collect, or account-state change.
+- No browser/site action of any kind - this milestone is backend + console UI only.
+- No automatic smart-model use - only the fast model, exactly like bulk analysis.
+- No `Job.status` mutation and no new persistence/scoring pipeline - every score still lands in the
+  existing `JobAnalysis` table through the existing `job_matcher.analyze_job`.
+- **No post-M5a milestone is authorized.** A future M5b/M6/etc. needs its own separate, explicit
+  authorization, exactly like every milestone before it.

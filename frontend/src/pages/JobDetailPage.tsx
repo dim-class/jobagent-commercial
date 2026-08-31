@@ -936,7 +936,7 @@ export default function JobDetailPage() {
             analyzedResumeId={analysis?.meta.resume_id ?? null}
           />
           <div className="field-hint">
-            JobAgent 不会替你投递，也不会向招聘方发送消息 —— 这里只记录你自己完成的动作。
+            这是完全手动记录入口，不会操作招聘网站；M6 单岗位确认入口仅在投递队列中提供。
           </div>
         </Modal>
       ) : null}

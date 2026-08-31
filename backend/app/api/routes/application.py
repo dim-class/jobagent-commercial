@@ -14,6 +14,8 @@ site - each one records something the human says they already did.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from fastapi import APIRouter, Body, Depends, Query
 from sqlalchemy.orm import Session
 
@@ -81,6 +83,18 @@ def get_queue(
 
     proposals = application_queue.all_proposals(db)
     eligible = [p for p in proposals if application_queue.is_eligible(p, filters)]
+    # A facet drives its own dropdown, so it is computed with its own dimension
+    # excluded. Counting cities over the already-city-filtered rows leaves the
+    # menu holding only the city you picked, with no way back to the others.
+    city_facet_source = (
+        eligible
+        if filters.city is None
+        else [
+            p
+            for p in proposals
+            if application_queue.is_eligible(p, replace(filters, city=None))
+        ]
+    )
 
     # Deferred jobs stay eligible but drop below the immediate work.
     from app.schemas.application import ProposalState
@@ -102,7 +116,7 @@ def get_queue(
             timezone_name=settings.report_timezone,
         ),
         facets={
-            **application_queue.build_facets(eligible),
+            **application_queue.build_facets(city_facet_source),
             "skip_reasons": list(SKIP_REASONS),
             "sorts": list(application_queue.SORT_KEYS),
         },

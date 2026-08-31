@@ -163,12 +163,22 @@ async def analyze_job(
     use_smart_model: bool = False,
     settings: Settings | None = None,
     resume_id: int | None = None,
+    mark_reviewed: bool = True,
+    no_retries: bool = False,
 ) -> AnalysisOutcome:
     """Analyze one job against a resume, using the cache unless forced.
 
     Defaults to the active analysis resume; pass ``resume_id`` to score the same
     JD against another variant. The cache key already covers resume content, so
     each variant gets its own cached row and re-checking one costs nothing.
+
+    ``mark_reviewed`` defaults to ``True`` - a human looking directly at one
+    job (the standalone ``/api/jobs/{id}/analyze`` family, batch analysis)
+    has, by definition, now seen a machine opinion on it. Task-scoped bulk
+    matching (``task_matching.run_task_match``) passes ``mark_reviewed=False``:
+    scoring up to twenty candidates in the background is not the human
+    reviewing any one of them, and M5a's contract is that it never touches
+    ``Job.status`` at all - see ``services/task_matching.py``.
     """
     cfg = settings or get_settings()
     job = db.get(Job, job_id)
@@ -226,6 +236,7 @@ async def analyze_job(
         },
         pre_analysis=pre.to_dict(),
         settings=cfg,
+        **({"no_retries": True} if no_retries else {}),
     )
     result = _sanitize(raw_result, pre, strategy)
 
@@ -238,6 +249,7 @@ async def analyze_job(
         result=result,
         pre=pre,
         force=force,
+        mark_reviewed=mark_reviewed,
     )
 
     log_event(
@@ -265,6 +277,7 @@ def _persist(
     result: JobMatchResult,
     pre: PreAnalysis,
     force: bool,
+    mark_reviewed: bool = True,
 ) -> JobAnalysis:
     """Upsert on ``cache_key`` (a forced re-run replaces the cached row)."""
     payload = result.model_dump(mode="json")
@@ -288,8 +301,17 @@ def _persist(
     analysis.verdict = result.verdict
     analysis.result_json = payload
 
-    # The user has now seen a machine opinion on this job.
-    if job.status == JobStatus.new:
+    # The user has now seen a machine opinion on this job - but only when a
+    # human is looking directly at this one job (see `analyze_job`'s
+    # docstring). Never read-then-restore `job.status` here: `job` was loaded
+    # before the awaited model call in `analyze_job`, so by the time we get
+    # here a human could have changed the real status themselves, through a
+    # different DB session, while this call was awaiting the model. Simply
+    # never touching the column when `mark_reviewed` is false is what avoids
+    # that lost-update - there is no snapshot to restore, and no window where
+    # this function's own read of `job.status` could go stale and overwrite
+    # a concurrent human write.
+    if mark_reviewed and job.status == JobStatus.new:
         job.status = JobStatus.reviewed
 
     db.add(

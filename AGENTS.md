@@ -1,5 +1,9 @@
 # Codex supervisor
 
+- Current user override (2026-08-28): Claude quota is exhausted. Codex implements and tests
+  directly until the user requests a switch back. Do not invoke Claude under this override.
+  The worker/delegation rules below apply only when Claude mode is explicitly restored.
+
 - The user communicates with Codex only. Claude Code is the implementation worker.
 - Read `CLAUDE.md`, `docs/orchestration/STATUS.md`, and this file before delegating.
 - Put one complete, bounded milestone in `docs/orchestration/TASK.md`; never paste source or

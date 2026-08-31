@@ -141,7 +141,7 @@ def test_a_v09_database_really_looks_like_one(v09_db):
 
 def test_the_interview_foreign_key_becomes_cascade(v09_db):
     assert upgrade(v09_db) == "upgraded"
-    assert current_revision_of(v09_db) == "0011_supervised_sessions"
+    assert current_revision_of(v09_db) == "0021_candidate_stage_policy"
 
     keys = foreign_keys(v09_db, "interview_processes")
     assert keys["applied_event_id"] == "CASCADE"
@@ -213,7 +213,8 @@ def test_the_upgrade_only_adds_the_decision_tables(v09_db):
         "decision_snapshots",
     }
     for table, cols in before.items():
-        assert columns(v09_db, table) == cols, f"{table} changed shape"
+        expected = cols | ({"source_message_id"} if table == "recruiter_messages" else set())
+        assert columns(v09_db, table) == expected, f"{table} changed shape"
 
 
 def test_the_new_timestamps_have_server_defaults(v09_db):
@@ -344,7 +345,7 @@ def test_a_v03_database_reaches_the_decision_schema_in_one_go(v03_db):
     finally:
         engine.dispose()
 
-    assert current_revision_of(v03_db) == "0011_supervised_sessions"
+    assert current_revision_of(v03_db) == "0021_candidate_stage_policy"
     assert {"decision_profiles", "offer_assessments", "decision_snapshots"} <= tables(
         v03_db
     )

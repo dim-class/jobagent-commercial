@@ -26,6 +26,7 @@ from app.schemas.application import (
     QueueSummary,
 )
 from app.services.timezones import is_local_today, local_now
+from app.services.urls import canonical_url, is_openable_posting_url
 
 #: Sort keys the UI offers.
 SORT_KEYS = ("recommended", "score", "newest", "salary")
@@ -104,6 +105,15 @@ def build_proposal(job: Job, *, now: datetime | None = None) -> ApplicationPropo
         city=job.city,
         salary_text=job.salary_text,
         source=job.source,
+        # Rows created before intake canonicalised every path may still carry a
+        # query; never hand one to a link the user is about to click - and only
+        # offer the link at all when the stored URL is backed by the row's own
+        # id, so a leftover fixture URL is not presented as the posting.
+        source_url=(
+            canonical_url(job.source_url)
+            if is_openable_posting_url(canonical_url(job.source_url), external_id=job.external_id)
+            else None
+        ),
         overall_score=analysis.overall_score,
         verdict=analysis.verdict,
         matched_skills=[str(s) for s in (result.get("matched_skills") or [])],

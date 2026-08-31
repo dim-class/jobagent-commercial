@@ -1,0 +1,25 @@
+{
+  "_comment": "Offline salary strings. 'unreadable' entries mirror real values observed in the local job library: BOSS obfuscated-font Private Use Area glyphs the UI can only draw as boxes. Nothing here contacts a recruitment site.",
+  "unreadable": [
+    "\ue035\ue031-\ue038\ue031K",
+    "\ue032\ue031-\ue032\ue033K",
+    "\ue032\ue037-\ue033\ue03aK\u00b7\ue032\ue034\u85aa",
+    "\ue03a-\ue032\ue033K",
+    "\ue034\ue031\ue031\ue031-\ue039\ue031\ue031\ue031\u5143/\u6708",
+    "\u25a1\u25a1-\u25a1\u25a1K",
+    "\ufffd\ufffd-\ufffd\ufffdK",
+    "\u25a1\u25a1\u25a1\u25a1-\u25a1\u25a1\u25a1\u25a1\u5143/\u6708",
+    "-K",
+    "   "
+  ],
+  "readable": [
+    "16-19K",
+    "8-13K",
+    "20-30K\u00b715\u85aa",
+    "500-700\u5143/\u5929",
+    "180-220\u5143/\u5929",
+    "25-35K\u00b716\u85aa",
+    "\u9762\u8bae",
+    "\u85aa\u8d44\u9762\u8bae"
+  ]
+}

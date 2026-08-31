@@ -33,6 +33,46 @@ class TaskMode(str, Enum):
     manual_review_only = "manual_review_only"
 
 
+class SearchTaskRunStatus(str, Enum):
+    """M4e/M4f bounded automatic-runner lifecycle for one ``JobSearchTask``
+    (CLAUDE.md "Chrome extension - M4 supervised navigation policy",
+    M4e/M4f amendment, explicitly authorized). ``NULL`` on the model means
+    "never run" - a manual (non-SearchPlan) task, or a generated task the
+    human has not started yet; ``pending`` is the explicit "generated, ready
+    to start" state a SearchPlan row is created in.
+
+    This tracks the *task's* lifecycle, which can span more than one
+    ``SupervisedSession`` (pausing and later resuming starts a fresh bounded
+    session) - the session itself keeps owning per-run page/candidate/scroll
+    cap accounting exactly as it already does for M4b/M4c.
+    """
+
+    pending = "pending"
+    running = "running"
+    paused = "paused"
+    #: A verification/CAPTCHA/rate-limit signal stopped the run. Distinct
+    #: from a plain ``paused`` so the human is not misled into thinking they
+    #: simply clicked pause - the site itself blocked forward progress and
+    #: no automatic bypass or retry is ever attempted.
+    paused_verification = "paused_verification"
+    #: The visible BOSS tab is logged out. Credentials and verification stay
+    #: human-owned; an explicit resume is required after login succeeds.
+    paused_login_required = "paused_login_required"
+    completed = "completed"
+    failed = "failed"
+    cancelled = "cancelled"
+
+
+#: Terminal states: nothing may resume from here, ever - only a fresh task.
+CLOSED_SEARCH_TASK_RUN_STATUSES: frozenset[SearchTaskRunStatus] = frozenset(
+    {
+        SearchTaskRunStatus.completed,
+        SearchTaskRunStatus.failed,
+        SearchTaskRunStatus.cancelled,
+    }
+)
+
+
 class SupervisedSessionStatus(str, Enum):
     """M4a bounded-session state. See CLAUDE.md's "Chrome extension - M4
     supervised navigation policy". No navigation happens in M4a - this only
@@ -119,6 +159,11 @@ class EventType(str, Enum):
     # --- v0.5 -----------------------------------------------------------
     #: The human confirmed they sent a reply themselves. JobAgent sends nothing.
     candidate_reply = "candidate_reply"
+    # --- M6 --------------------------------------------------------------
+    #: A confirmed application was attempted but the site's response could not
+    #: be verified. NOT a success and NOT a failure - `Job.status` is left
+    #: alone and the human resolves it. Never silently upgraded to `applied`.
+    application_result_unknown = "application_result_unknown"
     # --- v0.7 -----------------------------------------------------------
     #: A human filled in which resume an *older* application actually used.
     #: Corrective, never inferred - see ResumeUsage.unknown.

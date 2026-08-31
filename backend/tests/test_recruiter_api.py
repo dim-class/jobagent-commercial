@@ -26,6 +26,7 @@ from app.models import (
     JobStatus,
     MessageDirection,
     RecruiterMessage,
+    RecruiterConversation,
 )
 from app.schemas.recruiter import RecruiterMessageAnalysisResult
 from app.services import recruiter_message_analyzer as analyzer
@@ -219,6 +220,106 @@ def test_duplicate_message_within_a_conversation_is_detected(client):
     assert second["duplicate"] is True
     assert second["message"]["id"] == first["message"]["id"]
     assert len(second["conversation"]["messages"]) == 1
+
+
+def _applied_boss_job(client) -> int:
+    job_id = create_job(
+        client,
+        source="boss",
+        external_id="m7-job-1",
+        source_url="https://www.zhipin.com/job_detail/m7-job-1.html",
+    )
+    response = client.patch(f"/api/jobs/{job_id}", json={"status": "applied"})
+    assert response.status_code == 200, response.text
+    return job_id
+
+
+def _m7_scan_payload(job_id: int) -> dict:
+    return {
+        "job_id": job_id,
+        "page_url": "https://www.zhipin.com/web/geek/chat",
+        "recruiter_name": "招聘方甲",
+        "company": "示例科技",
+        "title": "云计算工程师",
+        "messages": [
+            {"source_message_id": "msg-1001", "direction": "user", "text": "您好。"},
+            {"source_message_id": "msg-1002", "direction": "recruiter", "text": "请问何时到岗？"},
+        ],
+    }
+
+
+def test_m7_current_chat_scan_is_incremental_and_uses_zero_ai(client, db):
+    job_id = _applied_boss_job(client)
+    headers = {"Origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"}
+    first = client.post(
+        "/api/recruiter-conversations/boss-current-scan",
+        json=_m7_scan_payload(job_id), headers=headers,
+    )
+    assert first.status_code == 200, first.text
+    assert first.json()["observed"] == 2
+    assert first.json()["imported"] == 2
+    assert first.json()["ai_used"] is False
+    assert "conversation" not in first.json()
+    assert "messages" not in first.json()
+    second = client.post(
+        "/api/recruiter-conversations/boss-current-scan",
+        json=_m7_scan_payload(job_id), headers=headers,
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["imported"] == 0
+    assert second.json()["duplicates"] == 2
+    assert db.query(RecruiterMessage).count() == 2
+
+
+def test_m7_auto_associates_by_exact_external_id(client, db):
+    job_id = _applied_boss_job(client)
+    payload = _m7_scan_payload(job_id)
+    payload.pop("job_id")
+    payload["source_url"] = "https://www.zhipin.com/job_detail/m7-job-1.html"
+    payload["external_id"] = "m7-job-1"
+    response = client.post(
+        "/api/recruiter-conversations/boss-current-scan",
+        json=payload,
+        headers={"Origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["matched"] is True
+    assert db.query(RecruiterConversation).one().job_id == job_id
+
+
+def test_m7_unmatched_auto_association_is_skipped_without_writes(client, db):
+    payload = _m7_scan_payload(1)
+    payload.pop("job_id")
+    payload["source_url"] = "https://www.zhipin.com/job_detail/not-in-library.html"
+    payload["external_id"] = "not-in-library"
+    response = client.post(
+        "/api/recruiter-conversations/boss-current-scan",
+        json=payload,
+        headers={"Origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["matched"] is False
+    assert response.json()["conversation_id"] is None
+    assert db.query(RecruiterConversation).count() == 0
+    assert db.query(RecruiterMessage).count() == 0
+
+
+def test_m7_rejects_non_extension_non_applied_and_source_id_conflict(client, db):
+    job_id = _applied_boss_job(client)
+    payload = _m7_scan_payload(job_id)
+    assert client.post(
+        "/api/recruiter-conversations/boss-current-scan", json=payload
+    ).status_code == 403
+    headers = {"Origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"}
+    assert client.post(
+        "/api/recruiter-conversations/boss-current-scan", json=payload, headers=headers
+    ).status_code == 200
+    payload["messages"][0]["text"] = "被篡改"
+    conflict = client.post(
+        "/api/recruiter-conversations/boss-current-scan", json=payload, headers=headers
+    )
+    assert conflict.status_code == 422
+    assert db.query(RecruiterMessage).count() == 2
 
 
 def test_duplicate_detection_ignores_whitespace_only_changes(client):

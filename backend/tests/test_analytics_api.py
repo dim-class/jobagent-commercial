@@ -7,14 +7,32 @@ and applying a proposal needs an explicit confirmation.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from app.core.career_strategy import load_strategy, strategy_hash
 from app.models import CareerStrategyChange, RecommendationDecision
 from app.schemas.analytics import ProposalType
 from app.services import strategy_recommendations as recs
 from app.services.application_analytics import AnalyticsFilters, compute_analytics
 
-from tests.test_career_analytics import NOW, applied_job
-from tests.test_strategy_recommendations import strong_hangzhou
+from tests.test_career_analytics import NOW, applied_job as _applied_job_at
+from tests.test_strategy_recommendations import strong_hangzhou as _strong_hangzhou_at
+
+
+def applied_job(db, **kwargs):
+    """Build the history relative to the REAL clock, not the frozen `NOW`.
+
+    The unit tests pass `now=NOW` into `compute_analytics`, but these go through
+    the HTTP route, which uses the real time. Anchoring the fixtures to a frozen
+    date meant they silently drifted out of the default 30-day window as real
+    time moved on - the suite began failing on 2026-08-31 with no code change.
+    """
+    return _applied_job_at(db, now=datetime.now(timezone.utc), **kwargs)
+
+
+def strong_hangzhou(db):
+    """Same cohort, anchored to the real clock - see `applied_job` above."""
+    return _strong_hangzhou_at(db, now=datetime.now(timezone.utc))
 
 
 def city_proposal(db):
@@ -52,7 +70,10 @@ def test_career_analytics_reports_the_funnel(client, db):
     assert body["by_city"][0]["mature_reply_rate"]["denominator"] == 6
 
 
-def test_window_and_filters_are_query_parameters(client, db):
+def test_window_and_filters_are_query_parameters(client, db, monkeypatch):
+    # This fixture's events are relative to NOW, not the machine's current day.
+    monkeypatch.setattr('app.api.routes.analytics.analytics.compute_analytics',
+                        lambda session, filters: compute_analytics(session, filters, now=NOW))
     applied_job(db, days_ago=3, city="北京")
     applied_job(db, days_ago=60, city="上海")
 

@@ -13,14 +13,15 @@ UI can offer to open it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger, log_event
 from app.job_sources.base import JobSource, RawJobPosting
-from app.models import ApplicationEvent, EventType, Job, JobStatus
+from app.models import ApplicationEvent, EventType, Job, JobAnalysis, JobStatus
+from app.services.salary_text import is_valid_salary_text
 
 logger = get_logger(__name__)
 
@@ -31,6 +32,10 @@ class IntakeResult:
 
     job: Job
     duplicate: bool
+    enriched_fields: list[str] = field(default_factory=list)
+    #: Cached analyses dropped because a scoring input they were computed from
+    #: has since been filled in. Zero unless an enrichment actually happened.
+    invalidated_analyses: int = 0
 
     @property
     def created(self) -> bool:
@@ -56,6 +61,7 @@ def save_posting(
     source: JobSource,
     source_name: str | None = None,
     note: str = "岗位已创建",
+    enrich_missing_salary: bool = False,
 ) -> IntakeResult:
     """Normalize, de-duplicate and persist one posting.
 
@@ -72,14 +78,57 @@ def save_posting(
         external_id=posting.external_id,
     )
     if existing is not None:
+        enriched_fields: list[str] = []
+        invalidated = 0
+        # Canonical intake may fill one previously unreadable optional field
+        # when the same stable posting is later revisited with stronger
+        # evidence (for example local screenshot OCR). Never overwrite a salary
+        # a human can already read; a stored obfuscated-font placeholder is not
+        # one, so it may be replaced (see services/salary_text.py).
+        if (
+            enrich_missing_salary
+            and not is_valid_salary_text(existing.salary_text)
+            and normalized.salary_text
+        ):
+            existing.salary_text = normalized.salary_text
+            enriched_fields.append("salary_text")
+            # `analysis_cache_key` is built from `content_hash`, which covers
+            # company + title + JD body only - a later salary never changes it.
+            # Any analysis scored while the salary was unknown would therefore
+            # be served from cache forever (scoring.py does read salary), so the
+            # rows whose input just changed are dropped and the next explicit
+            # 分析 recomputes. Only this job, and only on a real enrichment.
+            stale = list(db.scalars(select(JobAnalysis).where(JobAnalysis.job_id == existing.id)))
+            for analysis in stale:
+                db.delete(analysis)
+            invalidated = len(stale)
+            db.add(
+                ApplicationEvent(
+                    job_id=existing.id,
+                    event_type=EventType.note,
+                    notes=(
+                        "岗位薪资（此前缺失或无法识别）已由再次采集补充（需人工核对）"
+                        + (f"；已作废 {invalidated} 条基于旧薪资的分析缓存，请重新分析" if invalidated else "")
+                    ),
+                )
+            )
+            db.commit()
+            db.refresh(existing)
         log_event(
             logger,
             "job.duplicate_detected",
             existing_job_id=existing.id,
             hash=normalized.content_hash[:12],
             source=name,
+            enriched_fields=enriched_fields,
+            invalidated_analyses=invalidated,
         )
-        return IntakeResult(job=existing, duplicate=True)
+        return IntakeResult(
+            job=existing,
+            duplicate=True,
+            enriched_fields=enriched_fields,
+            invalidated_analyses=invalidated,
+        )
 
     job = Job(
         source=name,

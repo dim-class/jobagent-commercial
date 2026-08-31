@@ -21,6 +21,7 @@ from app.core.config import Settings, get_settings
 from app.core.errors import ConfigurationError, UpstreamError
 from app.core.logging import get_logger, log_event
 from app.schemas.analysis import JobMatchResult
+from app.services.ai_diagnostics import classify_openai_error
 
 logger = get_logger(__name__)
 
@@ -48,10 +49,11 @@ def require_openai(settings: Settings | None = None) -> Settings:
     return cfg
 
 
-def build_agent(model_name: str, settings: Settings | None = None) -> Agent:
+def build_agent(model_name: str, settings: Settings | None = None, *, no_retries: bool = False) -> Agent:
     """Construct the agent bound to a specific model."""
     cfg = require_openai(settings)
-    client = AsyncOpenAI(api_key=cfg.openai_api_key, timeout=cfg.openai_timeout_seconds)
+    client = AsyncOpenAI(api_key=cfg.openai_api_key, timeout=cfg.openai_timeout_seconds,
+                         **({"max_retries": 0} if no_retries else {}))
     return Agent(
         name=AGENT_NAME,
         instructions=SYSTEM_PROMPT,
@@ -69,6 +71,7 @@ async def run_job_match(
     job: dict[str, Any],
     pre_analysis: dict[str, Any],
     settings: Settings | None = None,
+    no_retries: bool = False,
 ) -> JobMatchResult:
     """Run one analysis. Returns the typed result or raises an ``AppError``."""
     cfg = require_openai(settings)
@@ -86,7 +89,7 @@ async def run_job_match(
         pre_analysis=pre_analysis,
     )
 
-    agent = build_agent(model_name, cfg)
+    agent = build_agent(model_name, cfg, **({"no_retries": True} if no_retries else {}))
     started = time.perf_counter()
     try:
         result = await Runner.run(
@@ -97,16 +100,27 @@ async def run_job_match(
             run_config=RunConfig(tracing_disabled=True, workflow_name="job-match"),
         )
     except Exception as exc:  # noqa: BLE001 - normalised into a 502 for the UI
+        classification = classify_openai_error(exc)
         log_event(
             logger,
             "analysis.upstream_failed",
             model=model_name,
             error=type(exc).__name__,
+            category=classification.category,
+            http_status=classification.http_status,
+            error_code=classification.error_code,
+            request_id=classification.request_id,
             elapsed_ms=int((time.perf_counter() - started) * 1000),
         )
         raise UpstreamError(
-            f"调用 OpenAI 失败：{type(exc).__name__}。请检查网络、模型名称与配额后重试。",
-            detail={"model": model_name, "error_type": type(exc).__name__},
+            classification.message,
+            detail={
+                "model": model_name,
+                "category": classification.category,
+                "http_status": classification.http_status,
+                "error_code": classification.error_code,
+                "request_id": classification.request_id,
+            },
         ) from exc
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)

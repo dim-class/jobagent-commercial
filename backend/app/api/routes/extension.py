@@ -15,6 +15,7 @@ but it makes the boundary an assertion rather than a deployment assumption.
 from __future__ import annotations
 
 import ipaddress
+import json
 
 from fastapi import APIRouter, Body, Depends, Request
 from sqlalchemy.orm import Session
@@ -30,14 +31,45 @@ from app.schemas.extension import (
     PreviewRow,
 )
 from app.services import extension_intake
+from app.services.salary_ocr import recognize_salary, MAX_IMAGE_BYTES
+from starlette.concurrency import run_in_threadpool
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/extension", tags=["extension"])
+
+
+@router.post("/salary-ocr")
+async def salary_ocr(request: Request) -> dict:
+    """Only an in-memory salary crop, bounded before JSON decoding; never persist it."""
+    require_loopback(request)
+    # Reject web-page callers. Chrome extension requests and local tools only.
+    origin = request.headers.get("origin", "")
+    if origin and not re_extension_origin(origin):
+        raise ForbiddenError("薪资识别仅允许本机扩展调用。")
+    from app.core.errors import ValidationError
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > MAX_IMAGE_BYTES * 4 // 3 + 1024:
+            raise ValidationError("薪资截图过大。")
+    try:
+        payload = json.loads(body)
+        if not isinstance(payload, dict) or set(payload) != {"image"} or not isinstance(payload["image"], str):
+            raise ValueError("invalid_payload")
+        return await run_in_threadpool(recognize_salary, payload["image"])
+    except (ValueError, TypeError):
+        raise ValidationError("需要有效的小幅 PNG 薪资截图。") from None
+
+
+def re_extension_origin(origin: str) -> bool:
+    import re
+    return re.fullmatch(r"chrome-extension://[a-p]{32}", origin) is not None
 
 STATUS_LABEL = {
     "new": "新岗位",
     "duplicate": "已存在",
     "incomplete": "信息不足",
+    "excluded": "已排除",
 }
 
 
@@ -79,10 +111,11 @@ def preview(
     require_loopback(request)
 
     rows: list[PreviewRow] = []
-    counts = {"new": 0, "duplicate": 0, "incomplete": 0}
+    counts = {"new": 0, "duplicate": 0, "incomplete": 0, "excluded": 0}
+    policy = extension_intake.early_career_policy_for_task(db, payload.task_id)
 
     for index, candidate in enumerate(payload.candidates):
-        verdict = extension_intake.inspect(db, candidate)
+        verdict = extension_intake.inspect(db, candidate, early_career_policy=policy)
         counts[verdict.status] += 1
         rows.append(
             PreviewRow(
@@ -93,6 +126,7 @@ def preview(
                 status_label=STATUS_LABEL[verdict.status],
                 existing_job_id=verdict.existing_job_id,
                 blocking_fields=verdict.blocking_fields,
+                enrichable_fields=verdict.enrichable_fields,
                 warnings=verdict.warnings + list(candidate.warnings),
             )
         )
@@ -122,6 +156,7 @@ def preview(
         new_count=counts["new"],
         duplicate_count=counts["duplicate"],
         incomplete_count=counts["incomplete"],
+        excluded_count=counts["excluded"],
         rows=rows,
         warnings=warnings,
         message="这是预览结果，什么都还没有保存。要保存请对具体岗位点「导入」。",
@@ -149,7 +184,10 @@ def import_job(
             "需要明确确认后才能导入岗位。", detail={"field": "confirmed"}
         )
 
-    outcome = extension_intake.import_one(db, payload.candidate)
+    policy = extension_intake.early_career_policy_for_task(db, payload.task_id)
+    outcome = extension_intake.import_one(
+        db, payload.candidate, early_career_policy=policy
+    )
     job = outcome.job
 
     return ImportResponse(

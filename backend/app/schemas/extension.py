@@ -12,7 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 PageType = Literal["search", "detail", "unsupported"]
-CandidateStatus = Literal["new", "duplicate", "incomplete"]
+CandidateStatus = Literal["new", "duplicate", "incomplete", "excluded"]
 
 
 class ExtensionJobCandidate(BaseModel):
@@ -43,6 +43,7 @@ class PreviewRequest(BaseModel):
     page_type: PageType = "unsupported"
     page_url: str | None = Field(default=None, max_length=1024)
     candidates: list[ExtensionJobCandidate] = Field(default_factory=list, max_length=60)
+    task_id: int | None = Field(default=None, gt=0)
 
 
 class PreviewRow(BaseModel):
@@ -57,6 +58,9 @@ class PreviewRow(BaseModel):
     existing_job_id: int | None = None
     #: Fields that would have to be filled in before an import can succeed.
     blocking_fields: list[str] = Field(default_factory=list)
+    #: Missing optional fields that a confirmed duplicate import can safely
+    #: fill without overwriting existing data.
+    enrichable_fields: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -67,6 +71,7 @@ class PreviewResponse(BaseModel):
     new_count: int = 0
     duplicate_count: int = 0
     incomplete_count: int = 0
+    excluded_count: int = 0
     rows: list[PreviewRow] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     message: str = ""
@@ -77,6 +82,7 @@ class ImportRequest(BaseModel):
 
     confirmed: bool = Field(default=False, description="必须为 true —— 导入是明确的人工动作")
     candidate: ExtensionJobCandidate
+    task_id: int | None = Field(default=None, gt=0)
 
 
 class ImportResponse(BaseModel):

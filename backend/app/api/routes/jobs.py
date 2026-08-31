@@ -29,6 +29,8 @@ from app.schemas.analysis import (
     AnalysisResponse,
     AnalyzeRequest,
     BatchAnalyzeItem,
+    BatchAnalyzePlanRequest,
+    BatchAnalyzePlanResponse,
     BatchAnalyzeRequest,
     BatchAnalyzeResponse,
 )
@@ -42,8 +44,15 @@ from app.schemas.job import (
     JobListResponse,
     JobUpdate,
 )
-from app.services import application_workflow, job_intake, job_matcher, resume_comparison
+from app.services import (
+    application_workflow,
+    job_intake,
+    job_matcher,
+    resume_comparison,
+    task_matching,
+)
 from app.services.application_cycles import effective_cycle
+from app.services.job_eligibility import classify_non_experienced_track
 from app.services.job_normalizer import normalize_city
 
 logger = get_logger(__name__)
@@ -137,12 +146,21 @@ def list_jobs(
     job_status: JobStatus | None = Query(default=None, alias="status"),
     keyword: str | None = Query(default=None, description="公司/职位/JD 关键词"),
     analyzed: bool | None = Query(default=None, description="是否已分析"),
+    early_career_cleanup: bool = Query(
+        default=False,
+        description="只列出尚未决定、且被确定性规则识别为应届/校招/实习的历史岗位",
+    ),
     sort: str = Query(default="score", pattern="^(score|created_at|company)$"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> JobListResponse:
     """Filterable job list. Score filtering uses each job's latest analysis."""
     stmt = select(Job).options(selectinload(Job.analyses))
+    # Facets drive the city/status dropdowns, so they are counted over the rows
+    # matching everything *except* those two dimensions. Counting them over the
+    # already-filtered rows leaves each menu holding only the value you picked,
+    # with no way back to the others.
+    facet_stmt = select(Job)
 
     if city:
         normalized = normalize_city(city)
@@ -151,19 +169,29 @@ def list_jobs(
         stmt = stmt.where(Job.status == job_status)
     if keyword:
         like = f"%{keyword.strip()}%"
-        stmt = stmt.where(
-            or_(
-                Job.title.ilike(like),
-                Job.company.ilike(like),
-                Job.normalized_description.ilike(like),
-            )
+        matches_keyword = or_(
+            Job.title.ilike(like),
+            Job.company.ilike(like),
+            Job.normalized_description.ilike(like),
         )
+        stmt = stmt.where(matches_keyword)
+        facet_stmt = facet_stmt.where(matches_keyword)
 
     jobs = list(db.scalars(stmt).unique())
 
     # Score/verdict/analyzed filters need the latest analysis per job, which is
     # cheap to resolve in Python at local-first data volumes (hundreds of rows).
     rows = [(job, _pick_latest(job)) for job in jobs]
+    if early_career_cleanup:
+        open_statuses = {JobStatus.new, JobStatus.reviewed, JobStatus.saved}
+        rows = [
+            (job, analysis)
+            for job, analysis in rows
+            if job.status in open_statuses
+            and not classify_non_experienced_track(
+                job.title, job.normalized_description
+            ).eligible
+        ]
     if analyzed is not None:
         rows = [(j, a) for j, a in rows if (a is not None) == analyzed]
     if min_score is not None:
@@ -183,7 +211,7 @@ def list_jobs(
 
     cities: dict[str, int] = {}
     statuses: dict[str, int] = {}
-    for job in jobs:
+    for job in db.scalars(facet_stmt).unique():
         if job.city:
             cities[job.city] = cities.get(job.city, 0) + 1
         statuses[job.status.value] = statuses.get(job.status.value, 0) + 1
@@ -241,6 +269,62 @@ def create_job(payload: JobCreate, db: Session = Depends(get_db)) -> JobCreateRe
 # --------------------------------------------------------------------------
 
 
+@router.post("/analyze-batch/plan", response_model=BatchAnalyzePlanResponse)
+def analyze_batch_plan(
+    payload: BatchAnalyzePlanRequest, db: Session = Depends(get_db)
+) -> BatchAnalyzePlanResponse:
+    """What analyzing these exact jobs would cost. Pure read - spends nothing.
+
+    Reuses ``task_matching.plan_jobs``: the same active resume, the same fast
+    model and the same ``JobAnalysis`` cache key the batch run itself uses, so
+    the numbers shown before the confirmation are the numbers that will apply.
+    """
+    settings = get_settings()
+    limit = settings.max_analyses_per_run
+
+    seen: set[int] = set()
+    ordered: list[int] = []
+    for job_id in payload.job_ids:
+        if job_id not in seen:
+            seen.add(job_id)
+            ordered.append(job_id)
+
+    found = {
+        job.id: job
+        for job in db.scalars(select(Job).where(Job.id.in_(ordered))).unique()
+    } if ordered else {}
+    jobs = [found[job_id] for job_id in ordered if job_id in found]
+    missing = [job_id for job_id in ordered if job_id not in found]
+
+    # ``analyze_batch`` truncates to the cap, so the plan reports cache state
+    # for exactly the prefix that batch would process.
+    in_batch = jobs[:limit]
+    resume, model, plans = task_matching.plan_jobs(db, in_batch, settings=settings)
+    pending = sum(1 for plan in plans if plan.needs_api_call)
+
+    log_event(
+        logger,
+        "analysis.batch_planned",
+        selected=len(jobs),
+        in_batch=len(in_batch),
+        cached=len(plans) - pending,
+        pending=pending,
+        limit=limit,
+    )
+    return BatchAnalyzePlanResponse(
+        selected=len(jobs),
+        limit=limit,
+        in_batch=len(in_batch),
+        deferred=len(jobs) - len(in_batch),
+        cached=len(plans) - pending,
+        pending=pending,
+        model=model,
+        resume_id=resume.id,
+        resume_name=resume.display_name,
+        missing_job_ids=missing,
+    )
+
+
 @router.post("/analyze-batch", response_model=BatchAnalyzeResponse)
 async def analyze_batch(
     payload: BatchAnalyzeRequest, db: Session = Depends(get_db)
@@ -250,7 +334,9 @@ async def analyze_batch(
     limit = settings.max_analyses_per_run
 
     if payload.job_ids:
-        job_ids = payload.job_ids
+        # Same de-duplication the plan endpoint applies, so the confirmed
+        # numbers and the executed run describe the same set of jobs.
+        job_ids = list(dict.fromkeys(payload.job_ids))
     else:
         candidates = list(db.scalars(select(Job).options(selectinload(Job.analyses))).unique())
         job_ids = [j.id for j in candidates if payload.force or _pick_latest(j) is None]

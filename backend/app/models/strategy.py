@@ -27,7 +27,7 @@ from app.models.enums import RecommendationDecision, StrategyChangeSource
 
 
 class CareerStrategyChange(Base):
-    """One recorded edit to ``config/career_strategy.yaml``."""
+    """One recorded edit to the per-user ``data/career_strategy.yaml``."""
 
     __tablename__ = "career_strategy_changes"
 

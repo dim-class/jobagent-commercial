@@ -133,6 +133,24 @@ p { margin: 0 0 8px; }
 .sidebar-footer { margin-top: auto; font-size: 11px; color: var(--text-faint); padding: 0 8px; }
 .sidebar-footer div + div { margin-top: 3px; }
 
+.nav-more {
+  margin-top: 4px;
+}
+.nav-more summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 9px 12px;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  user-select: none;
+}
+.nav-more summary::-webkit-details-marker { display: none; }
+.nav-more summary::after { content: '›'; float: right; transition: transform 0.15s ease; }
+.nav-more[open] summary::after { transform: rotate(90deg); }
+.nav-more summary:hover { background: var(--surface-2); color: var(--text); }
+.nav-more-links { margin-top: 3px; padding-left: 6px; }
+
 .content { padding: 26px 30px 60px; max-width: 1280px; width: 100%; }
 
 .page-head {

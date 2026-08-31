@@ -140,10 +140,11 @@ export default function SettingsPage() {
         <ul className="bullet-list">
           <li>OpenAI API Key 只存在于后端进程，不写入数据库、不返回给前端、不打印到日志。</li>
           <li>
-            <code className="mono">AUTO_APPLY</code> 恒为 false：v0.1 不做自动投递，也不自动发送招呼语。
+            不存在全局自动投递模式。M6 只允许一个岗位经双重人工确认后尝试一次首次招呼；
+            不批量、不后台、不自动重试，也不发送任何后续消息。
           </li>
           <li>不绕过验证码、反爬机制、登录保护或频率限制；不保存招聘网站账号密码。</li>
-          <li>AI 只负责推荐，投递与沟通全部由本人确认后手动完成。</li>
+          <li>AI 只负责推荐，绝不能生成确认或触发投递；每个 M6 动作都必须由本人逐岗位最终确认。</li>
           <li>简历原文保存在本机 SQLite 中；调用模型时只发送结构化摘要与必要节选。</li>
         </ul>
       </Card>

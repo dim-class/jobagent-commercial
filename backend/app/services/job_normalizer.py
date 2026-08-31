@@ -16,6 +16,8 @@ import re
 from dataclasses import dataclass
 
 from app.services.hashing import job_content_hash
+from app.services.salary_text import sanitize_salary_text
+from app.services.urls import canonical_url
 
 # Targeted, lossless-in-meaning substitutions for the glyphs that routinely
 # show up when a JD is copied out of a recruiting site.
@@ -151,7 +153,9 @@ def normalize_job(
         company=norm_company,
         title=norm_title,
         city=normalize_city(city),
-        salary_text=normalize_field(salary_text),
+        # A salary made of obfuscated-font placeholders is not a salary: it is
+        # dropped here so it never reaches the database (see salary_text.py).
+        salary_text=sanitize_salary_text(normalize_field(salary_text)),
         experience_text=normalize_field(experience_text),
         education_text=normalize_field(education_text),
         raw_description=raw_description or "",
@@ -159,5 +163,8 @@ def normalize_job(
         content_hash=job_content_hash(
             company=norm_company, title=norm_title, normalized_description=norm_desc
         ),
-        source_url=normalize_field(source_url, max_len=1024),
+        # Every intake path, not just the extension's: `canonical_url` promises
+        # the query never reaches storage, and BOSS puts `lid`/`securityId`
+        # there. A manually pasted URL used to keep them.
+        source_url=canonical_url(normalize_field(source_url, max_len=1024)),
     )

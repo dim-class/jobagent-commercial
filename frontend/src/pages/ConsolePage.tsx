@@ -1,7 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { ApiError, api } from '@/api/client'
+import { nextMatchResult } from '@/pages/matchResultLifecycle'
+import AutoMatchReviewPanel from '@/pages/AutoMatchReviewPanel'
+import ConsoleSearchPanel from '@/pages/ConsoleSearchPanel'
+import CrossTaskMatchPanel from '@/pages/CrossTaskMatchPanel'
+import SalaryBackfillPanel from '@/pages/SalaryBackfillPanel'
 import {
   Alert,
   Card,
@@ -19,7 +24,11 @@ import type {
   ResumeListItem,
   TaskCandidateOut,
   TaskCreatePayload,
+  TaskMatchOutcomeOut,
+  TaskMatchPlanOut,
+  TaskMatchRunResponse,
   TaskOut,
+  Verdict,
 } from '@/types'
 
 const EVENT_TYPE_LABEL: Record<OrchestrationEventType, string> = {
@@ -51,11 +60,24 @@ function trimmedOrNull(value: string | null | undefined): string | null {
   return trimmed ? trimmed : null
 }
 
+/** Appends only the safe classification fields the backend already vetted
+ * (category / HTTP status / error code / request id) - never anything else
+ * from the outcome. */
+function describeMatchError(outcome: TaskMatchOutcomeOut): string {
+  const extras: string[] = []
+  if (outcome.category) extras.push(`分类：${outcome.category}`)
+  if (outcome.http_status != null) extras.push(`状态码：${outcome.http_status}`)
+  if (outcome.error_code) extras.push(`错误码：${outcome.error_code}`)
+  if (outcome.request_id) extras.push(`请求ID：${outcome.request_id}`)
+  return extras.length ? `${outcome.error}（${extras.join(' · ')}）` : outcome.error ?? ''
+}
+
 export default function ConsolePage() {
   const [tasks, setTasks] = useState<TaskOut[]>([])
   const [tasksLoading, setTasksLoading] = useState(true)
   const [resumes, setResumes] = useState<ResumeListItem[]>([])
   const [feedback, setFeedback] = useState<Feedback>(null)
+  const [showAdvancedConsole, setShowAdvancedConsole] = useState(false)
 
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null)
   const [candidates, setCandidates] = useState<TaskCandidateOut[] | null>(null)
@@ -78,6 +100,52 @@ export default function ConsolePage() {
   const [attention, setAttention] = useState<ConsoleAttentionOut | null>(null)
   const [attentionLoading, setAttentionLoading] = useState(true)
   const [attentionError, setAttentionError] = useState<string | null>(null)
+
+  // M5a: explicit, task-scoped candidate matching. Plan is a pure read; a
+  // second explicit click confirms the exact pending-call count before any
+  // model is called. Never triggered on load or on task completion.
+  const [matchPlan, setMatchPlan] = useState<TaskMatchPlanOut | null>(null)
+  const [matchPlanLoading, setMatchPlanLoading] = useState(false)
+  const [matchRunning, setMatchRunning] = useState(false)
+  const [matchResult, setMatchResult] = useState<TaskMatchRunResponse | null>(null)
+  const [onlyAboveMinScore, setOnlyAboveMinScore] = useState(false)
+
+  async function handlePlanMatch(taskId: number) {
+    // A read-only plan refresh never clears `matchResult` (see
+    // `nextMatchResult`'s `plan-refresh` case) - `handleConfirmMatch` calls
+    // this right after a run, and the just-completed result must survive it.
+    // `matchResult` is invalidated explicitly instead, wherever it actually
+    // goes stale: `selectTask` and `handleAssociate`.
+    setMatchResult((current) => nextMatchResult(current, { type: 'plan-refresh' }) as typeof current)
+    setMatchPlanLoading(true)
+    try {
+      const plan = await api.getTaskMatchPlan(taskId)
+      setMatchPlan(plan)
+    } catch (err) {
+      setFeedback({ tone: 'error', text: err instanceof ApiError ? err.message : '生成匹配计划失败' })
+      setMatchPlan(null)
+    } finally {
+      setMatchPlanLoading(false)
+    }
+  }
+
+  async function handleConfirmMatch(taskId: number) {
+    setMatchRunning(true)
+    try {
+      const result = await api.runTaskMatch(taskId, true)
+      setMatchResult(nextMatchResult(null, { type: 'confirm-success', result }) as typeof result)
+      setFeedback({
+        tone: result.failed ? 'warn' : 'success',
+        text: `已分析 ${result.analyzed} 个，失败 ${result.failed} 个`,
+      })
+      await loadCandidates(taskId)
+      await handlePlanMatch(taskId)
+    } catch (err) {
+      setFeedback({ tone: 'error', text: err instanceof ApiError ? err.message : '执行匹配分析失败' })
+    } finally {
+      setMatchRunning(false)
+    }
+  }
 
   const loadAttention = useCallback(async () => {
     setAttentionLoading(true)
@@ -138,13 +206,103 @@ export default function ConsolePage() {
     }
   }, [])
 
+  // The candidate panels render far below the search form, so selecting a task
+  // used to look like nothing happened. Scroll after the panel actually exists.
+  const selectedTaskRef = useRef<HTMLDivElement | null>(null)
+  const scrollToSelection = useRef(false)
+
+  useEffect(() => {
+    if (!scrollToSelection.current || !selectedTaskRef.current) return
+    scrollToSelection.current = false
+    selectedTaskRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [selectedTaskId])
+
   function selectTask(taskId: number) {
+    scrollToSelection.current = true
     setSelectedTaskId(taskId)
     setJobResults(null)
     setJobKeyword('')
+    setMatchPlan(null)
+    setMatchResult((current) => nextMatchResult(current, { type: 'task-changed' }) as typeof current)
     void loadCandidates(taskId)
     void loadEvents(taskId)
   }
+
+  /** Each candidate's *latest* reviewed/dismissed outcome - events are
+   * oldest-first, task-level events (`job_id === null`) never count toward
+   * any candidate, and a repeated click on the same button must not inflate
+   * the count: only the most recent reviewed/dismissed event per candidate
+   * decides its current outcome. */
+  function latestReviewOutcome(jobId: number): 'reviewed' | 'dismissed' | null {
+    let latest: 'reviewed' | 'dismissed' | null = null
+    for (const e of events ?? []) {
+      if (e.job_id !== jobId) continue
+      if (e.event_type === 'reviewed' || e.event_type === 'dismissed') latest = e.event_type
+    }
+    return latest
+  }
+
+  const candidateJobIds = candidates?.map((c) => c.job_id) ?? []
+  const reviewedCount = events
+    ? candidateJobIds.filter((id) => latestReviewOutcome(id) === 'reviewed').length
+    : 0
+  const dismissedCount = events
+    ? candidateJobIds.filter((id) => latestReviewOutcome(id) === 'dismissed').length
+    : 0
+
+  /** M5a review-fix item 2: once a match plan exists, score/verdict/cache
+   * status must come from *that* plan's active-resume + fast-model result -
+   * never an unrelated "latest analysis" that might be a different resume
+   * variant or the smart model. Before a plan exists, fall back to the
+   * job's existing analysis, labeled honestly as such. */
+  const planByJobId = new Map(matchPlan?.candidates.map((c) => [c.job_id, c]) ?? [])
+
+  function scoreInfo(candidate: TaskCandidateOut): {
+    score: number | null
+    verdict: Verdict | null
+    cached: boolean | null
+    fromPlan: boolean
+  } {
+    const planEntry = planByJobId.get(candidate.job_id)
+    if (planEntry) {
+      return {
+        score: planEntry.overall_score,
+        verdict: planEntry.verdict,
+        cached: planEntry.cached,
+        fromPlan: true,
+      }
+    }
+    return {
+      score: candidate.analysis?.overall_score ?? null,
+      verdict: candidate.analysis?.verdict ?? null,
+      cached: null,
+      fromPlan: false,
+    }
+  }
+
+  const analyzedCount = candidates
+    ? candidates.filter((c) => (matchPlan ? scoreInfo(c).cached : c.analysis)).length
+    : 0
+  const pendingCount = (candidates?.length ?? 0) - analyzedCount
+
+  const sortedCandidates = candidates
+    ? [...candidates].sort((a, b) => {
+        const aScore = scoreInfo(a).score
+        const bScore = scoreInfo(b).score
+        if (aScore == null && bScore == null) return 0
+        if (aScore == null) return 1 // unanalyzed last
+        if (bScore == null) return -1
+        return bScore - aScore // score-desc
+      })
+    : null
+  const visibleCandidates =
+    sortedCandidates && onlyAboveMinScore && selectedTaskId
+      ? sortedCandidates.filter((c) => {
+          const task = tasks.find((t) => t.id === selectedTaskId)
+          if (!task?.min_score) return true
+          return (scoreInfo(c).score ?? -1) >= task.min_score
+        })
+      : sortedCandidates
 
   /** Only ever called from an explicit button click - never on mount/select/poll. */
   async function handleRecordEvent(
@@ -226,6 +384,12 @@ export default function ConsolePage() {
     try {
       await api.addTaskCandidate(selectedTaskId, job.id)
       setFeedback({ tone: 'success', text: `已将「${job.title}」关联到当前任务` })
+      // M5a review-fix item 1: the candidate set just changed, so any
+      // previously displayed plan (its total/pending count, and which job
+      // each row's score came from) is stale - never let a confirm click
+      // use a call count that no longer matches reality.
+      setMatchPlan(null)
+      setMatchResult((current) => nextMatchResult(current, { type: 'task-changed' }) as typeof current)
       await loadCandidates(selectedTaskId)
     } catch (err) {
       setFeedback({ tone: 'error', text: err instanceof ApiError ? err.message : '关联岗位失败' })
@@ -241,20 +405,32 @@ export default function ConsolePage() {
     <>
       <header className="page-head">
         <div>
-          <h1>求职任务控制台</h1>
+          <h1>搜索适合我的岗位</h1>
           <p>
-            先设定一个任务的搜索条件，再把你在其他渠道找到的岗位关联进来集中查看。
-            控制台本身不搜索、不抓取、不投递 —— 岗位仍然通过快速采集 / 浏览器采集 /
-            插件等现有方式进入系统。
+            只需选择意向城市和岗位数量；JobAgent 会从当前简历策略选择岗位方向并有限搜索。
           </p>
         </div>
       </header>
+
+      <ConsoleSearchPanel onSelect={id => { void loadTasks(); selectTask(id) }} />
+
+      <div className="row mb-1">
+        <Link className="btn btn-primary" to="/jobs">查看岗位库</Link>
+        <button type="button" className="btn-sm" aria-expanded={showAdvancedConsole}
+          onClick={() => setShowAdvancedConsole(current => !current)}>
+          {showAdvancedConsole ? '收起更多功能' : '更多功能'}
+        </button>
+      </div>
 
       {feedback ? (
         <Alert tone={feedback.tone} onDismiss={() => setFeedback(null)}>
           {feedback.text}
         </Alert>
       ) : null}
+
+      {showAdvancedConsole ? <>
+      <SalaryBackfillPanel />
+      <CrossTaskMatchPanel />
 
       <Card
         title="待处理事项"
@@ -605,7 +781,8 @@ export default function ConsolePage() {
       </Card>
 
       {selectedTask ? (
-        <>
+        <div ref={selectedTaskRef}>
+          <AutoMatchReviewPanel key={selectedTask.id} taskId={selectedTask.id} />
           <Card
             title={`关联已有岗位 - ${selectedTask.name}`}
             sub="从已经采集到系统里的岗位中选择，不会新建或抓取任何岗位"
@@ -678,7 +855,11 @@ export default function ConsolePage() {
 
           <Card
             title={`候选人 - ${selectedTask.name}`}
-            sub={candidatesLoading ? '加载中…' : `${candidates?.length ?? 0} 个候选人`}
+            sub={
+              candidatesLoading
+                ? '加载中…'
+                : `${candidates?.length ?? 0} 个候选人 · 已分析 ${analyzedCount} · 待分析 ${pendingCount} · 已复核 ${reviewedCount} · 已忽略 ${dismissedCount}`
+            }
             actions={
               <button
                 type="button"
@@ -692,12 +873,70 @@ export default function ConsolePage() {
               </button>
             }
           >
+            <div className="card-block">
+              <div className="btn-row">
+                <button
+                  type="button"
+                  className="btn-sm"
+                  disabled={matchPlanLoading}
+                  onClick={() => void handlePlanMatch(selectedTask.id)}
+                >
+                  {matchPlanLoading ? '生成中…' : '生成匹配计划'}
+                </button>
+                {selectedTask.min_score != null && (
+                  <label className="checkbox small">
+                    <input
+                      type="checkbox"
+                      checked={onlyAboveMinScore}
+                      onChange={(e) => setOnlyAboveMinScore(e.target.checked)}
+                    />
+                    只看不低于任务最低分（{selectedTask.min_score}）
+                  </label>
+                )}
+              </div>
+              {matchPlan && (
+                <div className="small faint mt-1">
+                  简历：{matchPlan.active_resume_name} · 模型：{matchPlan.model} · 共{' '}
+                  {matchPlan.total_candidates} 个候选人 · 本次将分析 {matchPlan.pending_analyses} 个
+                  {matchPlan.pending_total > matchPlan.pending_analyses
+                    ? `（尚有 ${matchPlan.pending_total - matchPlan.pending_analyses} 个需再次确认，上限 ${matchPlan.cap}）`
+                    : ''}
+                  {matchPlan.pending_analyses > 0 ? (
+                    <div className="mt-1">
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        disabled={matchRunning}
+                        onClick={() => void handleConfirmMatch(selectedTask.id)}
+                      >
+                        {matchRunning
+                          ? '正在分析…'
+                          : `确认分析这 ${matchPlan.pending_analyses} 个（可能产生 API 费用）`}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="mt-1">全部候选人已有缓存分析，无需再次确认。</div>
+                  )}
+                </div>
+              )}
+              {matchResult && (
+                <div className="small faint mt-1">
+                  上次执行：已分析 {matchResult.analyzed} 个，失败 {matchResult.failed} 个
+                  {matchResult.results.some((r) => r.error)
+                    ? ` · 错误：${matchResult.results
+                        .filter((r) => r.error)
+                        .map((r) => `#${r.job_id} ${describeMatchError(r)}`)
+                        .join('；')}`
+                    : ''}
+                </div>
+              )}
+            </div>
             {candidatesLoading ? (
               <Loading />
-            ) : !candidates || candidates.length === 0 ? (
+            ) : !visibleCandidates || visibleCandidates.length === 0 ? (
               <EmptyState
                 icon="📭"
-                title="这个任务下还没有候选人"
+                title={candidates && candidates.length > 0 ? '没有符合筛选条件的候选人' : '这个任务下还没有候选人'}
                 text="在上面搜索并关联已经采集到岗位库里的岗位。"
               />
             ) : (
@@ -715,10 +954,16 @@ export default function ConsolePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {candidates.map((candidate) => (
+                    {visibleCandidates.map((candidate) => {
+                      const info = scoreInfo(candidate)
+                      const review = latestReviewOutcome(candidate.job_id)
+                      return (
                       <tr key={candidate.job_id}>
                         <td className="nowrap">
-                          <ScoreBadge score={candidate.analysis?.overall_score ?? null} />
+                          <ScoreBadge score={info.score} />
+                          {!info.fromPlan && info.score != null ? (
+                            <div className="small faint">现有分析（非本次计划）</div>
+                          ) : null}
                         </td>
                         <td>
                           <div className="cell-title">
@@ -729,10 +974,13 @@ export default function ConsolePage() {
                         <td className="nowrap">{candidate.city ?? '—'}</td>
                         <td className="nowrap">{candidate.salary_text ?? '—'}</td>
                         <td className="nowrap">
-                          <VerdictBadge verdict={candidate.analysis?.verdict ?? null} />
+                          <VerdictBadge verdict={info.verdict} />
                         </td>
                         <td className="nowrap">
                           <StatusBadge status={candidate.status} />
+                          {review ? (
+                            <div className="small faint">{EVENT_TYPE_LABEL[review]}</div>
+                          ) : null}
                         </td>
                         <td className="nowrap">
                           <div className="btn-row">
@@ -775,7 +1023,8 @@ export default function ConsolePage() {
                           </div>
                         </td>
                       </tr>
-                    ))}
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -824,8 +1073,9 @@ export default function ConsolePage() {
               </ul>
             )}
           </Card>
-        </>
+        </div>
       ) : null}
+      </> : null}
     </>
   )
 }

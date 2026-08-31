@@ -30,6 +30,23 @@ _ASSIGNMENT_RE = re.compile(
 )
 # A bare ``Bearer <token>`` with no field name in front of it.
 _BEARER_RE = re.compile(r"(?i)\b(bearer|basic)\s+([A-Za-z0-9._\-+/=]{8,})")
+# A ``kv`` field *name* that means "this whole value is a credential" -
+# regardless of what the value looks like. Catches e.g. ``api_key="plain
+# text"`` or a nested ``{"token": "plain text"}``, which the value-shape
+# regexes above would never flag on their own.
+#
+# Matched as *whole segments* (split on non-alphanumerics), never a bare
+# substring - `token` alone would otherwise also flag a perfectly safe
+# `tokens_used` usage counter, which must survive redaction untouched.
+_CREDENTIAL_FIELD_WORDS = {"apikey", "key", "secret", "token", "authorization", "password"}
+_FIELD_SEGMENT_RE = re.compile(r"[^A-Za-z0-9]+")
+
+
+def _is_credential_field(key: object) -> bool:
+    if not isinstance(key, str):
+        return False
+    segments = (seg.lower() for seg in _FIELD_SEGMENT_RE.split(key) if seg)
+    return any(seg in _CREDENTIAL_FIELD_WORDS for seg in segments)
 
 
 def redact(message: str) -> str:
@@ -40,8 +57,49 @@ def redact(message: str) -> str:
     return scrubbed
 
 
+def _scrub_kv_value(key: object, value: Any) -> Any:
+    """Recursively scrub one ``log_event`` keyword value.
+
+    The credential-name check on ``key`` runs *before* any recursion: a
+    credential-named field (``api_key``, ``token``, a nested ``authorization``,
+    ...) is replaced wholesale, container or not - e.g.
+    ``authorization={"bearer": "..."}`` must be redacted as a whole because
+    ``authorization`` itself is the credential-named field, regardless of what
+    its nested keys are named. Checking the key only *after* already having
+    recursed into a dict/list value (the previous ordering) would miss this
+    exact shape, since the outer field name is never re-examined once nested.
+
+    Every other, non-credential-named field still recurses into dicts/lists
+    so a *nested* field name is caught by its own key, and a plain string
+    still goes through ``redact()`` for an embedded credential-shaped
+    substring. Nested dict keys are not always strings (e.g. an int-keyed
+    mapping) - ``_is_credential_field`` treats a non-string key as "not a
+    credential name" rather than raising.
+    """
+    if _is_credential_field(key):
+        return _REDACTED
+    if isinstance(value, dict):
+        return {k: _scrub_kv_value(k, v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return type(value)(_scrub_kv_value(key, v) for v in value)
+    if isinstance(value, str):
+        return redact(value)
+    return value
+
+
 class _RedactFilter(logging.Filter):
-    """Last line of defence against a secret reaching stdout."""
+    """Last line of defence against a secret reaching stdout.
+
+    Scrubs both the base message and every ``kv`` value ``log_event``
+    attaches - a filter runs before the formatter builds the final
+    ``key=value`` line, so redacting only ``record.getMessage()`` would leave
+    a secret passed as a keyword argument (e.g. ``log_event(..., api_key=...)``)
+    completely unredacted in the appended ``key=value`` pairs. ``kv`` scrubbing
+    is by *field name* as well as value shape and recurses into nested
+    dicts/lists (see ``_scrub_kv_value``), so ``log_event(..., api_key="plain
+    text", nested={"token": "plain text"})`` is fully redacted even though
+    neither value looks like a credential on its own.
+    """
 
     def filter(self, record: logging.LogRecord) -> bool:
         try:
@@ -52,6 +110,10 @@ class _RedactFilter(logging.Filter):
         if scrubbed != message:
             record.msg = scrubbed
             record.args = ()
+
+        kv = getattr(record, "kv", None)
+        if isinstance(kv, dict):
+            record.kv = {k: _scrub_kv_value(k, v) for k, v in kv.items()}
         return True
 
 
@@ -86,9 +148,22 @@ def ensure_utf8_stdout() -> None:
             pass
 
 
-def setup_logging(level: str = "INFO") -> None:
+def setup_logging(level: str = "INFO", *, force: bool = False) -> None:
+    """Install the app's structured, redacted handler on the root logger.
+
+    Idempotent by default (``_CONFIGURED`` guards a second call from doing
+    anything). ``force=True`` reinstalls it even if already configured -
+    Alembic's ``fileConfig`` (invoked by every migration, including the one
+    ``init_db()`` runs at startup) reconfigures the root logger's own
+    handlers/formatter from ``alembic.ini`` regardless of
+    ``disable_existing_loggers``, which silently drops this formatter and the
+    redaction filter along with it. ``db/migrations.py`` calls this with
+    ``force=True`` right after every migration invocation so a structured,
+    redacted log line survives startup instead of quietly degrading to a
+    plain root ``Formatter`` at ``WARNING``.
+    """
     global _CONFIGURED
-    if _CONFIGURED:
+    if _CONFIGURED and not force:
         return
     ensure_utf8_stdout()
 

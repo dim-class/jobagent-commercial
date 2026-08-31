@@ -16,7 +16,7 @@ inbox, sends a message, or writes ``Job.status``.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Body, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, Query, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -27,6 +27,8 @@ from app.schemas.application import ApplicationEventOut
 from app.schemas.recruiter import (
     AnalysisOut,
     AnalyzeRequest,
+    BossChatScanIn,
+    BossChatScanOut,
     CloseRequest,
     ConversationActionOut,
     ConversationCreate,
@@ -46,6 +48,7 @@ from app.schemas.recruiter import (
     RecruiterMessageOut,
     Sentiment,
 )
+from app.api.routes.extension import ForbiddenError, re_extension_origin, require_loopback
 from app.services import quick_capture, recruiter_conversations as convo
 from app.services import recruiter_message_analyzer as analyzer
 from app.services.timezones import is_local_today, local_now
@@ -68,6 +71,7 @@ def _message_out(message) -> RecruiterMessageOut:  # noqa: ANN001
         conversation_id=message.conversation_id,
         direction=message.direction,
         raw_text=message.raw_text,
+        source_message_id=message.source_message_id,
         source_message_time_text=message.source_message_time_text,
         captured_at=message.captured_at,
         created_at=message.created_at,
@@ -153,6 +157,44 @@ def _detail_out(db: Session, conversation: RecruiterConversation) -> Conversatio
 # --------------------------------------------------------------------------
 # inbox
 # --------------------------------------------------------------------------
+
+
+@router.post("/boss-current-scan", response_model=BossChatScanOut)
+def import_boss_current_scan(
+    request: Request,
+    payload: BossChatScanIn = Body(...),
+    db: Session = Depends(get_db),
+) -> BossChatScanOut:
+    """Persist one explicit foreground snapshot. Never analyzes or sends."""
+    require_loopback(request)
+    origin = request.headers.get("origin", "")
+    if not origin or not re_extension_origin(origin):
+        raise ForbiddenError("BOSS 当前对话扫描只接受本机 JobAgent 扩展上报。")
+    job = convo.resolve_boss_chat_job(db, payload)
+    if job is None:
+        log_event(
+            logger,
+            "recruiter.boss_chat_skipped",
+            observed=len(payload.messages),
+            reason="job_identity_not_unique",
+        )
+        return BossChatScanOut(
+            matched=False,
+            skipped_reason="岗位身份无法唯一匹配",
+            observed=len(payload.messages),
+            imported=0,
+            duplicates=0,
+            ai_used=False,
+        )
+    resolved_payload = payload.model_copy(update={"job_id": job.id})
+    conversation, imported, duplicates = convo.import_boss_chat_scan(db, resolved_payload)
+    return BossChatScanOut(
+        conversation_id=conversation.id,
+        observed=len(payload.messages),
+        imported=imported,
+        duplicates=duplicates,
+        ai_used=False,
+    )
 
 
 @router.get("", response_model=InboxResponse)

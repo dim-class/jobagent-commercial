@@ -171,6 +171,18 @@ export default function StrategyPage() {
         </Card>
 
         <Card title="经验与薪资偏好">
+          <div className="field">
+            <label htmlFor="candidate-stage">候选人阶段</label>
+            <select id="candidate-stage" value={strategy.early_career_policy}
+              onChange={(e) => patch({
+                early_career_policy: e.target.value as CareerStrategy['early_career_policy'],
+              })}>
+              <option value="exclude">社招 / 有经验（排除应届、校招、实习）</option>
+              <option value="include">两类都看</option>
+              <option value="only">应届 / 在校（只看应届、校招、实习）</option>
+            </select>
+            <div className="field-hint">新搜索任务会保存此设置的快照；修改不会改变已创建任务。</div>
+          </div>
           <div className="field-row">
             <div className="field">
               <label htmlFor="exp-min">偏好最低年限</label>

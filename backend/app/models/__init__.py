@@ -3,6 +3,7 @@
 from app.models.analysis import JobAnalysis
 from app.models.enums import (
     BenefitKey,
+    CLOSED_SEARCH_TASK_RUN_STATUSES,
     DealBreakerKind,
     DealBreakerResult,
     DecisionDimension,
@@ -30,6 +31,7 @@ from app.models.enums import (
     RecommendationDecision,
     RecruiterSource,
     ResumeUsage,
+    SearchTaskRunStatus,
     StrategyChangeSource,
     SupervisedSessionEventType,
     SupervisedSessionStatus,
@@ -63,6 +65,8 @@ from app.models.recruiter import (
     RecruiterMessageAnalysis,
 )
 from app.models.resume import Resume
+from app.models.application_approval import ApplicationApproval
+from app.models.salary_backfill import SalaryBackfillItem, SalaryBackfillRun
 from app.models.strategy import (
     CareerStrategyChange,
     StrategyRecommendationDecision,
@@ -119,6 +123,9 @@ __all__ = [
     "RecruiterMessageAnalysis",
     "RecruiterSource",
     "Resume",
+    "ApplicationApproval",
+    "SalaryBackfillItem",
+    "SalaryBackfillRun",
     "ResumeUsage",
     "StrategyChangeSource",
     "StrategyRecommendationDecision",
@@ -126,6 +133,8 @@ __all__ = [
     "SupervisedSessionEvent",
     "SupervisedSessionEventType",
     "SupervisedSessionStatus",
+    "SearchTaskRunStatus",
+    "CLOSED_SEARCH_TASK_RUN_STATUSES",
     "JobSearchTask",
     "TaskCandidate",
     "TaskMode",

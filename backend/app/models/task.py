@@ -20,14 +20,15 @@ the same task twice a no-op rather than a duplicate row.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin
-from app.models.enums import TaskMode
+from app.models.enums import SearchTaskRunStatus, TaskMode
 
 
 class JobSearchTask(Base, TimestampMixin):
@@ -63,6 +64,76 @@ class JobSearchTask(Base, TimestampMixin):
         default=TaskMode.manual_review_only,
     )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    #: Candidate-stage policy captured when this task is created. It must not
+    #: follow later settings edits while a confirmed runner is in progress.
+    early_career_policy: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="exclude", server_default="exclude"
+    )
+
+    # --- M4e/M4f: SearchPlan + bounded automatic runner (explicitly
+    # authorized - see CLAUDE.md's M4e/M4f amendment). All nullable/defaulted
+    # so every pre-existing manual task is unaffected - see
+    # ``services/search_plan.py`` and ``services/search_task_runner.py``.
+    #: The structured BOSS city code (e.g. "101010100") a SearchPlan task was
+    #: generated for - distinct from the free-text, human-entered ``city``
+    #: above. ``None`` for a manual task.
+    city_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    #: True only for a task ``services/search_plan.py`` generated - one
+    #: city x keyword combination. A manual task (M1) is never flagged this
+    #: way, even if its own ``keywords``/``city`` happen to match one.
+    is_search_plan: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    run_status: Mapped[SearchTaskRunStatus | None] = mapped_column(
+        SAEnum(SearchTaskRunStatus, native_enum=False, length=24), nullable=True
+    )
+    run_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    run_stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: Cumulative across the task's whole life (every run, not reset on
+    #: pause/resume) - unique canonical URLs seen, newly seen, and already-
+    #: known-duplicate, per ``services/search_task_runner.py``.
+    observed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    new_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    duplicate_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    #: Consecutive rounds with zero new candidates in the *current* run only
+    #: - reset to 0 by a resume and by any round that finds something new.
+    #: Reaching the configured threshold (default 3) auto-completes the run.
+    no_new_rounds: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    #: Set only by ``fail_run`` - a short, human-readable reason. Never a
+    #: stack trace, and never page content/tokens.
+    last_error: Mapped[str | None] = mapped_column(String(256), nullable=True)
+
+    # --- M4f: runner observability (explicitly authorized). Narrow, current-
+    # state-only fields the extension reports via ``report_state`` - never a
+    # query string (BOSS session tokens live there), never cookies/storage,
+    # never a full job description. See ``services/search_task_runner.py``.
+    #: The approved tab's current, query-stripped URL - a results or detail
+    #: page, never the raw address bar value.
+    current_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    #: How many bounded scroll rounds this run has performed so far.
+    scroll_round: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    #: How many candidate cards are currently rendered on the results page -
+    #: a live snapshot, not cumulative.
+    visible_jobs: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    #: How many candidates this run actually imported through
+    #: ``job_intake`` - distinct from ``new_count`` (a scroll-round dedup
+    #: tally) since a "new" card can still turn out already-known by the
+    #: time its detail pane is captured.
+    imported_jobs: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    #: The title of whichever candidate the runner is currently opening/
+    #: reading, if any - a job title is not private data.
+    current_candidate: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    #: A short, human-readable label for the runner's most recent step
+    #: (e.g. "opened candidate", "scrolled", "imported"), for the status UI.
+    last_action: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    #: Set only while paused/verification-halted - why (e.g. "verification",
+    #: "user_pause"), distinct from ``last_error`` (an actual failure).
+    paused_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Opt-in cost approval and bounded claim ledger, not a second analysis/job store.
+    match_run_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    match_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
     resume: Mapped["Resume | None"] = relationship()  # noqa: F821
     candidates: Mapped[list["TaskCandidate"]] = relationship(

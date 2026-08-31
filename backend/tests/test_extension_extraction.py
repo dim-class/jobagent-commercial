@@ -650,11 +650,12 @@ async def test_no_cookies_storage_or_forms_are_read(extension_code):
 
 @pytest.mark.asyncio
 async def test_the_extractor_never_submits_or_navigates(extension_code):
-    """No automation beyond the one M4b/M4c-authorized click and the one
-    M4c-authorized bounded scroll below: the human drives the browser
-    everywhere else. `scrollTo`/`scrollBy`/`scrollIntoView` are checked by
-    the two pinned-count tests right below instead of a bare absence check,
-    now that M4c explicitly authorizes exactly one of them."""
+    """No native form submit or self-navigation is hidden in extraction.
+
+    The separately pinned test below permits exactly the M4 navigation click
+    and the M6 per-approval application click. Scroll calls remain pinned by
+    the following test rather than a bare absence assertion.
+    """
     forbidden = (
         ".submit(",
         "location.assign",
@@ -667,19 +668,22 @@ async def test_the_extractor_never_submits_or_navigates(extension_code):
 
 
 @pytest.mark.asyncio
-async def test_the_only_click_is_the_authorized_click_primitive(extension_code):
-    """M4b/M4c (CLAUDE.md "Chrome extension - M4 supervised navigation
-    policy", explicitly authorized) permit exactly one click call site
-    anywhere in the built extraction code: `clickAnchor`, shared by
-    `openCandidateLink` (an already-rendered search-result card's own link)
-    and `activateNextPage` (a same-origin pagination control) - never a
-    second, independent click site. This pins the count, not just the
-    presence, so a second click added anywhere else fails this test."""
-    assert extension_code.count(".click(") == 1, (
-        "exactly one click site is authorized (clickAnchor, shared by "
-        "openCandidateLink and activateNextPage); found a different count"
+async def test_only_the_named_m4_m6_and_m7_click_primitives_exist(extension_code):
+    """Pin the three and only three explicitly authorized click call sites.
+
+    M4 uses `clickAnchor` for supervised card traversal. M6 has one separate
+    call after the background worker has atomically claimed one per-job human
+    approval and the content script has repeated exact identity preflight.
+    M7 adds one bounded conversation-list selection click after explicit human
+    confirmation. A fourth call site fails this test.
+    """
+    assert extension_code.count(".click(") == 3, (
+        "only the named M4 navigation, M6 single-application and M7 chat-list clicks "
+        "are authorized"
     )
     assert "anchor.click()" in extension_code
+    assert "control.node.click()" in extension_code
+    assert "controls[0].click()" in extension_code
 
 
 @pytest.mark.asyncio
@@ -767,3 +771,232 @@ async def test_search_cards_are_refused_by_the_backend(detect, client):
     assert body["detected"] == 3
     assert body["incomplete_count"] == 3
     assert body["new_count"] == 0
+
+
+# --------------------------------------------------------------------------
+# salary integrity - PUA glyph text must never be persisted as a real salary,
+# on a search card exactly as already enforced on a detail pane, and a
+# usable pane salary may fill in for an unusable/missing card salary during
+# the two-phase capture merge.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_search_card_with_an_unusable_salary_never_reports_it_as_real(detect):
+    result = await detect("boss_search_card_pua_salary.html", url=SEARCH_URL)
+    card = result["candidates"][0]
+
+    assert card["salary_text"] is None
+    # Requirement 3: a clear selector diagnostic is retained even though the
+    # value itself is rejected - the node was found, just unusable.
+    assert card["matched_selectors"]["salary_text"] == ".salary"
+    assert "salary_text" in card["missing_fields"]
+    assert any("特殊字体" in w for w in card["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_a_search_card_finds_the_company_in_the_live_boss_info_shape(detect):
+    """Live logged-in Chrome (2026-08): a real search card had no
+    `.company-name` anywhere - the company lived in
+    `a.boss-info > span.boss-name` instead."""
+    result = await detect("boss_search_card_boss_info_company.html", url=SEARCH_URL)
+    card = result["candidates"][0]
+
+    assert card["title"] == "云计算运维工程师"
+    assert card["company"] == "纳新电子"
+    assert card["matched_selectors"]["company"] == "a.boss-info span.boss-name"
+    # The accepted salary-integrity behavior must stay intact alongside this
+    # selector addition - a readable salary, never PUA/placeholder text.
+    assert card["salary_text"] == "20-35K"
+
+
+@pytest.mark.asyncio
+async def test_merge_fills_an_unusable_card_salary_from_a_usable_pane_salary(browser_page, extension_bundle):
+    await _load_fixture(browser_page, extension_bundle, "boss_job_detail.html", url=DETAIL_URL)
+    cached_card = {
+        "title": "云平台工程师",
+        "company": "示例云科技（虚构公司）",
+        "salary_text": "-K",
+        "city": None,
+        "experience_text": None,
+        "education_text": None,
+        "source_url": None,
+        "external_id": None,
+        "matched_selectors": {"salary_text": ".stale-card-salary-node"},
+    }
+    result = await browser_page.evaluate(
+        "([url, canonicalUrl, cachedCard]) => "
+        "BossExtract.captureAndMerge(document, url, canonicalUrl, cachedCard)",
+        [DETAIL_URL, DETAIL_URL, cached_card],
+    )
+
+    assert result["status"] == "ok"
+    assert result["candidate"]["salary_text"] == "25-40K·14薪"
+    # Requirement 3 - the rejected cached selector must not linger and
+    # misleadingly point at the (unusable) card value once the pane's own
+    # usable value has won.
+    assert result["candidate"]["matched_selectors"]["salary_text"] != ".stale-card-salary-node"
+
+
+@pytest.mark.asyncio
+async def test_merge_reports_a_missing_salary_when_both_card_and_pane_are_unusable(browser_page, extension_bundle):
+    await _load_fixture(browser_page, extension_bundle, "boss_job_no_salary.html", url=DETAIL_URL)
+    cached_card = {
+        "title": "SRE 工程师",
+        "company": None,
+        "salary_text": "-K",
+        "city": None,
+        "experience_text": None,
+        "education_text": None,
+        "source_url": None,
+        "external_id": None,
+    }
+    result = await browser_page.evaluate(
+        "([url, canonicalUrl, cachedCard]) => "
+        "BossExtract.captureAndMerge(document, url, canonicalUrl, cachedCard)",
+        [DETAIL_URL, DETAIL_URL, cached_card],
+    )
+
+    assert result["status"] == "ok"
+    assert result["candidate"]["salary_text"] is None
+    assert "salary_text" in result["candidate"]["missing_fields"]
+
+
+# --------------------------------------------------------------------------
+# M6: the application control, against attribute shapes captured read-only
+# from a real logged-in BOSS page (2026-08-31). These are behavioural tests
+# against the built bundle, not source greps.
+# --------------------------------------------------------------------------
+
+
+EXPECTED = {
+    "canonical_url": "https://www.zhipin.com/job_detail/aaa111bbb222~.html",
+    "external_id": "aaa111bbb222~",
+    "title": "云计算运维工程师",
+    "company": "纳新电子",
+}
+
+
+@pytest.fixture
+async def preflight(browser_page, extension_bundle):
+    async def _preflight(fixture: str, *, url: str = DETAIL_URL, expected=None) -> dict:
+        await _load_fixture(browser_page, extension_bundle, fixture, url=url)
+        return await browser_page.evaluate(
+            "(expected) => BossExtract.preflightConfirmedApplication("
+            "document, document.location.href, expected)",
+            expected or EXPECTED,
+        )
+
+    return _preflight
+
+
+async def test_a_fresh_job_passes_preflight_with_exactly_one_visible_control(preflight):
+    """Live shape: `.btn-startchat` matches 2 nodes, exactly 1 visible."""
+    result = await preflight("boss_job_detail_live_shape.html")
+    assert result["status"] == "ok"
+    assert result["observed_external_id"] == "aaa111bbb222~"
+    assert "securityId" not in result["observed_url"]
+    assert "lid" not in result["observed_url"]
+
+
+async def test_an_already_chatted_job_is_refused_and_never_clicked(preflight, browser_page):
+    """THE boundary: on a job already in conversation the control reads
+    `data-isfriend="true"` / 继续沟通. Clicking it would send a follow-up
+    message, which M6 forbids outright. It must refuse, not apply."""
+    result = await preflight("boss_job_detail_already_chatted.html")
+    assert result["status"] == "control_wrong_state"
+    assert "observed_url" not in result or not result.get("observed_url")
+
+    # And the execute primitive refuses too - preflight is not the only guard.
+    executed = await browser_page.evaluate(
+        "(expected) => BossExtract.executeConfirmedApplication("
+        "document, document.location.href, expected)",
+        EXPECTED,
+    )
+    assert executed["status"] == "control_wrong_state"
+    assert executed["status"] != "clicked"
+
+
+async def test_a_job_whose_identity_does_not_match_is_refused(preflight):
+    result = await preflight(
+        "boss_job_detail_live_shape.html",
+        expected={**EXPECTED, "external_id": "some-other-job"},
+    )
+    assert result["status"] == "identity_mismatch"
+
+
+async def test_the_search_split_pane_is_not_an_application_surface(preflight):
+    """M6 executes only on a job_detail page, never the search results pane."""
+    result = await preflight(
+        "boss_search_split_pane_live_shape.html", url=SEARCH_URL
+    )
+    assert result["status"] != "ok"
+
+
+# --------------------------------------------------------------------------
+# M7: one explicitly triggered, current rendered BOSS conversation only.
+# --------------------------------------------------------------------------
+
+CHAT_URL = "https://www.zhipin.com/web/geek/chat?securityId=not-persisted"
+
+
+async def test_m7_extracts_only_text_messages_with_stable_source_ids(browser_page, extension_bundle):
+    await _load_fixture(
+        browser_page, extension_bundle, "boss_chat_current_conversation.html", url=CHAT_URL
+    )
+    result = await browser_page.evaluate(
+        "() => BossExtract.scanCurrentBossConversation(document, document.location.href)"
+    )
+    assert result["status"] == "ok"
+    assert result["page_url"] == "https://www.zhipin.com/web/geek/chat"
+    assert [m["source_message_id"] for m in result["messages"]] == ["msg-1001", "msg-1003"]
+    assert [m["direction"] for m in result["messages"]] == ["user", "recruiter"]
+    assert result["source_url"] == "https://www.zhipin.com/job_detail/m7-job-1.html"
+    assert result["external_id"] == "m7-job-1"
+    assert all("竞争者" not in m["text"] for m in result["messages"])
+    assert "securityId" not in str(result)
+
+
+async def test_m7_refuses_wrong_path_and_missing_data_mid(browser_page, extension_bundle):
+    await _load_fixture(
+        browser_page, extension_bundle, "boss_chat_current_conversation.html", url=DETAIL_URL
+    )
+    wrong = await browser_page.evaluate(
+        "() => BossExtract.scanCurrentBossConversation(document, document.location.href)"
+    )
+    assert wrong["status"] == "wrong_page"
+
+    await _load_fixture(
+        browser_page, extension_bundle, "boss_chat_current_conversation.html", url=CHAT_URL
+    )
+    await browser_page.evaluate("document.querySelector('[data-mid=msg-1003]').removeAttribute('data-mid')")
+    missing = await browser_page.evaluate(
+        "() => BossExtract.scanCurrentBossConversation(document, document.location.href)"
+    )
+    assert missing["status"] == "message_identity_missing"
+
+
+async def test_m7_selects_each_rendered_conversation_at_most_once(browser_page, extension_bundle):
+    await _load_fixture(
+        browser_page, extension_bundle, "boss_chat_current_conversation.html", url=CHAT_URL
+    )
+    first = await browser_page.evaluate(
+        "() => BossExtract.selectNextBossConversation(document, document.location.href)"
+    )
+    second = await browser_page.evaluate(
+        "() => BossExtract.selectNextBossConversation(document, document.location.href)"
+    )
+    exhausted = await browser_page.evaluate(
+        "() => BossExtract.selectNextBossConversation(document, document.location.href)"
+    )
+    assert first == {"status": "selected", "recruiter_name": "招聘方甲", "company": "示例科技"}
+    assert second == {"status": "selected", "recruiter_name": "招聘方乙", "company": "另一家公司"}
+    assert exhausted == {"status": "exhausted"}
+    reset = await browser_page.evaluate(
+        "() => BossExtract.resetBossConversationTraversal(document, document.location.href)"
+    )
+    again = await browser_page.evaluate(
+        "() => BossExtract.selectNextBossConversation(document, document.location.href)"
+    )
+    assert reset == {"status": "reset"}
+    assert again["recruiter_name"] == "招聘方甲"

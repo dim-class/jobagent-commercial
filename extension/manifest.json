@@ -1,12 +1,12 @@
 {
   "manifest_version": 3,
   "name": "JobAgent BOSS Detector",
-  "version": "0.1.0",
-  "description": "只读检测你已经打开的 BOSS 直聘页面，把结构化岗位信息交给本机 JobAgent。不自动搜索、不翻页、不投递、不发消息。",
+  "version": "0.1.20",
+  "description": "通过本地 JobAgent 控制台显式启动有限 BOSS 搜索采集并支持逐岗位确认投递。不批量投递、不扫描沟通、不后台、不自动重试或跟进。",
 
   "permissions": ["activeTab", "scripting", "storage"],
 
-  "host_permissions": ["http://127.0.0.1:8000/*", "http://localhost:8000/*"],
+  "host_permissions": ["http://127.0.0.1:8000/*", "http://localhost:8000/*", "https://www.zhipin.com/*", "http://127.0.0.1:5173/*", "http://localhost:5173/*"],
 
   "background": {
     "service_worker": "dist/background.js"
@@ -21,6 +21,11 @@
         "dist/content.js",
         "dist/overlay.js"
       ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["http://127.0.0.1:5173/*", "http://localhost:5173/*"],
+      "js": ["dist/console-bridge.js"],
       "run_at": "document_idle"
     }
   ],

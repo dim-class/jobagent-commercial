@@ -5,8 +5,15 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from app.core.career_strategy import load_strategy, save_strategy, strategy_hash, strategy_path
+from app.core.career_strategy import (
+    DEFAULT_STRATEGY,
+    load_strategy,
+    save_strategy,
+    strategy_hash,
+    strategy_path,
+)
 from app.core.errors import ValidationError
+from app.core.paths import CAREER_STRATEGY_PATH, DATA_DIR
 
 
 def test_strategy_ships_with_the_expected_targets():
@@ -18,6 +25,30 @@ def test_strategy_ships_with_the_expected_targets():
     assert "WebSphere" in strategy["relevant_skills"]
     assert any("Helpdesk" in k for k in strategy["excluded_keywords"])
     assert strategy["experience_policy"]["preferred_max_years"] == 3
+
+
+def test_product_defaults_do_not_embed_a_developer_profile():
+    assert DEFAULT_STRATEGY["target_cities"] == []
+    assert DEFAULT_STRATEGY["preferred_roles"] == []
+    assert DEFAULT_STRATEGY["relevant_skills"] == []
+    assert DEFAULT_STRATEGY["excluded_keywords"] == []
+    assert DEFAULT_STRATEGY["early_career_policy"] == "include"
+
+
+def test_runtime_strategy_path_is_local_user_data():
+    assert CAREER_STRATEGY_PATH == DATA_DIR / "career_strategy.yaml"
+
+
+def test_first_run_without_a_strategy_is_neutral_and_can_be_saved():
+    path = strategy_path()
+    path.unlink()
+    strategy = load_strategy(force=True)
+    assert strategy["target_cities"] == []
+    assert strategy["preferred_roles"] == []
+
+    saved = save_strategy({**strategy, "target_cities": ["北京"], "preferred_roles": ["测试工程师"]})
+    assert path.exists()
+    assert saved["preferred_roles"] == ["测试工程师"]
 
 
 def test_strategy_is_a_file_not_python():
@@ -52,13 +83,15 @@ def test_save_rejects_a_malformed_strategy():
         save_strategy({"target_cities": "北京"})
     with pytest.raises(ValidationError):
         save_strategy({"relevant_skills": [1, 2, 3]})
+    with pytest.raises(ValidationError):
+        save_strategy({"early_career_policy": "guess"})
 
 
 def test_partial_save_keeps_nested_defaults():
     saved = save_strategy({"target_cities": ["北京"], "experience_policy": {"flexibility": "lenient"}})
     assert saved["experience_policy"]["flexibility"] == "lenient"
-    assert saved["experience_policy"]["preferred_max_years"] == 3
-    assert saved["salary"]["min_monthly_cny"] == 15000
+    assert saved["experience_policy"]["preferred_max_years"] == 5
+    assert saved["salary"]["min_monthly_cny"] == 0
 
 
 # --------------------------------------------------------------------------

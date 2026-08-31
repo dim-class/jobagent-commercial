@@ -13,6 +13,18 @@
             <span class="text-desc text-degree">大专</span>
           </p>
         </div>
+        <!-- Attribute set captured read-only from a real logged-in BOSS detail
+             page on 2026-08-31. `ka` / `data-url` / `redirect-url` carry
+             session tokens on the live site (379-406 chars); only their
+             presence is ever read, so they are placeholders here. -->
+        <a class="btn btn-startchat" href="javascript:;" ka="job_detail_startchat_1"
+           redirect-url="/web/geek/chat" data-url="/wapi/blocked"
+           data-isfriend="false">立即沟通</a>
+        <!-- Live BOSS markup includes a responsive hidden duplicate: the strict
+             `.btn-startchat` selector matches 2 nodes, exactly 1 of them visible. -->
+        <a class="btn btn-startchat" style="display:none" href="javascript:;"
+           ka="job_detail_startchat_2" redirect-url="/web/geek/chat"
+           data-url="/wapi/blocked" data-isfriend="false">立即沟通</a>
       </div>
     </div>
   </div>

@@ -110,6 +110,7 @@ def applied_job(
     db,
     *,
     days_ago: float,
+    now: datetime = NOW,
     replied_after_h: float | None = None,
     interview_after_h: float | None = None,
     offer_after_h: float | None = None,
@@ -118,7 +119,7 @@ def applied_job(
 ) -> Job:
     """A job with a complete, coherent event history."""
     job = make_job(db, **job_kwargs)
-    applied_at = NOW - timedelta(days=days_ago)
+    applied_at = now - timedelta(days=days_ago)
     add_event(db, job, EventType.applied, at=applied_at)
     for hours, kind in (
         (replied_after_h, EventType.replied),

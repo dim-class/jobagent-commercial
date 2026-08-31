@@ -182,6 +182,7 @@ class RecruiterMessageOut(BaseModel):
     conversation_id: int
     direction: MessageDirection
     raw_text: str
+    source_message_id: str | None = None
     source_message_time_text: str | None = None
     captured_at: datetime
     created_at: datetime
@@ -324,3 +325,35 @@ class CloseRequest(BaseModel):
 class ConversationActionOut(BaseModel):
     conversation: ConversationDetailOut
     message: str = ""
+
+
+class BossChatScanMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_message_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
+    direction: MessageDirection
+    text: str = Field(min_length=1, max_length=10000)
+    source_message_time_text: str | None = Field(default=None, max_length=128)
+
+
+class BossChatScanIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: int | None = Field(default=None, gt=0)
+    page_url: str = Field(max_length=256)
+    source_url: str | None = Field(default=None, max_length=1024)
+    external_id: str | None = Field(default=None, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+    recruiter_name: str | None = Field(default=None, max_length=128)
+    company: str | None = Field(default=None, max_length=256)
+    title: str | None = Field(default=None, max_length=256)
+    messages: list[BossChatScanMessage] = Field(min_length=1, max_length=100)
+
+
+class BossChatScanOut(BaseModel):
+    conversation_id: int | None = None
+    matched: bool = True
+    skipped_reason: str | None = None
+    observed: int
+    imported: int
+    duplicates: int
+    ai_used: bool = False

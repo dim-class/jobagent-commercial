@@ -96,12 +96,17 @@ def test_a_cohort_below_the_recommend_sample_is_never_actionable(db):
 # --------------------------------------------------------------------------
 
 
-def strong_hangzhou(db) -> None:
-    """A cohort that genuinely clears every bar."""
+def strong_hangzhou(db, *, now=None) -> None:
+    """A cohort that genuinely clears every bar.
+
+    ``now`` lets the HTTP tests anchor the history to the real clock; the unit
+    tests here keep the frozen ``NOW`` they also pass into ``compute_analytics``.
+    """
+    extra = {} if now is None else {"now": now}
     for _ in range(12):
-        applied_job(db, days_ago=20, city="杭州", replied_after_h=6)
+        applied_job(db, days_ago=20, city="杭州", replied_after_h=6, **extra)
     for _ in range(20):
-        applied_job(db, days_ago=20, city="北京")
+        applied_job(db, days_ago=20, city="北京", **extra)
 
 
 def test_a_well_evidenced_city_produces_an_actionable_proposal(db):

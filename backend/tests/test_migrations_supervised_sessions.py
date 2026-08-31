@@ -69,15 +69,55 @@ TRACKED = (
     "orchestration_events",
 )
 
+#: 0012 (M4e/M4f, later than the 0011 revision this file is actually about)
+#: adds exactly these columns to `job_search_tasks` - additive only, never a
+#: shape change to any column this file's own migration owns. Every *other*
+#: tracked table must still be byte-for-byte identical, the original,
+#: stronger assertion this test already made.
+JOB_SEARCH_TASKS_0012_COLUMNS = frozenset(
+    {
+        
+        # 0021 snapshots the candidate-stage policy onto every task.
+        "early_career_policy","city_id",
+        "is_search_plan",
+        "run_status",
+        "run_started_at",
+        "run_stopped_at",
+        "observed_count",
+        "new_count",
+        "duplicate_count",
+        "no_new_rounds",
+        "last_error",
+        # 0013: runner observability
+        "current_url",
+        "scroll_round",
+        "visible_jobs",
+        "imported_jobs",
+        "current_candidate",
+        "last_action",
+        "paused_reason",
+        "match_run_json",
+        "match_revision",
+    }
+)
+
 
 def test_the_upgrade_only_adds_the_supervised_session_tables(v12_db):
     before = {t: columns(v12_db, t) for t in TRACKED}
     assert upgrade(v12_db) == "upgraded"
 
-    assert current_revision_of(v12_db) == "0011_supervised_sessions"
+    assert current_revision_of(v12_db) == "0021_candidate_stage_policy"
     assert {"supervised_sessions", "supervised_session_events"} <= set(tables(v12_db))
     for table, cols in before.items():
-        assert columns(v12_db, table) == cols, f"{table} changed shape"
+        after = columns(v12_db, table)
+        if table == "job_search_tasks":
+            assert cols <= after, f"{table} lost a column"
+            assert after - cols == JOB_SEARCH_TASKS_0012_COLUMNS, (
+                f"{table} gained unexpected columns: {after - cols - JOB_SEARCH_TASKS_0012_COLUMNS}"
+            )
+        else:
+            expected = cols | ({"source_message_id"} if table == "recruiter_messages" else set())
+            assert after == expected, f"{table} changed shape"
 
 
 def test_supervised_session_ondelete_actions(v12_db):
@@ -146,5 +186,5 @@ def test_a_v03_database_reaches_the_supervised_session_schema_in_one_go(v03_db):
     finally:
         engine.dispose()
 
-    assert current_revision_of(v03_db) == "0011_supervised_sessions"
+    assert current_revision_of(v03_db) == "0021_candidate_stage_policy"
     assert {"supervised_sessions", "supervised_session_events"} <= set(tables(v03_db))

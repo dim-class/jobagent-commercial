@@ -102,6 +102,7 @@ For a read-only proof task, product files must remain unchanged; updating RESULT
         "--print",
         "--output-format", "json",
         "--max-budget-usd", $budget,
+        "--append-system-prompt", "Supervisor handoff: the current on-disk docs/orchestration/TASK.md supersedes all unfinished work and background notifications from resumed history. Your first tool action must read TASK.md anew. Do not resume a previous command or rerun old tests before that read. Follow its current test limits. Do not use git stash, reset, checkout, or clean; preserve this dirty worktree.",
         "--no-chrome",
         "--disable-slash-commands",
         "--dangerously-skip-permissions"
@@ -129,6 +130,9 @@ For a read-only proof task, product files must remain unchanged; updating RESULT
         throw "Claude worker did not return valid JSON (exit $claudeExitCode)."
     }
 
+    if ($null -eq $payload -or $payload -is [array]) {
+        throw "Claude worker returned no single result object (exit $claudeExitCode); task not accepted."
+    }
     if ($claudeExitCode -ne 0 -or $payload.is_error) {
         $hasResult = $payload.PSObject.Properties.Name -contains "result"
         $reason = if ($hasResult -and $payload.result) { [string]$payload.result } else { "Claude CLI failed." }

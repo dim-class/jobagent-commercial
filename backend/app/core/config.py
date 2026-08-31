@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     # --- behaviour --------------------------------------------------------
     max_analyses_per_run: int = Field(default=50, alias="MAX_ANALYSES_PER_RUN")
     auto_apply: bool = Field(default=False, alias="AUTO_APPLY")
+    # M6 exposes only the per-job confirmation workflow.  This is not an
+    # authority to execute: a still-valid ApplicationApproval remains the
+    # sole authority for one attempt.
+    human_confirmed_apply_enabled: bool = Field(
+        default=False, alias="HUMAN_CONFIRMED_APPLY_ENABLED"
+    )
 
     # --- server -----------------------------------------------------------
     app_host: str = Field(default="127.0.0.1", alias="APP_HOST")
@@ -131,9 +137,10 @@ class Settings(BaseSettings):
 
     @property
     def auto_apply_enabled(self) -> bool:
-        """Never true. v0.2 can read a job page; it can never apply.
+        """There is no global automatic-application mode.
 
-        Kept as a property so no config value can flip it.
+        M6 uses ``human_confirmed_apply_enabled`` plus a separate, per-job
+        approval.  It never changes this legacy invariant.
         """
         return False
 

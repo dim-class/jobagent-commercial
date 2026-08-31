@@ -23,6 +23,7 @@ const EVENT_LABEL: Record<string, string> = {
   rejected: '未通过',
   // v0.5: the user confirmed they replied to a recruiter themselves.
   candidate_reply: '我已回复',
+  application_result_unknown: '投递结果待确认',
   // v0.7: the user filled in / corrected which resume an application used.
   application_resume_attributed: '补充投递简历',
   application_resume_changed: '修改投递简历',
@@ -61,6 +62,7 @@ const EVENT_ICON: Record<string, string> = {
   offer: '🎉',
   rejected: '❌',
   candidate_reply: '✉️',
+  application_result_unknown: '❓',
   application_resume_attributed: '📎',
   application_resume_changed: '📎',
   interview_scheduled: '🗓️',

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
+import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 
 import { api } from '@/api/client'
 import { Alert } from '@/components/ui'
@@ -21,23 +21,28 @@ import OfferAnalyticsPage from '@/pages/OfferAnalyticsPage'
 import OfferBoardPage from '@/pages/OfferBoardPage'
 import OfferComparisonPage from '@/pages/OfferComparisonPage'
 import OfferDetailPage from '@/pages/OfferDetailPage'
+import OnboardingPage from '@/pages/OnboardingPage'
 import ResumeAnalyticsPage from '@/pages/ResumeAnalyticsPage'
 import ResumePage from '@/pages/ResumePage'
 import SettingsPage from '@/pages/SettingsPage'
 import StrategyPage from '@/pages/StrategyPage'
 import type { HealthResponse } from '@/types'
 
-const NAV = [
-  { to: '/dashboard', label: '仪表盘', icon: '📊' },
-  { to: '/console', label: '任务控制台', icon: '🗃️' },
+const PRIMARY_NAV = [
+  { to: '/console', label: '搜索岗位', icon: '🔎' },
   { to: '/queue', label: '投递队列', icon: '🎯' },
   { to: '/jobs', label: '岗位库', icon: '💼' },
   { to: '/interviews', label: '面试', icon: '🗓️' },
   { to: '/offers', label: 'Offer', icon: '📨' },
-  { to: '/recruiter', label: 'HR沟通', icon: '💬' },
+  { to: '/resume', label: '简历', icon: '📄' },
+]
+
+const SECONDARY_NAV = [
+  { to: '/setup', label: '个人设置', icon: '👤' },
+  { to: '/dashboard', label: '数据概览', icon: '📊' },
+  { to: '/recruiter', label: 'HR沟通记录', icon: '💬' },
   { to: '/quick-capture', label: '快速采集', icon: '⚡' },
   { to: '/capture', label: '浏览器采集', icon: '🧭' },
-  { to: '/resume', label: '简历', icon: '📄' },
   { to: '/resume-analytics', label: '简历表现', icon: '🧪' },
   { to: '/analytics', label: '策略分析', icon: '📈' },
   { to: '/strategy', label: '求职策略', icon: '🎯' },
@@ -45,6 +50,9 @@ const NAV = [
 ]
 
 export default function App() {
+  const location = useLocation()
+  const secondaryRouteActive = SECONDARY_NAV.some((item) => location.pathname.startsWith(item.to))
+  const [showMoreNav, setShowMoreNav] = useState(secondaryRouteActive)
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [offline, setOffline] = useState(false)
 
@@ -66,6 +74,10 @@ export default function App() {
     }
   }, [])
 
+  useEffect(() => {
+    if (secondaryRouteActive) setShowMoreNav(true)
+  }, [secondaryRouteActive])
+
   return (
     <div className="app">
       <aside className="sidebar">
@@ -75,7 +87,7 @@ export default function App() {
         </div>
 
         <nav className="nav">
-          {NAV.map((item) => (
+          {PRIMARY_NAV.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -87,19 +99,37 @@ export default function App() {
               {item.label}
             </NavLink>
           ))}
+          <details
+            className="nav-more"
+            open={showMoreNav}
+            onToggle={(event) => setShowMoreNav(event.currentTarget.open)}
+          >
+            <summary>更多工具</summary>
+            <div className="nav-more-links">
+              {SECONDARY_NAV.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+                >
+                  <span className="nav-icon" aria-hidden>{item.icon}</span>
+                  {item.label}
+                </NavLink>
+              ))}
+            </div>
+          </details>
         </nav>
 
         <div className="sidebar-footer">
           <div>{health?.openai_configured ? '🟢 OpenAI 已配置' : '🟡 未配置 OpenAI'}</div>
-          <div>自动投递：关闭</div>
         </div>
       </aside>
 
       <main className="content">
         {offline ? (
           <Alert tone="error">
-            无法连接后端服务。请在项目根目录运行 <code className="mono">.\scripts\dev.ps1 backend</code>
-            ，确认 <code className="mono">http://127.0.0.1:8000/health</code> 可访问后刷新页面。
+            无法连接后端服务。请双击项目根目录的 <code className="mono">Start-JobAgent.cmd</code>
+            重新启动控制台；如仍失败，再查看 <code className="mono">.tmp\launcher</code> 中的日志。
           </Alert>
         ) : null}
 
@@ -111,7 +141,7 @@ export default function App() {
         ) : null}
 
         <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/" element={<Navigate to="/console" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/console" element={<ConsolePage />} />
           <Route path="/queue" element={<ApplicationQueuePage />} />
@@ -133,11 +163,12 @@ export default function App() {
           <Route path="/quick-capture" element={<QuickCapturePage />} />
           <Route path="/capture" element={<BrowserCapturePage />} />
           <Route path="/resume" element={<ResumePage />} />
+          <Route path="/setup" element={<OnboardingPage />} />
           <Route path="/resume-analytics" element={<ResumeAnalyticsPage />} />
           <Route path="/analytics" element={<CareerAnalyticsPage />} />
           <Route path="/strategy" element={<StrategyPage />} />
           <Route path="/settings" element={<SettingsPage />} />
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          <Route path="*" element={<Navigate to="/console" replace />} />
         </Routes>
       </main>
     </div>

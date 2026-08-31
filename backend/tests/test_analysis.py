@@ -244,6 +244,98 @@ def test_batch_analysis_respects_max_analyses_per_run(client, active_resume, fak
     assert len(fake_agent.calls) == 3
 
 
+def test_batch_plan_is_free_and_reports_cached_pending_and_the_cap(
+    client, active_resume, fake_agent, settings
+):
+    """The confirmation numbers: selection, cache hits, new calls, batch cap."""
+    assert settings.max_analyses_per_run == 3
+    job_ids = [_create_job(client, company=f"公司{i}") for i in range(5)]
+    client.post(f"/api/jobs/{job_ids[0]}/analyze", json={})
+    calls_before = len(fake_agent.calls)
+
+    body = client.post(
+        "/api/jobs/analyze-batch/plan", json={"job_ids": job_ids + [job_ids[0], 9999]}
+    ).json()
+
+    assert len(fake_agent.calls) == calls_before, "planning must never call a model"
+    assert body["selected"] == 5
+    assert body["missing_job_ids"] == [9999]
+    assert body["limit"] == 3
+    assert body["in_batch"] == 3
+    assert body["deferred"] == 2
+    assert body["cached"] == 1
+    assert body["pending"] == 2
+    assert body["resume_id"] == active_resume.id
+
+
+def test_batch_plan_matches_what_the_confirmed_run_actually_does(
+    client, active_resume, fake_agent
+):
+    job_ids = [_create_job(client, company=f"公司{i}") for i in range(4)]
+    client.post(f"/api/jobs/{job_ids[0]}/analyze", json={})
+    plan = client.post("/api/jobs/analyze-batch/plan", json={"job_ids": job_ids}).json()
+    calls_before = len(fake_agent.calls)
+
+    run = client.post("/api/jobs/analyze-batch", json={"job_ids": job_ids}).json()
+
+    assert run["limit"] == plan["limit"]
+    assert run["cached"] == plan["cached"]
+    assert run["analyzed"] == plan["pending"]
+    assert len(fake_agent.calls) - calls_before == plan["pending"]
+    assert run["failed"] == 0
+
+
+def test_batch_run_only_touches_the_selected_jobs_and_never_their_status(
+    client, active_resume, fake_agent
+):
+    selected = _create_job(client, company="被选中公司")
+    other = _create_job(client, company="未选中公司")
+
+    body = client.post("/api/jobs/analyze-batch", json={"job_ids": [selected]}).json()
+    assert body["requested"] == 1
+    assert [item["job_id"] for item in body["items"]] == [selected]
+
+    # The unselected job is untouched, and the selected one only moves along
+    # the pre-existing 新建 -> 已查看 rule that the per-row AI 分析 button already
+    # applies. No human decision status (applied / skipped / ...) is ever written.
+    assert client.get(f"/api/jobs/{other}").json()["latest_analysis"] is None
+    assert client.get(f"/api/jobs/{other}").json()["status"] == "new"
+    assert client.get(f"/api/jobs/{selected}").json()["status"] == "reviewed"
+
+
+def test_analyzed_filter_isolates_the_unanalyzed_jobs(client, active_resume, fake_agent):
+    """Backs the job library's 「选中未分析的 N 个」 button and its 分析状态 filter."""
+    analyzed = _create_job(client, company="已分析公司")
+    pending = [_create_job(client, company=f"未分析公司{i}") for i in range(3)]
+    client.post(f"/api/jobs/{analyzed}/analyze", json={})
+
+    unanalyzed = client.get("/api/jobs", params={"analyzed": False}).json()
+    assert unanalyzed["total"] == 3
+    assert sorted(item["id"] for item in unanalyzed["items"]) == sorted(pending)
+    assert all(item["latest_analysis"] is None for item in unanalyzed["items"])
+
+    done = client.get("/api/jobs", params={"analyzed": True}).json()
+    assert [item["id"] for item in done["items"]] == [analyzed]
+
+    # Unfiltered, the two groups are still distinguishable by the same field the
+    # button reads, so the button never has to guess.
+    every = client.get("/api/jobs").json()["items"]
+    assert len([i for i in every if i["latest_analysis"] is None]) == 3
+
+
+def test_deleting_an_analyzed_job_removes_it_and_its_analysis(client, active_resume, fake_agent):
+    """The real job-library case: analysed, skipped, then deleted."""
+    job_id = _create_job(client)
+    assert client.post(f"/api/jobs/{job_id}/analyze", json={}).status_code == 200
+    assert client.patch(f"/api/jobs/{job_id}", json={"status": "skipped"}).status_code == 200
+    assert client.get(f"/api/jobs/{job_id}/analysis").status_code == 200
+
+    assert client.delete(f"/api/jobs/{job_id}").status_code == 200
+    assert client.get(f"/api/jobs/{job_id}").status_code == 404
+    assert client.get(f"/api/jobs/{job_id}/analysis").status_code == 404
+    assert client.get("/api/dashboard/summary").json()["analyzed_jobs"] == 0
+
+
 def test_score_and_verdict_filters_use_the_latest_analysis(client, active_resume, fake_agent):
     high = _create_job(client, company="高分公司")
     low = _create_job(client, company="低分公司")

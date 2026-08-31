@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { ApiError, api, type QueueFilters } from '@/api/client'
+import { consoleExtension } from '@/pages/consoleExtension'
 import {
   ResumePicker,
   UNKNOWN_CHOICE,
@@ -19,7 +20,13 @@ import {
   VerdictBadge,
   formatDateTime,
 } from '@/components/ui'
-import type { ApplicationProposal, JobStatus, QueueResponse, Verdict } from '@/types'
+import type {
+  ApplicationApprovalOut,
+  ApplicationProposal,
+  JobStatus,
+  QueueResponse,
+  Verdict,
+} from '@/types'
 
 type Feedback = { tone: 'success' | 'error' | 'info' | 'warn'; text: string } | null
 
@@ -52,6 +59,7 @@ export default function ApplicationQueuePage() {
 
   // Confirmation dialogs: applying and skipping are real decisions.
   const [confirmApply, setConfirmApply] = useState<ApplicationProposal | null>(null)
+  const [confirmApplyFromM6, setConfirmApplyFromM6] = useState(false)
   const [applyNote, setApplyNote] = useState('')
   // Which resume the user says they actually submitted. Defaults to the
   // active analysis resume as a convenience; never substituted silently.
@@ -59,6 +67,13 @@ export default function ApplicationQueuePage() {
   const { resumes, activeId } = useSelectableResumes()
   const [skipTarget, setSkipTarget] = useState<ApplicationProposal | null>(null)
   const [skipReason, setSkipReason] = useState('')
+  const [m6Target, setM6Target] = useState<ApplicationProposal | null>(null)
+  const [m6ResumeId, setM6ResumeId] = useState<number | null>(null)
+  const [m6DynamicAccepted, setM6DynamicAccepted] = useState(false)
+  const [m6Approval, setM6Approval] = useState<ApplicationApprovalOut | null>(null)
+  const [m6Busy, setM6Busy] = useState(false)
+  const [m6Attempted, setM6Attempted] = useState(false)
+  const [m6StatusUnknown, setM6StatusUnknown] = useState(false)
 
   const load = useCallback(async (active: QueueFilters) => {
     setLoading(true)
@@ -113,6 +128,25 @@ export default function ApplicationQueuePage() {
     }
   }
 
+  /** Put the greeting on the clipboard as the posting's own page opens.
+   *
+   * Rendered as a real anchor so the browser treats the new tab as a plain user
+   * navigation (a popup blocker would eat a scripted `window.open`). Neither
+   * half is a decision: opening a page and filling the clipboard change no
+   * status and send nothing. This remains the fully manual path: you paste,
+   * read it, click send, and only then come back and record it. The separate
+   * M6 path is deliberately not reachable from this helper.
+   */
+  function openForApplying(proposal: ApplicationProposal) {
+    if (proposal.greeting_message) void copyGreeting(proposal)
+    setFeedback({
+      tone: 'info',
+      text: `已打开「${proposal.title}」的岗位页${
+        proposal.greeting_message ? '，招呼语已复制到剪贴板' : ''
+      }。发送后回到这里点「标记已投递」才会记录。`,
+    })
+  }
+
   async function bulk(action: 'later' | 'skip') {
     const ids = [...selected]
     if (ids.length === 0) return
@@ -148,6 +182,104 @@ export default function ApplicationQueuePage() {
     })
   }
 
+  function openM6Confirmation(proposal: ApplicationProposal) {
+    setM6Target(proposal)
+    setM6ResumeId(activeId ?? null)
+    setM6DynamicAccepted(false)
+    setM6Approval(null)
+    setM6Attempted(false)
+    setM6StatusUnknown(false)
+  }
+
+  async function prepareM6Approval() {
+    if (!m6Target || !m6ResumeId || !m6DynamicAccepted) return
+    setM6Busy(true)
+    try {
+      const approval = await api.createApplicationApproval(m6Target.job_id, m6ResumeId)
+      setM6Approval(approval)
+      setFeedback({ tone: 'info', text: '最终确认快照已生成；尚未操作 BOSS。请再次逐项核对。' })
+    } catch (err) {
+      setFeedback({ tone: 'error', text: err instanceof ApiError ? err.message : '生成最终确认失败' })
+    } finally {
+      setM6Busy(false)
+    }
+  }
+
+  async function executeM6Approval() {
+    if (!m6Approval || m6Approval.state !== 'pending' || m6Attempted) return
+    setM6Attempted(true) // One final click can dispatch at most one command.
+    setM6Busy(true)
+    // Call immediately in this click handler so the extension bridge receives
+    // a real browser user activation before any await occurs.
+    const pending = consoleExtension(
+      'execute-application', undefined, undefined, undefined, undefined, m6Approval.id,
+    )
+    try {
+      const reply = await pending
+      if (!reply.ok) throw new Error(reply.error || '扩展未确认执行结果')
+      const attemptedJob = m6Target
+      const attemptedResumeId = m6Approval.resume_id
+      setFeedback({
+        tone: 'warn',
+        text: '已执行一次「立即沟通」，并记录为结果待确认。请先在 BOSS 核对沟通是否建立，勿直接重试；再在弹窗中确认，确认后会通过现有唯一记录路径进入「已投递」列表。',
+      })
+      setM6Target(null)
+      setM6Approval(null)
+      setApplyNote('M6 单次确认投递；已在 BOSS 人工核对结果')
+      setAppliedResume({ resumeId: attemptedResumeId, usage: 'used' })
+      setConfirmApplyFromM6(true)
+      setConfirmApply(attemptedJob)
+      await load(filters)
+    } catch (err) {
+      // If the worker claimed the attempt and then vanished, retain the real
+      // executing state so the user can close it as unknown. Never re-enable
+      // this approval's execute button after an ambiguous command.
+      setM6StatusUnknown(true)
+      try {
+        setM6Approval(await api.applicationApproval(m6Approval.id))
+        setM6StatusUnknown(false)
+      } catch { /* backend may be unavailable; keep modal open and approval non-retryable */ }
+      setFeedback({
+        tone: 'error',
+        text: err instanceof Error ? err.message : '执行结果未知；请到 BOSS 人工核对，勿重复点击。',
+      })
+    } finally {
+      setM6Busy(false)
+    }
+  }
+
+  async function refreshM6Attempt() {
+    if (!m6Approval || !m6Attempted) return
+    setM6Busy(true)
+    try {
+      setM6Approval(await api.applicationApproval(m6Approval.id))
+      setM6StatusUnknown(false)
+    } catch (err) {
+      setM6StatusUnknown(true)
+      setFeedback({ tone: 'error', text: err instanceof ApiError ? err.message : '尝试状态仍无法确认；不会重试' })
+    } finally {
+      setM6Busy(false)
+    }
+  }
+
+  async function abandonM6Attempt() {
+    if (!m6Approval || m6Approval.state !== 'executing') return
+    setM6Busy(true)
+    try {
+      const closed = await api.abandonApplicationAttempt(m6Approval.id)
+      setM6Approval(closed)
+      setFeedback({
+        tone: 'warn',
+        text: '已由你确认结束这次未返回结果的尝试，并记为「结果待确认」。请先到 BOSS 核对；系统不会自动重试。',
+      })
+      await load(filters)
+    } catch (err) {
+      setFeedback({ tone: 'error', text: err instanceof ApiError ? err.message : '结束未知尝试失败' })
+    } finally {
+      setM6Busy(false)
+    }
+  }
+
   const target = summary?.daily_target ?? 10
   const appliedToday = summary?.applied_today ?? 0
 
@@ -157,7 +289,7 @@ export default function ApplicationQueuePage() {
         <div>
           <h1>今日投递队列</h1>
           <p>
-            AI 推荐，你来决定。JobAgent 不会替你投递 —— 在招聘平台完成实际投递后，回到这里记录。
+            AI 只负责推荐。你可以完全手动投递并回来记录，或对单个岗位使用 M6 双重人工确认入口。
           </p>
         </div>
         <div className="page-actions">
@@ -449,6 +581,22 @@ export default function ApplicationQueuePage() {
               <Link className="btn btn-sm" to={`/jobs/${proposal.job_id}`}>
                 查看岗位
               </Link>
+              {proposal.source_url ? (
+                <a
+                  className="btn btn-sm"
+                  href={proposal.source_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="在新标签页打开岗位原页面，并把招呼语复制到剪贴板"
+                  onClick={() => openForApplying(proposal)}
+                >
+                  去投递 ↗
+                </a>
+              ) : (
+                <span className="small faint" title="该岗位没有可核对的原始链接，可能是早期导入或测试数据">
+                  无可用岗位链接
+                </span>
+              )}
               <button
                 type="button"
                 className="btn-sm"
@@ -466,11 +614,22 @@ export default function ApplicationQueuePage() {
                   setAppliedResume(
                     activeId ? { resumeId: activeId, usage: 'used' } : UNKNOWN_CHOICE,
                   )
+                  setConfirmApplyFromM6(false)
                   setConfirmApply(proposal)
                 }}
               >
                 标记已投递
               </button>
+              {proposal.source_url ? (
+                <button
+                  type="button"
+                  className="btn-sm"
+                  disabled={busy || m6Busy}
+                  onClick={() => openM6Confirmation(proposal)}
+                >
+                  单次确认投递（M6）
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="btn-sm"
@@ -497,11 +656,17 @@ export default function ApplicationQueuePage() {
 
       {confirmApply ? (
         <Modal
-          title="确认已投递？"
-          onClose={() => setConfirmApply(null)}
+          title={confirmApplyFromM6 ? '核对并记录本次投递' : '确认已投递？'}
+          onClose={() => {
+            setConfirmApply(null)
+            setConfirmApplyFromM6(false)
+          }}
           footer={
             <>
-              <button type="button" onClick={() => setConfirmApply(null)}>
+              <button type="button" onClick={() => {
+                setConfirmApply(null)
+                setConfirmApplyFromM6(false)
+              }}>
                 取消
               </button>
               <button
@@ -510,6 +675,7 @@ export default function ApplicationQueuePage() {
                 onClick={() => {
                   const proposal = confirmApply
                   setConfirmApply(null)
+                  setConfirmApplyFromM6(false)
                   void run(proposal.job_id, () =>
                     api.markApplied(proposal.job_id, applyNote, appliedResume),
                   )
@@ -525,7 +691,11 @@ export default function ApplicationQueuePage() {
             <br />
             {confirmApply.title}
           </p>
-          <p className="muted">你已经在招聘平台完成了实际投递或沟通吗？</p>
+          <p className="muted">
+            {confirmApplyFromM6
+              ? '请先查看 BOSS：该岗位的沟通是否已经成功建立？只有确认成功后才记录为已投递；取消会保留“结果待确认”的审计记录。'
+              : '你已经在招聘平台完成了实际投递或沟通吗？'}
+          </p>
           <ResumePicker
             resumes={resumes}
             value={appliedResume}
@@ -541,8 +711,138 @@ export default function ApplicationQueuePage() {
             />
           </div>
           <div className="field-hint">
-            JobAgent 不会替你投递，也不会向招聘方发送任何消息 —— 这里只记录你自己完成的动作。
+            {confirmApplyFromM6
+              ? '确认后复用现有 mark_applied 唯一路径进入已投递列表；不会创建第二套投递记录。'
+              : '这是完全手动记录入口，不会操作招聘网站；M6 单岗位确认入口与此处相互独立。'}
           </div>
+        </Modal>
+      ) : null}
+
+      {m6Target ? (
+        <Modal
+          title={m6Approval ? '最终确认：执行一次投递？' : '准备单岗位投递确认'}
+          onClose={() => {
+            if (!m6Busy && m6Approval?.state !== 'executing' && !m6StatusUnknown) {
+              setM6Target(null)
+              setM6Approval(null)
+            }
+          }}
+          footer={
+            <>
+              <button type="button" disabled={m6Busy || m6Approval?.state === 'executing' || m6StatusUnknown} onClick={() => {
+                setM6Target(null)
+                setM6Approval(null)
+              }}>
+                取消
+              </button>
+              {m6StatusUnknown ? (
+                <button type="button" disabled={m6Busy} onClick={() => void refreshM6Attempt()}>
+                  {m6Busy ? '正在刷新…' : '刷新尝试状态'}
+                </button>
+              ) : null}
+              {m6Approval ? (
+                m6Approval.state === 'executing' ? (
+                  <button
+                    type="button"
+                    disabled={m6Busy}
+                    onClick={() => void abandonM6Attempt()}
+                  >
+                    {m6Busy ? '正在记录…' : '我已人工核对，结束为结果未知'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    disabled={m6Busy || m6Approval.state !== 'pending' || m6Attempted}
+                    onClick={() => void executeM6Approval()}
+                  >
+                    {m6Busy ? '正在执行…' : m6Attempted ? '本确认已发出，不可重试' : '我已最终核对，执行一次'}
+                  </button>
+                )
+              ) : (
+                <button
+                  type="button"
+                  className="btn-primary"
+                    disabled={m6Busy || !m6ResumeId || !m6DynamicAccepted}
+                  onClick={() => void prepareM6Approval()}
+                >
+                  {m6Busy ? '正在生成…' : '生成最终确认（不执行）'}
+                </button>
+              )}
+            </>
+          }
+        >
+          <p className="mt-0">
+            <strong>{m6Approval?.company ?? m6Target.company}</strong>
+            <br />
+            {m6Approval?.title ?? m6Target.title}
+          </p>
+          <Alert tone="warn">
+            BOSS 会在点击「立即沟通」时发送平台动态决定的首次招呼语。
+            <strong> JobAgent 无法在点击前预览、独立核实或控制其正文</strong>，实际发送内容可能变化。
+          </Alert>
+          {m6Approval ? (
+            <>
+              <div className="field">
+                <label>岗位链接</label>
+                <div className="small">{m6Approval.canonical_url}</div>
+              </div>
+              <div className="field">
+                <label>简历</label>
+                <div>{resumes.find((resume) => resume.id === m6Approval.resume_id)?.label ?? `#${m6Approval.resume_id}`}</div>
+              </div>
+              <div className="field">
+                <label>首次招呼语</label>
+                <div className="greeting">未知（由 BOSS 动态生成，JobAgent 无法预览或控制）</div>
+              </div>
+              <div className="field-hint">
+                点击后只允许这一个岗位的一次尝试；不会批量、后台、自动重试或发送后续消息。
+                当前没有可靠的站点成功状态 fixture，因此点击后先记为「结果待确认」，不会自动标记已投递。
+              </div>
+              {m6Approval.state === 'executing' ? (
+                <Alert tone="warn">
+                  扩展已领取这次尝试，但没有返回终态。请先到 BOSS 人工核对。上方按钮只把本地记录
+                  结束为「结果未知」，不会点击网页或重试投递。
+                </Alert>
+              ) : null}
+              {m6StatusUnknown ? (
+                <Alert tone="warn">
+                  后端暂时无法确认本次尝试是否已领取。为避免重复发送，本窗口不会允许再次执行或关闭；
+                  恢复本地服务后请点“刷新尝试状态”。
+                </Alert>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <div className="field">
+                <label htmlFor="m6-resume">本次简历</label>
+                <select
+                  id="m6-resume"
+                  value={m6ResumeId ?? ''}
+                  onChange={(e) => setM6ResumeId(e.target.value ? Number(e.target.value) : null)}
+                >
+                  <option value="">请选择</option>
+                  {resumes.filter((resume) => !resume.archived).map((resume) => (
+                    <option key={resume.id} value={resume.id}>{resume.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="checkbox-row">
+                <input
+                  id="m6-dynamic-accept"
+                  type="checkbox"
+                  checked={m6DynamicAccepted}
+                  onChange={(e) => setM6DynamicAccepted(e.target.checked)}
+                />
+                <label htmlFor="m6-dynamic-accept">
+                  我接受 BOSS 为这个岗位动态生成未知的首次招呼语，并理解 JobAgent 无法预览、核实或控制正文。
+                </label>
+              </div>
+              <div className="field-hint">
+                此处不要求、生成、保存或沿用任何预计正文；AI 也不能代替你勾选确认。
+              </div>
+            </>
+          )}
         </Modal>
       ) : null}
 

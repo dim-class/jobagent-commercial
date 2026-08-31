@@ -7,7 +7,7 @@ untouched instead of forcing the user's file into a rigid model.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -36,6 +36,7 @@ class CareerStrategy(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     version: int = 1
+    early_career_policy: Literal["exclude", "include", "only"] = "include"
     target_cities: list[str] = Field(default_factory=list)
     remote_ok: bool = True
     preferred_roles: list[str] = Field(default_factory=list)

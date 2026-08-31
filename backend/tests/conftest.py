@@ -4,7 +4,7 @@ Environment variables are set *before* any ``app`` import because
 ``app.core.config.settings`` and ``app.db.session.engine`` are module-level
 singletons. That keeps every test on a throwaway SQLite file and a throwaway
 copy of the career strategy, so running the suite never touches the developer's
-real database or ``config/career_strategy.yaml``.
+real database or the user's ``data/career_strategy.yaml``.
 
 No test in this suite makes a network call. The OpenAI agent is always patched.
 """
@@ -22,7 +22,8 @@ _TMP_ROOT = Path(tempfile.mkdtemp(prefix="jobagent-tests-"))
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 _STRATEGY_COPY = _TMP_ROOT / "career_strategy.yaml"
-shutil.copyfile(_PROJECT_ROOT / "config" / "career_strategy.yaml", _STRATEGY_COPY)
+_TEST_STRATEGY = _PROJECT_ROOT / "backend" / "tests" / "fixtures" / "career_strategy.test.yaml"
+shutil.copyfile(_TEST_STRATEGY, _STRATEGY_COPY)
 
 os.environ["DATABASE_URL"] = f"sqlite:///{(_TMP_ROOT / 'test.db').as_posix()}"
 os.environ["CAREER_STRATEGY_PATH"] = str(_STRATEGY_COPY)
@@ -76,7 +77,7 @@ def clean_state():
         finally:
             conn.exec_driver_sql("PRAGMA foreign_keys=ON")
     yield
-    shutil.copyfile(_PROJECT_ROOT / "config" / "career_strategy.yaml", _STRATEGY_COPY)
+    shutil.copyfile(_TEST_STRATEGY, _STRATEGY_COPY)
     load_strategy(force=True)
 
 

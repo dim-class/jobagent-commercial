@@ -74,6 +74,53 @@ export interface TaskCandidateListResponse {
   total: number
 }
 
+// --- M5a: explicit, task-scoped candidate matching + human review ---
+
+export interface TaskMatchCandidateOut {
+  job_id: number
+  title: string
+  company: string
+  cached: boolean
+  overall_score: number | null
+  verdict: Verdict | null
+}
+
+export interface TaskMatchPlanOut {
+  task_id: number
+  min_score: number | null
+  active_resume_id: number
+  active_resume_name: string
+  model: string
+  candidates: TaskMatchCandidateOut[]
+  total_candidates: number
+  /** Already capped at `cap` - how many would actually run right now. */
+  pending_analyses: number
+  /** The honest, uncapped pending count. */
+  pending_total: number
+  cap: number
+}
+
+export interface TaskMatchOutcomeOut {
+  job_id: number
+  cached: boolean
+  overall_score: number | null
+  verdict: Verdict | null
+  /** A safe, actionable Chinese message - never a raw exception/response body. */
+  error: string | null
+  /** Populated only for a classified upstream/model failure. */
+  category: string | null
+  http_status: number | null
+  error_code: string | null
+  request_id: string | null
+}
+
+export interface TaskMatchRunResponse {
+  task_id: number
+  results: TaskMatchOutcomeOut[]
+  analyzed: number
+  failed: number
+}
+
 export type JobStatus =
   | 'new'
   | 'reviewed'
@@ -320,6 +367,7 @@ export interface SalaryPolicy {
 
 export interface CareerStrategy {
   version: number
+  early_career_policy: 'exclude' | 'include' | 'only'
   target_cities: string[]
   remote_ok: boolean
   preferred_roles: string[]
@@ -358,6 +406,19 @@ export interface HealthResponse {
   openai_configured: boolean
   auto_apply: boolean
   models: { fast: string; smart: string }
+}
+
+export interface BatchAnalyzePlan {
+  selected: number
+  limit: number
+  in_batch: number
+  deferred: number
+  cached: number
+  pending: number
+  model: string
+  resume_id: number
+  resume_name: string
+  missing_job_ids: number[]
 }
 
 export interface BatchAnalyzeItem {
@@ -506,6 +567,7 @@ export interface ApplicationProposal {
   city: string | null
   salary_text: string | null
   source: string
+  source_url: string | null
   overall_score: number
   verdict: Verdict
   matched_skills: string[]
@@ -543,6 +605,29 @@ export interface QueueResponse {
     skip_reasons?: string[]
     sorts?: string[]
   }
+}
+
+export interface ApplicationApprovalOut {
+  id: number
+  job_id: number
+  company: string
+  title: string
+  canonical_url: string
+  external_id: string
+  resume_id: number
+  resume_hash: string
+  answers_text: string
+  answers_hash: string
+  answers_source: 'boss_dynamic_unverified' | string
+  state: 'pending' | 'executing' | 'consumed' | 'invalidated'
+  invalidated_reason: string | null
+  outcome: 'applied' | 'unknown' | 'failed' | null
+  outcome_detail: string | null
+  consumed_at: string | null
+  attempt_started_at: string | null
+  applied_event_id: number | null
+  created_at: string
+  updated_at: string
 }
 
 export interface WorkflowResponse {
@@ -660,6 +745,7 @@ export interface RecruiterMessageOut {
   conversation_id: number
   direction: MessageDirection
   raw_text: string
+  source_message_id: string | null
   source_message_time_text: string | null
   captured_at: string
   created_at: string
@@ -2024,4 +2110,139 @@ export interface OrchestrationEventCreatePayload {
   event_type: OrchestrationEventType
   job_id?: number | null
   note?: string | null
+}
+// Opt-in bounded search-to-match review. Scores never represent human actions.
+export interface AutoMatchReview {
+  task_id: number; enabled: boolean; state: string | null
+  cap: number; used: number; completed: number; failed: number; uncertain: number
+  resume_id: number | null; model: string | null
+  items: { job_id: number; title: string; company: string; score: number | null;
+    verdict: string | null; state: string; cached: boolean; error: string | null;
+    bucket: string; review_reasons: string[]; summary: string }[]
+}
+
+// --- M5b: bounded cross-task matching + unified human review ---
+
+export interface CrossTaskSourceOut {
+  task_id: number
+  name: string
+  city: string | null
+  keyword: string | null
+}
+
+export interface CrossTaskReviewItemOut {
+  job_id: number
+  title: string
+  company: string
+  city: string | null
+  salary_text: string | null
+  experience_text: string | null
+  education_text: string | null
+  sources: CrossTaskSourceOut[]
+  cached: boolean
+  score: number | null
+  verdict: Verdict | null
+  bucket: string
+  review_reasons: string[]
+  summary: string
+}
+
+export interface CrossTaskMatchPlanOut {
+  task_ids: number[]
+  task_count: number
+  active_resume_id: number
+  active_resume_name: string
+  model: string
+  fingerprint: string
+  unique_jobs: number
+  cached_jobs: number
+  pending_jobs: number
+  max_new_calls: number
+  items: CrossTaskReviewItemOut[]
+}
+
+export interface CrossTaskMatchOutcomeOut {
+  job_id: number
+  cached: boolean
+  analyzed: boolean
+  error: string | null
+  category: string | null
+  http_status: number | null
+}
+
+export interface CrossTaskMatchRunResponse {
+  plan: CrossTaskMatchPlanOut
+  results: CrossTaskMatchOutcomeOut[]
+  calls_used: number
+  analyzed: number
+  failed: number
+}
+// Existing SearchPlan API; counts are rendered DOM observations, not viewport pixels.
+export interface SearchPlanTask {
+  id: number
+  city: string | null
+  keywords: string | null
+  early_career_policy: 'exclude' | 'include' | 'only'
+  state: string | null
+  max_candidates: number | null
+  current_url: string | null
+  scroll_round: number
+  visible_jobs: number
+  observed_jobs: number
+  new_jobs: number
+  duplicate_jobs: number
+  imported_jobs: number
+  no_new_rounds: number
+  current_candidate: string | null
+  last_action: string | null
+  last_error: string | null
+  paused_reason: string | null
+  updated_at: string
+}
+
+export interface QuickSearchPrepareResponse {
+  tasks: SearchPlanTask[]
+  active_resume_name: string
+  keyword_source: 'career_strategy'
+}
+
+export interface SearchPlanOptions {
+  supported_cities: string[]
+  max_selected_cities: number
+  max_batch_tasks: number
+}
+export interface SalaryBackfillPlanItem {
+  job_id: number
+  company: string
+  title: string
+  source_url: string
+}
+
+export interface SalaryBackfillPlan {
+  total_jobs: number
+  salary_present: number
+  salary_missing: number
+  eligible_jobs: number
+  ineligible_jobs: number
+  fingerprint: string
+  items: SalaryBackfillPlanItem[]
+}
+
+export interface SalaryBackfillRun {
+  id: number
+  state: 'pending' | 'running' | 'paused' | 'completed' | 'cancelled'
+  total_jobs: number
+  processed_jobs: number
+  updated_jobs: number
+  unavailable_jobs: number
+  failed_jobs: number
+  session_processed: number
+  session_cap: number
+  current_job_id: number | null
+  paused_reason: string | null
+  last_action: string | null
+  last_error: string | null
+  created_at: string
+  updated_at: string
+  items: (SalaryBackfillPlanItem & { position: number; state: string; reason: string | null })[]
 }

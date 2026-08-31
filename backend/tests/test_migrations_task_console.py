@@ -76,10 +76,11 @@ def test_the_upgrade_only_adds_the_task_console_tables(v10_db):
     before = {t: columns(v10_db, t) for t in TRACKED}
     assert upgrade(v10_db) == "upgraded"
 
-    assert current_revision_of(v10_db) == "0011_supervised_sessions"
+    assert current_revision_of(v10_db) == "0021_candidate_stage_policy"
     assert {"job_search_tasks", "task_candidates"} <= set(tables(v10_db))
     for table, cols in before.items():
-        assert columns(v10_db, table) == cols, f"{table} changed shape"
+        expected = cols | ({"source_message_id"} if table == "recruiter_messages" else set())
+        assert columns(v10_db, table) == expected, f"{table} changed shape"
 
 
 def test_task_candidates_ondelete_actions(v10_db):
@@ -156,5 +157,5 @@ def test_a_v03_database_reaches_the_task_console_schema_in_one_go(v03_db):
     finally:
         engine.dispose()
 
-    assert current_revision_of(v03_db) == "0011_supervised_sessions"
+    assert current_revision_of(v03_db) == "0021_candidate_stage_policy"
     assert {"job_search_tasks", "task_candidates"} <= set(tables(v03_db))

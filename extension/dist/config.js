@@ -14,4 +14,6 @@ var JobAgentConfig = {
     TASKS_PATH: '/api/tasks',
     SESSIONS_PATH: '/api/extension/sessions',
     SESSIONS_ACTIVE_PATH: '/api/extension/sessions/active',
+    SEARCH_PLAN_PATH: '/api/tasks/search-plan',
+    SEARCH_PLAN_GENERATE_PATH: '/api/tasks/search-plan/generate',
 };

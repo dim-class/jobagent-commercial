@@ -102,3 +102,63 @@ class TaskCandidateOut(BaseModel):
 class TaskCandidateListResponse(BaseModel):
     items: list[TaskCandidateOut]
     total: int
+
+
+# --------------------------------------------------------------------------
+# M5a: explicit, task-scoped candidate matching + human review
+# --------------------------------------------------------------------------
+
+
+class TaskMatchCandidateOut(BaseModel):
+    """One candidate's cost/cache status - read-only, never spends anything."""
+
+    job_id: int
+    title: str
+    company: str
+    cached: bool
+    #: The candidate's current score/verdict, only if already cached -
+    #: never fabricated for a pending candidate.
+    overall_score: int | None = None
+    verdict: Verdict | None = None
+
+
+class TaskMatchPlanOut(BaseModel):
+    task_id: int
+    min_score: int | None = None
+    active_resume_id: int
+    active_resume_name: str
+    model: str
+    candidates: list[TaskMatchCandidateOut]
+    total_candidates: int
+    #: How many candidates would actually be scored if confirmed *right now*
+    #: - already capped at `MAX_ANALYSES_PER_RUN`. `pending_total` is the
+    #: honest, uncapped count, so the UI can say "N more after this run".
+    pending_analyses: int
+    pending_total: int
+    cap: int
+
+
+class TaskMatchRunRequest(BaseModel):
+    confirmed: bool = False
+
+
+class TaskMatchOutcomeOut(BaseModel):
+    job_id: int
+    cached: bool
+    overall_score: int | None = None
+    verdict: Verdict | None = None
+    #: A safe, actionable Chinese message - never a raw exception/response body.
+    error: str | None = None
+    #: Populated only for a classified upstream/model failure - see
+    #: `services/ai_diagnostics.py`. Never a raw HTTP body or header.
+    category: str | None = None
+    http_status: int | None = None
+    error_code: str | None = None
+    request_id: str | None = None
+
+
+class TaskMatchRunResponse(BaseModel):
+    task_id: int
+    results: list[TaskMatchOutcomeOut]
+    analyzed: int
+    failed: int

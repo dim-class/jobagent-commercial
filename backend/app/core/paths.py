@@ -17,7 +17,9 @@ DATA_DIR: Path = PROJECT_ROOT / "data"
 UPLOADS_DIR: Path = DATA_DIR / "uploads"
 #: Persistent Playwright profiles, one subdirectory per recruitment site.
 BROWSER_PROFILES_DIR: Path = DATA_DIR / "browser_profiles"
-CAREER_STRATEGY_PATH: Path = CONFIG_DIR / "career_strategy.yaml"
+# Per-user mutable data belongs beside the local database, never in the
+# tracked product template under ``config/``.
+CAREER_STRATEGY_PATH: Path = DATA_DIR / "career_strategy.yaml"
 
 
 def ensure_runtime_dirs() -> None:

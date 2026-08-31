@@ -124,12 +124,29 @@ def test_starting_on_a_busy_port_writes_no_pid_file_and_takes_no_backup(tmp_path
     assert str(port) in message, "the message must name the port"
 
 
-def test_the_doctor_reports_the_configured_port(tmp_path, capsys):
-    holder, port = _busy_port()
+def test_the_doctor_checks_the_port_it_was_given_not_a_cached_one(tmp_path, capsys):
+    """`get_settings()` is lru_cached, so setting APP_PORT cannot reach an
+    already-constructed Settings. The doctor once read `cfg.app_port` and so
+    checked whichever port was cached. That only looked correct locally,
+    because the developer happened to have something on 8000; CI, where 8000 is
+    free, caught it."""
+    holder, busy_port = _busy_port()
     try:
-        busy = portable.main(["--data-dir", str(tmp_path), "--port", str(port), "--doctor"])
+        busy = portable.main(
+            ["--data-dir", str(tmp_path), "--port", str(busy_port), "--doctor"]
+        )
         busy_output = capsys.readouterr().out
     finally:
         holder.close()
-    assert "port_available" in busy_output
+
+    assert "FAIL port_available" in busy_output
     assert busy != 0, "doctor must fail while the port it would use is taken"
+
+    # The same run on a port nothing holds must pass, proving the check follows
+    # the argument rather than a cached or default value.
+    free_holder, free_port = _busy_port()
+    free_holder.close()
+    ok = portable.main(["--data-dir", str(tmp_path), "--port", str(free_port), "--doctor"])
+    free_output = capsys.readouterr().out
+    assert "OK   port_available" in free_output
+    assert ok == 0

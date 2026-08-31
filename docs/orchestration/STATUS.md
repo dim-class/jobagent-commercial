@@ -1,5 +1,31 @@
 # JobAgent Orchestration Status
 
+- Current (2026-09-01): Windows portable 候选修复了一个**正确性 bug**（不只是体验问题），
+  已在真实产物上验证。用户目前只在 Windows 使用，本轮按此优先级推进。
+- **端口占用会把失败的启动伪装成成功的启动。** 启动器过去在 uvicorn 尝试绑定**之前**就已经
+  写好 PID 记录、做完升级备份、并启动了浏览器轮询线程。绑定失败时进程以退出码 3 结束，但
+  `_open_when_ready` 已经在轮询 `/health`——如果端口被**另一个 JobAgent** 占用，它会拿到那个
+  进程的健康响应，于是：写下 `runtime-version.json` 确认一个自己从未提供过的版本、置位 `ready`
+  （这会**抑制 `finally` 里的升级回滚**）、并把浏览器打开到那个进程的界面上。
+  也就是说升级失败时备份不会被恢复，而用户看到的是一个"正常工作"的 JobAgent。
+  P2B 验收当时出现的假阳性正是这个原因：健康的 `/health` 来自遗留的开发后端。
+- 修复：新增 `portable._port_available()`，在写 PID、做备份、开浏览器**之前**探测端口。被占时打印
+  端口号、两条解决办法（`--stop` 或 `--port`）、以及"该地址上的页面属于别的程序"，退出码 4，
+  不留任何 PID 记录。`--doctor` 同步增加 `port_available` 检查（`cli._port_is_free`），
+  端口被占时报 FAIL/退出码 1，而不再是 PASS/0。
+- `SHA256SUMS.txt` 改为 LF 行尾（`[System.IO.File]::WriteAllText` + 无 BOM UTF8）。CRLF 时
+  `sha256sum -c`（Git for Windows 自带、也是最常用的校验方式）会去找一个名字以回车结尾的文件并
+  报 FAILED，即使哈希本身正确。
+- 验收：测试先红后绿（`test_portable_runtime.py` 8/8，新增 3 个用例覆盖端口探测、启动拒绝、
+  doctor 报错）；完整后端 pytest 退出码 0。重新构建 run 33415774563 全部步骤 success，
+  下载产物用 `sha256sum -c` **直接校验通过**（`JobAgent-Windows-x64-0.1.0-4.zip: OK`）。
+  用**打包后的真实 exe** 复测：端口被占时 `--doctor` FAIL/退出码 1、启动退出码 4、无 PID 残留。
+- 一处**排除掉的伪缺陷**：exe 的中文提示在本会话的控制台捕获里显示为乱码。核对原始字节后确认
+  它输出的是 **GBK**（`端` = B6CB），UTF-8 解码失败而 GBK 解码结构完整——在中文 Windows 控制台
+  （代码页 936）会正常显示。乱码来自我的捕获管道按 UTF-8 解码，不是产品问题，未做改动。
+- P2B/P2C 边界不变：仍是**未签名候选**；签名、安装/卸载 UX、无工具链干净 Windows 验收属 P2C。
+  本轮未发布 Release、未签名、未控制 Chrome/BOSS、未调用 AI、未触碰用户数据。
+
 - Current (2026-09-01): **P2B 远程验收 PASS**。`b5be113` 已推送到 `origin/commercial`，
   「Windows portable candidate」workflow 在 GitHub Actions 上完整跑通并产出可下载的未签名候选包。
   P2B 仍是**未签名候选**，不是最终商用安装器；签名、安装/卸载 UX 与无工具链干净 Windows 验收属 P2C。

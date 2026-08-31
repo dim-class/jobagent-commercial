@@ -92,7 +92,10 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         # The port the runtime would actually bind. A doctor that says PASS
         # while the port is taken sends the user to whatever else is serving
         # it - which is exactly how a failed start once looked healthy.
-        "port_available": _port_is_free(cfg.app_host, cfg.app_port),
+        # From the caller, never from `cfg.app_port`: `get_settings()` is
+        # lru_cached, so a port chosen on the command line after the first
+        # settings read would silently check a different one.
+        "port_available": _port_is_free(cfg.app_host, getattr(args, "port", None) or cfg.app_port),
     }
     payload = {
         "ok": all(checks.values()),
@@ -131,6 +134,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("info", help="print non-secret configuration").set_defaults(func=_cmd_info)
     doctor = sub.add_parser("doctor", help="check runtime files without printing secrets")
     doctor.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    doctor.add_argument(
+        "--port", type=int, default=None, help="the port the runtime would bind"
+    )
     doctor.set_defaults(func=_cmd_doctor)
 
     args = parser.parse_args(argv)

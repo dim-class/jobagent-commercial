@@ -209,7 +209,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.doctor:
         from app.cli import main as cli_main
 
-        return cli_main(["doctor"])
+        # Pass the port explicitly: settings are lru_cached, so setting
+        # APP_PORT above does not reach an already-constructed Settings.
+        return cli_main(["doctor", "--port", str(args.port)])
 
     existing_record = _read_json(pid_file) or {}
     existing = _same_process(existing_record)

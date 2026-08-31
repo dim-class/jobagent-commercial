@@ -39,11 +39,17 @@ jobs:
       - name: Build and audit unsigned candidate
         shell: pwsh
         run: ./scripts/build-windows-portable.ps1 -Version "0.1.0-${{ github.run_number }}"
+      - name: Verify artifact files
+        shell: pwsh
+        run: |
+          Get-ChildItem -LiteralPath .artifacts -Force
+          if (-not (Get-ChildItem -LiteralPath .artifacts -Filter 'JobAgent-Windows-x64-*.zip' -File)) { throw 'Portable ZIP was not created.' }
+          if (-not (Test-Path -LiteralPath .artifacts/SHA256SUMS.txt)) { throw 'SHA256SUMS.txt was not created.' }
       - uses: actions/upload-artifact@v4
         with:
           name: JobAgent-Windows-x64-unsigned-${{ github.run_number }}
           path: |
-            .artifacts/JobAgent-Windows-x64-*.zip
+            .artifacts/*.zip
             .artifacts/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14

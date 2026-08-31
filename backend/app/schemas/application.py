@@ -109,6 +109,11 @@ class ApplicationProposal(BaseModel):
     reasoning_summary: str = ""
     greeting_message: str = ""
 
+    #: Whether the posting explicitly targets an early-career cohort
+    #: (应届 / 校招 / 实习). Computed deterministically from title + JD by the
+    #: same `job_eligibility` classifier the intake uses - never a model.
+    early_career: bool = False
+
     job_status: JobStatus
     proposal_state: ProposalState
     review_after: datetime | None = None
@@ -123,6 +128,10 @@ class QueueSummary(BaseModel):
     strong_apply: int = 0
     apply: int = 0
     later: int = 0
+    #: How many otherwise-eligible proposals the candidate-stage policy hid.
+    #: Reported, never silent: the UI says so and can show them on request.
+    early_career_hidden: int = 0
+    early_career_policy: str = "include"
     applied_today: int = 0
     replied_today: int = 0
     interview_today: int = 0

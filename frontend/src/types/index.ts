@@ -568,6 +568,7 @@ export interface ApplicationProposal {
   salary_text: string | null
   source: string
   source_url: string | null
+  early_career: boolean
   overall_score: number
   verdict: Verdict
   matched_skills: string[]
@@ -587,6 +588,8 @@ export interface QueueSummary {
   strong_apply: number
   apply: number
   later: number
+  early_career_hidden: number
+  early_career_policy: string
   applied_today: number
   replied_today: number
   interview_today: number

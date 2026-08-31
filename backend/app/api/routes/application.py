@@ -19,6 +19,7 @@ from dataclasses import replace
 from fastapi import APIRouter, Body, Depends, Query
 from sqlalchemy.orm import Session
 
+from app.core.career_strategy import load_strategy
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models import JobStatus, Verdict
@@ -61,12 +62,18 @@ def get_queue(
     source: str | None = Query(default=None),
     include_maybe: bool = Query(default=False, description="包含 Maybe 的岗位"),
     include_decided: bool = Query(default=False, description="包含已处理的岗位"),
+    include_early_career: bool = Query(
+        default=False, description="忽略候选阶段设置，显示被它隐藏的岗位"
+    ),
     sort: str = Query(default="recommended", pattern="^(recommended|score|newest|salary)$"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> QueueResponse:
     """Today's proposals, derived from Job + latest analysis on every read."""
     settings = get_settings()
+    # The live strategy decides, not a task snapshot: this is a view over the
+    # whole library, not one task's intake.
+    policy = str(load_strategy().get("early_career_policy") or "include")
     filters = QueueFilters(
         city=city,
         verdict=verdict,
@@ -76,6 +83,8 @@ def get_queue(
         source=source,
         include_maybe=include_maybe,
         include_decided=include_decided,
+        early_career_policy=policy,
+        include_early_career=include_early_career,
         sort=sort,
         limit=limit,
         offset=offset,
@@ -114,6 +123,8 @@ def get_queue(
             proposals,
             daily_target=settings.daily_application_target,
             timezone_name=settings.report_timezone,
+            early_career_policy=policy,
+            include_maybe=include_maybe,
         ),
         facets={
             **application_queue.build_facets(city_facet_source),

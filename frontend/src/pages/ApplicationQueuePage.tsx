@@ -308,6 +308,33 @@ export default function ApplicationQueuePage() {
         </Alert>
       ) : null}
 
+      {/* Filtering the queue without saying so would be a silent exclusion.
+          The count comes from the API and always matches what vanished. */}
+      {summary && summary.early_career_hidden > 0 ? (
+        <Alert tone="info">
+          按当前「候选阶段」设置（
+          {summary.early_career_policy === 'exclude'
+            ? '排除应届/校招/实习'
+            : summary.early_career_policy === 'only'
+              ? '只看应届/校招/实习'
+              : summary.early_career_policy}
+          ），已隐藏 <strong>{summary.early_career_hidden}</strong> 个岗位。{' '}
+          <button
+            type="button"
+            className="btn-ghost btn-sm"
+            onClick={() =>
+              updateFilter('include_early_career', !filters.include_early_career)
+            }
+          >
+            {filters.include_early_career ? '重新隐藏' : '查看这些岗位'}
+          </button>
+          <Link className="btn-ghost btn-sm" to="/strategy">
+            修改设置
+          </Link>
+        </Alert>
+      ) : null}
+
+
       <div className="grid grid-stats">
         <section className="card stat">
           <span className="stat-label">待处理</span>
@@ -541,6 +568,11 @@ export default function ApplicationQueuePage() {
             </div>
 
             <div className="job-card-meta mt-1">
+              {proposal.early_career ? (
+                <span className="chip chip-bad" title="标题或 JD 显示这是应届/校招/实习岗位">
+                  应届/校招
+                </span>
+              ) : null}
               {proposal.city ? <span className="chip">{proposal.city}</span> : null}
               {proposal.salary_text ? <span className="chip">{proposal.salary_text}</span> : null}
               <span className="chip">{proposal.source}</span>

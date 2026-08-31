@@ -201,6 +201,7 @@ export interface QueueFilters {
   source?: string
   include_maybe?: boolean
   include_decided?: boolean
+  include_early_career?: boolean
   sort?: 'recommended' | 'score' | 'newest' | 'salary'
   limit?: number
   offset?: number

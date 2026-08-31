@@ -462,3 +462,109 @@ def test_reanalysis_updates_the_proposal_without_a_second_row(client, make_analy
     assert body["total"] == 1, "the queue is derived, not accumulated"
     assert body["items"][0]["overall_score"] == 93
     assert body["items"][0]["verdict"] == "strong_apply"
+
+
+# --------------------------------------------------------------------------
+# candidate-stage policy applies to the queue, visibly
+# --------------------------------------------------------------------------
+
+
+CAMPUS = "【2027届秋招】运维开发工程师"
+
+
+def set_policy(policy: str) -> None:
+    from app.core.career_strategy import load_strategy, save_strategy
+
+    strategy = load_strategy()
+    strategy["early_career_policy"] = policy
+    save_strategy(strategy)
+
+
+def test_exclude_hides_campus_jobs_from_the_queue_and_says_how_many(client, make_analyzed):
+    """The real case: a 76-point 2027届秋招 posting sat in the queue while the
+    strategy said `exclude`, because the policy only applied at intake."""
+    normal = make_analyzed(company="普通公司")
+    campus = make_analyzed(company="校招公司", title=CAMPUS)
+    set_policy("exclude")
+
+    body = client.get("/api/application-queue").json()
+    ids = [item["job_id"] for item in body["items"]]
+    assert normal in ids
+    assert campus not in ids, "an excluded stage must not reach the queue"
+
+    # Hidden, never silent.
+    assert body["summary"]["early_career_hidden"] == 1
+    assert body["summary"]["early_career_policy"] == "exclude"
+
+
+def test_the_hidden_jobs_can_still_be_shown_on_request(client, make_analyzed):
+    campus = make_analyzed(company="校招公司", title=CAMPUS)
+    set_policy("exclude")
+
+    shown = client.get(
+        "/api/application-queue", params={"include_early_career": True}
+    ).json()
+    assert campus in [item["job_id"] for item in shown["items"]]
+    assert shown["summary"]["early_career_hidden"] == 1
+
+
+def test_include_keeps_both_stages(client, make_analyzed):
+    normal = make_analyzed(company="普通公司")
+    campus = make_analyzed(company="校招公司", title=CAMPUS)
+    set_policy("include")
+
+    body = client.get("/api/application-queue").json()
+    ids = [item["job_id"] for item in body["items"]]
+    assert normal in ids and campus in ids
+    assert body["summary"]["early_career_hidden"] == 0
+
+
+def test_only_keeps_just_the_early_career_jobs(client, make_analyzed):
+    normal = make_analyzed(company="普通公司")
+    campus = make_analyzed(company="校招公司", title=CAMPUS)
+    set_policy("only")
+
+    body = client.get("/api/application-queue").json()
+    ids = [item["job_id"] for item in body["items"]]
+    assert ids == [campus]
+    assert normal not in ids
+    assert body["summary"]["early_career_hidden"] == 1
+
+
+def test_the_policy_is_a_view_rule_and_never_changes_job_status(client, make_analyzed):
+    campus = make_analyzed(company="校招公司", title=CAMPUS)
+    before = client.get(f"/api/jobs/{campus}").json()["status"]
+    set_policy("exclude")
+    client.get("/api/application-queue")
+    assert client.get(f"/api/jobs/{campus}").json()["status"] == before
+
+
+def test_each_proposal_carries_the_stage_flag_so_the_ui_can_label_it(client, make_analyzed):
+    make_analyzed(company="普通公司")
+    make_analyzed(company="校招公司", title=CAMPUS)
+    set_policy("include")
+
+    body = client.get("/api/application-queue").json()
+    flags = {item["title"]: item["early_career"] for item in body["items"]}
+    assert flags[CAMPUS] is True
+    assert any(v is False for k, v in flags.items() if k != CAMPUS)
+
+
+def test_the_hidden_count_matches_what_actually_vanished(client, make_analyzed):
+    """The notice must agree with the list. A hidden `maybe` row was being left
+    out of the count while `include_maybe` put it in the queue, so the banner
+    said 1 while 2 rows disappeared."""
+    make_analyzed(company="普通公司")
+    make_analyzed(company="校招A", title=CAMPUS)
+    make_analyzed(company="校招B", title="【27届校招】系统运维工程师", verdict="maybe")
+    set_policy("exclude")
+
+    params = {"include_maybe": True, "limit": 100}
+    hidden_view = client.get("/api/application-queue", params=params).json()
+    full_view = client.get(
+        "/api/application-queue", params={**params, "include_early_career": True}
+    ).json()
+
+    vanished = full_view["total"] - hidden_view["total"]
+    assert vanished == 2
+    assert hidden_view["summary"]["early_career_hidden"] == vanished

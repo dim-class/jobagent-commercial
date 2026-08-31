@@ -26,6 +26,7 @@ from app.schemas.application import (
     QueueSummary,
 )
 from app.services.timezones import is_local_today, local_now
+from app.services.job_eligibility import is_early_career_track
 from app.services.urls import canonical_url, is_openable_posting_url
 
 #: Sort keys the UI offers.
@@ -49,6 +50,12 @@ class QueueFilters:
     source: str | None = None
     include_maybe: bool = False
     include_decided: bool = False
+    #: The candidate-stage policy this view applies (from the live strategy).
+    early_career_policy: str = "include"
+    #: Explicit "show me what the policy hid". Never on by default, so the
+    #: policy actually takes effect, and never silent - `build_summary`
+    #: reports the count either way.
+    include_early_career: bool = False
     sort: str = "recommended"
     limit: int = 50
     offset: int = 0
@@ -120,6 +127,7 @@ def build_proposal(job: Job, *, now: datetime | None = None) -> ApplicationPropo
         missing_skills=[str(s) for s in (result.get("missing_skills") or [])],
         reasoning_summary=str(result.get("reasoning_summary") or ""),
         greeting_message=str(result.get("greeting_message") or ""),
+        early_career=is_early_career_track(job.title, job.normalized_description),
         job_status=job.status,
         proposal_state=proposal_state(job, now=now),
         review_after=job.review_after,
@@ -161,6 +169,17 @@ def is_eligible(proposal: ApplicationProposal, filters: QueueFilters) -> bool:
         return False
     if filters.source and proposal.source != filters.source:
         return False
+
+    # The candidate-stage policy is a *view* rule: it hides rows and never
+    # touches `Job.status`. `proposal.early_career` was classified from title +
+    # full JD when the proposal was built, so re-deriving it here from the
+    # title alone would be a second, weaker classifier. `include` is a no-op,
+    # and `include_early_career` is the visible escape hatch.
+    if not filters.include_early_career:
+        if filters.early_career_policy == "exclude" and proposal.early_career:
+            return False
+        if filters.early_career_policy == "only" and not proposal.early_career:
+            return False
     if filters.keyword:
         needle = filters.keyword.strip().lower()
         haystack = " ".join(
@@ -228,9 +247,21 @@ def all_proposals(db: Session, *, now: datetime | None = None) -> list[Applicati
 
 
 def build_summary(
-    db: Session, proposals: list[ApplicationProposal], *, daily_target: int, timezone_name: str
+    db: Session,
+    proposals: list[ApplicationProposal],
+    *,
+    daily_target: int,
+    timezone_name: str,
+    early_career_policy: str = "include",
+    include_maybe: bool = False,
 ) -> QueueSummary:
-    """Counts for the header cards. Daily numbers use the local calendar day."""
+    """Counts for the header cards. Daily numbers use the local calendar day.
+
+    ``early_career_hidden`` is counted over the same active set the queue draws
+    from, so a policy that hides rows always says how many. Filtering the queue
+    without saying so would be exactly the kind of silent exclusion this project
+    refuses everywhere else.
+    """
     active = [
         p
         for p in proposals
@@ -248,7 +279,25 @@ def build_summary(
         if event.event_type in today_counts and is_local_today(event.created_at):
             today_counts[event.event_type] += 1
 
+    # Counted over the same verdict set the queue itself is showing: with
+    # `include_maybe` on, a hidden `maybe` row is one the user would otherwise
+    # have seen, so leaving it out made the notice under-report what vanished.
+    stage_allowed = set(RECOMMENDED_VERDICTS) | ({Verdict.maybe} if include_maybe else set())
+    stage_scope = [
+        p
+        for p in proposals
+        if p.verdict in stage_allowed and p.job_status not in DECIDED_STATUSES
+    ]
+    if early_career_policy == "exclude":
+        hidden = sum(1 for p in stage_scope if p.early_career)
+    elif early_career_policy == "only":
+        hidden = sum(1 for p in stage_scope if not p.early_career)
+    else:
+        hidden = 0
+
     return QueueSummary(
+        early_career_hidden=hidden,
+        early_career_policy=early_career_policy,
         pending=len(pending),
         strong_apply=sum(1 for p in pending if p.verdict is Verdict.strong_apply),
         apply=sum(1 for p in pending if p.verdict is Verdict.apply),

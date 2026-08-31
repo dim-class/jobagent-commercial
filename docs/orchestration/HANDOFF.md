@@ -1,4 +1,4 @@
-# Handoff — 2026-08-31
+# Handoff — 2026-09-01
 
 Written for whoever picks this up next. Read `CLAUDE.md` first; this file only
 records the things that are true right now and are easy to get wrong.
@@ -13,9 +13,12 @@ records the things that are true right now and are easy to get wrong.
 | Remote | `https://github.com/dim-class/jobagent-commercial` (**private**) |
 | Archived old repo | `dim-class/Qirui-JobAgent` — unrelated history, 1 commit, read-only |
 
-The verified clean commercial baseline before P2A work was `532f530`, in sync
-with `origin/commercial`. Always verify the current hash rather than relying on
-this historical handoff value.
+Verified clean at `959faa8`, in sync with `origin/commercial`, with regular CI
+green (run `33417074087`). Always re-verify the current hash rather than
+trusting a historical handoff value.
+
+**The user runs this on Windows only.** Weigh Windows behaviour first; a
+Linux-only concern is not a reason to change product behaviour here.
 
 ## Personal vs commercial — do not break this
 
@@ -58,6 +61,57 @@ the same way. CI runs daily partly to catch this.
 build+test, on push/PR and daily. All three green as of run `33400062616`.
 Note pytest does not create the parent of `--basetemp`, hence the `mkdir -p`.
 
+## P2B — the Windows portable candidate
+
+Built by `.github/workflows/windows-portable.yml` (manual dispatch or a `v*`
+tag). It produces an **unsigned** ZIP plus `SHA256SUMS.txt`. Signing,
+install/uninstall UX and a clean toolchain-free Windows acceptance are P2C and
+have not been started.
+
+Remote acceptance passed on 2026-09-01: every workflow step green, the
+downloaded ZIP matched its declared SHA256, `--doctor` passed, `/health`
+returned `status=ok` + `database=ok`, the root page returned 200, and `--stop`
+removed the process, the PID record and the port binding. The bundle carries
+the neutral strategy template only.
+
+### Two traps this milestone actually sprang
+
+**A failed start could look like a successful one.** The launcher used to write
+its PID record, take the upgrade backup and start the browser poller *before*
+uvicorn tried to bind. On a busy port it exited 3, but the poller had already
+found the *other* process's healthy `/health`, written `runtime-version.json`,
+set `ready` (which suppresses the upgrade rollback) and opened a browser onto
+that other process. A failed upgrade would silently keep its backup
+unrestored. Fixed in `4f9aac4`: `portable._port_available()` runs first, and a
+busy port exits 4 with a message naming the port and saying the page on that
+address belongs to another program.
+
+**`get_settings()` is `lru_cache`d.** Setting `APP_PORT` in `portable.main()`
+does not reach an already-constructed `Settings`, so the doctor's port check
+read a stale value. It passed locally only because this machine had a dev
+backend on 8000; CI, where 8000 is free, caught it. Fixed in `959faa8` by
+passing `--port` into the doctor subcommand explicitly. **If you add a check
+that depends on runtime configuration, take it from the caller, not from
+`get_settings()`.**
+
+The second trap is the more general lesson: a local green can be an accident of
+what happens to be listening. When a test involves ports or the clock, make it
+assert both directions in one run.
+
+### Do not "fix" this — it is not a bug
+
+The portable exe writes its Chinese console output as **GBK** (`端` = `B6CB`),
+which is correct for a Chinese Windows console (codepage 936). It looks like
+mojibake in a tool that decodes captured output as UTF-8. This was checked at
+the byte level: UTF-8 decoding fails, GBK decoding yields the intact message.
+Changing it to UTF-8 would break the real console it is meant for.
+
+### Known, deliberately unfixed
+
+`SHA256SUMS.txt` is now written with LF so `sha256sum -c` (Git for Windows) can
+consume it; verified against the real artifact. Nothing else from P2B is
+outstanding.
+
 ## M6 — the one genuinely dangerous area
 
 M6 is human-confirmed **single** application execution. Policy is in
@@ -96,12 +150,21 @@ Score distribution is poor: 0 jobs above 89, 72 of 130 below 60.
 
 ## Suggested next steps (none started, none authorized)
 
-1. The user was advised to drop 「基础设施」 from `preferred_roles` — it has
+1. **P2C**: signing, install/uninstall UX, and acceptance on a clean Windows
+   box with no Python/Node toolchain. Not begun.
+2. Windows launch polish the user has not asked for yet: what the console
+   window does on a double-click, and whether `README-FIRST.txt` is readable
+   enough for a first run.
+3. The user was advised to drop 「基础设施」 from `preferred_roles` — it has
    enough evidence to call wasteful. Their edit to make, not yours.
-2. Add `--reload` to the backend launcher, or make the launcher obvious about
+4. Add `--reload` to the backend launcher, or make the launcher obvious about
    needing a restart.
-3. Multi-user / auth / deployment for "giving it to other people" is a separate
+5. Multi-user / auth / deployment for "giving it to other people" is a separate
    design conversation the user has explicitly deferred.
+
+**Note:** the dev backend that had been running on port 8000 was stopped on
+2026-09-01, to reproduce the CI environment while verifying the port fix. It
+was not restarted. Ask before starting it.
 
 Ask the user before starting any of these. The project's convention is one
 bounded, explicitly authorized milestone at a time in `TASK.md`.

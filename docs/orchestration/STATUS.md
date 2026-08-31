@@ -1,5 +1,36 @@
 # JobAgent Orchestration Status
 
+- Current (2026-08-31): 商用分支 `commercial` 已推送到私有仓库
+  https://github.com/dim-class/jobagent-commercial ，**CI 三个 job 全绿**
+  （run 33400062616：backend / extension / frontend）。旧仓库 `Qirui-JobAgent` 已归档。
+- 本轮按「先让自己用得舒服」的优先级做了三件事：
+  1. **候选阶段策略作用到队列**（`c700c51`）。此前 P1 只在入库时生效，库里已有的 130 个岗位不受
+     影响，`exclude` 策略下仍有 76 分的「2027届秋招」躺在投递队列里。现在队列按当前策略过滤：
+     标记在构建 proposal 时用**完整 JD** 经同一分类器算好（不在过滤时用标题重算第二套），
+     不动 `Job.status`，隐藏必须说出来（顶部提示 + 一键展开 + 行内「应届/校招」标签）。
+     修掉一个自造的 bug：提示说隐藏 1 个而实际消失 2 个，因为计数只算 apply/strong_apply，
+     漏了 `include_maybe` 打开后在队列里的 maybe 行。
+  2. **搜索方向表现统计**（`3fc7269` + `a9e25b2`）。零 AI，复用 `statistics.py`（不写第二套置信度）。
+     真实数据结论：云计算工程师 8/28 推荐率 29%（strong）、运维开发 4/24 17%（strong）、
+     **基础设施 0/8、均分 31.5**（moderate，纯烧钱）。排序按「置信档优先，再 Wilson 下界」，
+     所以 AWS 的 2/3 = 67% 被正确压到样本不足区、没冒充第一名。面板放在任务控制台关键词选择器下方。
+  3. **CI + dist 漂移守卫**（`cc185f5` + `2fdd2e0`）。`dist-freshness.test.cjs` 把当前源码编译到
+     临时目录与 `dist/` 逐字节比对；缺少编译器时**失败而非跳过**（那正是掩盖问题的场景）。
+     红绿双向验证过：dist 最新时绿，改一行源码不重建即红并给出 `npm run build` 指令。
+     workflow 在 push/PR 与每日定时运行三套测试。
+- 首次 CI 失败是我流水线自身的问题（pytest 不会创建 `--basetemp` 的父目录，而 `.tmp/` 只是本地
+  gitignore 的工作状态），已修并复跑至全绿；未把未验证的流水线当成可用。
+- 本轮修复的既有缺陷：迁移测试的精确列集合断言与 `0021` 不同步；`test_analytics_api` 用冻结
+  `NOW=2026-08-21` 造数据却调用真实时钟路由，在 8-31 当天开始失败（已锚定真实时钟）；
+  `extension` 的 `npm test` 脚本在 Node 22+ 报错；`frontend` 根本没有 `test` 脚本，导致两个 M6
+  测试无人执行；`extension/node_modules` 丢失 typescript 使 294 个测试跑在无法重建的 dist 上。
+- 个人/商用分离保持不变：个人策略只在 gitignore 的 `data/career_strategy.yaml`；远程 434 个文件中
+  敏感模式仅命中 0 字节的 `data/.gitkeep`。本地 `main` 分支与个人数据未被改动。
+- 运行提醒：用户的后端**不带 `--reload`**，后端改动需重启才生效；本轮为验证重启过数次，
+  当前以后台任务方式运行（PID 由 harness 管理）。
+- 下一步（未开始，需用户确认优先级）：M6 真实点击仍未验证（`HUMAN_CONFIRMED_APPLY_ENABLED` 为
+  False）；「基础设施」方向建议从策略中移除；给别人使用所需的多用户/认证/部署仍是另一轮设计。
+
 - Current (2026-08-31): 商用基线已在本地分支 `commercial` 提交（`b7ed135`），**未推送**——
   仓库没有配置任何 git remote，按要求不猜测地址、不推送。`main` 分支未被改动。
 - P1 候选阶段筛选经审查后**已完整**，未重复造轮子：`job_eligibility.evaluate_early_career_policy`

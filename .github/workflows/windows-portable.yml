@@ -53,3 +53,7 @@ jobs:
             .artifacts/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
+          # `.artifacts` starts with a dot, and upload-artifact v4 treats
+          # dot-prefixed paths as hidden and silently skips them. The build and
+          # the verify step both succeeded; only the upload found nothing.
+          include-hidden-files: true

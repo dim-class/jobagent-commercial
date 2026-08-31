@@ -222,6 +222,32 @@ class StrategyDiff(BaseModel):
     description: str
 
 
+class KeywordCohortOut(BaseModel):
+    """One search keyword's cohort. Every rate travels with its counts."""
+
+    keyword: str
+    cities: list[str] = Field(default_factory=list)
+    jobs: int
+    recommended: int
+    average_score: float | None = None
+    recommend_rate: float | None = None
+    interval_low: float | None = None
+    interval_high: float | None = None
+    confidence: str
+    actionable: bool
+
+
+class SearchKeywordAnalyticsResult(BaseModel):
+    """Which search directions surfaced well-matched postings. Zero AI calls."""
+
+    cohorts: list[KeywordCohortOut] = Field(default_factory=list)
+    analyzed_jobs: int = 0
+    attributed_jobs: int = 0
+    unattributed_jobs: int = 0
+    coverage: float | None = None
+    observations: list[str] = Field(default_factory=list)
+
+
 class CareerAnalyticsResult(BaseModel):
     window: TimeWindow
     generated_at: datetime

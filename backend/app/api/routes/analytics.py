@@ -21,6 +21,8 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.models import RecommendationDecision
 from app.schemas.analytics import (
+    KeywordCohortOut,
+    SearchKeywordAnalyticsResult,
     ApplyProposalRequest,
     ApplyProposalResponse,
     CareerAnalyticsResult,
@@ -34,6 +36,7 @@ from app.schemas.analytics import (
     UnattributedApplication,
     UnattributedResponse,
 )
+from app.services import search_keyword_analytics as keyword_analytics
 from app.services import application_analytics as analytics
 from app.services import (
     interview_analytics,
@@ -109,6 +112,38 @@ def dashboard_card(db: Session = Depends(get_db)) -> DashboardAnalytics:
 # --------------------------------------------------------------------------
 # recommendations
 # --------------------------------------------------------------------------
+
+
+@router.get("/search-keywords", response_model=SearchKeywordAnalyticsResult)
+def search_keyword_analytics(db: Session = Depends(get_db)) -> SearchKeywordAnalyticsResult:
+    """Which search directions surfaced well-matched postings.
+
+    Pure read over scores that already exist - no model call, no network, no
+    write. Reading this page costs nothing.
+    """
+    result = keyword_analytics.compute(db)
+    return SearchKeywordAnalyticsResult(
+        cohorts=[
+            KeywordCohortOut(
+                keyword=c.keyword,
+                cities=c.cities,
+                jobs=c.jobs,
+                recommended=c.recommended,
+                average_score=c.average_score,
+                recommend_rate=c.recommend_rate,
+                interval_low=c.interval.low if c.interval else None,
+                interval_high=c.interval.high if c.interval else None,
+                confidence=c.confidence.value,
+                actionable=c.actionable,
+            )
+            for c in result.cohorts
+        ],
+        analyzed_jobs=result.analyzed_jobs,
+        attributed_jobs=result.attributed_jobs,
+        unattributed_jobs=result.unattributed_jobs,
+        coverage=result.coverage,
+        observations=result.observations,
+    )
 
 
 @router.get("/strategy-recommendations", response_model=RecommendationsResponse)

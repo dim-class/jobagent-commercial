@@ -1,5 +1,13 @@
 # JobAgent Orchestration Status
 
+- Current (2026-09-01): “任何人可用”P2B **未签名 Windows x64 便携候选**已在本机完成真实产物
+  验收。锁定 PyInstaller 6.22.2；ZIP 约 102 MB，含冻结 Python 后端、编译前端、迁移、中性策略
+  和扩展 0.1.20。3222 文件审计：missing 0 / forbidden 0 / `direct_url.json` 0；ZIP SHA-256 与
+  `SHA256SUMS.txt` 一致。解压后的 EXE doctor、HTML 200、health/database ok、隔离首次初始化、
+  PID 身份停止均 PASS。成功升级生成 SQLite+策略备份；强制端口冲突退出 3 后，数据库证明行和
+  策略均恢复、版本不推进、PID 清除。完整后端 pytest 100%/退出码 0。新增人工/tag Windows
+  artifact workflow；远端干净 checkout 构建、代码签名、安装/卸载 UX、无工具链独立 VM 仍待验收。
+
 - Current (2026-08-31): “任何人可用”P2A 商用运行基础已实现并离线验收。新增
   `JOBAGENT_DATA_DIR`/冻结运行时 `%LOCALAPPDATA%\JobAgent` 数据根，数据库、策略、简历、浏览器
   资料与 `.env` 可完全脱离源码；首次启动只在缺失时复制中性策略，不覆盖既有用户。FastAPI 可由

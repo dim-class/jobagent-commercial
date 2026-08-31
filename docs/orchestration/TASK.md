@@ -1,57 +1,57 @@
-# Authorized task — P2A commercial runtime foundation
+# Authorized task — P2B unsigned Windows portable candidate
 
 ## Goal
 
-Move the commercial branch from a source-only developer launch toward a
-single-process Windows product that a new local user can run without storing
-personal data in the checkout. This is the first bounded P2 increment; it does
-not claim that a signed installer already exists.
+Produce and prove a self-contained Windows x64 release candidate that no
+longer needs a source checkout, Python or Node at normal runtime, while keeping
+all user data outside the bundle.
 
 ## Scope
 
-- Add an explicit per-user runtime-data root suitable for a packaged build,
-  while keeping current source-development defaults and overrides compatible.
-- On first startup create runtime directories and a neutral strategy copy.
-- Let FastAPI optionally serve the already-built React frontend so a packaged
-  release needs one local process and no Node runtime at use time.
-- Add a safe, non-secret `doctor` check and tests for clean-user initialization.
-- Document exactly what remains before a distributable Windows artifact.
+- Add a pinned, repeatable PyInstaller onedir build containing the backend
+  runtime, compiled frontend, schema migrations, neutral strategy and the
+  exact unpacked MV3 extension release.
+- Add a release audit and per-file SHA-256 manifest that fail closed on missing
+  runtime parts or bundled databases, environment files, logs, browser
+  profiles, uploads and editable-install source paths.
+- Add safe start/stop process identity, first-run initialization, pre-upgrade
+  SQLite/strategy backup and automatic rollback if the new runtime never
+  becomes healthy.
+- Add an on-demand/tagged Windows GitHub Actions artifact workflow.
 
 ## Boundaries
 
-- No BOSS/Chrome actions, task starts, AI calls, application, message, favorite,
-  credential access, CAPTCHA behavior, or live user-data migration.
-- Never stage or copy `.env`, SQLite, resumes, browser profiles, logs, or
-  `data/` contents into a release or Git commit.
-- Do not break the current developer launcher or existing user's local data.
-- No installer claims until an artifact is actually built and clean-machine
-  tested.
+- This milestone produces an **unsigned candidate**, not a signed installer or
+  generally available release.
+- No BOSS/Chrome action, task start, application, message, AI call, credential
+  access or live user-data migration.
+- No `.env`, database, resume, log, browser profile, upload or local source path
+  may enter Git or the release artifact.
+- Do not publish a GitHub Release or claim clean-machine acceptance until a
+  separate machine without the development toolchain proves it.
 
 ## Acceptance
 
-- Tests prove an override runtime root creates isolated directories and a
-  neutral strategy without touching repository data.
-- Production frontend serving is opt-in and serves the built index/assets;
-  development root/API behavior stays compatible when disabled.
-- `doctor` reports actionable component status without secrets.
-- Backend, frontend and extension suites remain green; docs/status state the
-  remaining packaging/signing/upgrade work accurately.
+- The tracked build script creates a ZIP, SHA256SUMS and internal file manifest.
+- The audit passes the real bundle and tests prove forbidden residue fails.
+- An extracted EXE passes doctor, serves HTML + healthy API from isolated data,
+  creates its neutral strategy/database, and stops only its recorded process.
+- A successful upgrade creates a database/strategy backup; a deliberately
+  failed startup restores both and does not advance the installed version.
+- Full backend tests pass and the remote Windows workflow builds the same
+  candidate from a clean checkout.
 
-## Authorization
+## Result (local, 2026-09-01)
 
-The active user goal is to make JobAgent usable by anyone, and the user already
-authorized keeping personal data local while publishing a commercial branch.
+The unsigned candidate is implemented and locally proven. PyInstaller 6.22.2
+built a 3222-file onedir bundle and the release audit found zero forbidden or
+missing items. The ZIP checksum matched after extraction; no `direct_url.json`
+or personal/runtime residue was present. The extracted EXE passed doctor,
+served HTML 200 with health/database `ok`, created isolated data, and its stop
+command matched and removed the recorded PID. Upgrade success created both
+SQLite and strategy backups. A forced port-conflict startup exited 3 and
+restored a custom database proof row and strategy, retained the old version,
+and removed its PID record. Full backend pytest reached 100% with exit 0.
 
-## Result (2026-08-31)
-
-P2A is complete and verified offline. Runtime data can be isolated outside the
-checkout; clean startup creates a neutral strategy; the backend can serve the
-built frontend as one process; doctor reports only safe component state. An
-isolated lifecycle (rechecked on ports 18127/18128) created a new database and strategy,
-served HTML + healthy API, and stopped only its recorded PID. Full backend
-pytest collected 1787 and exited 0 (30 existing environment skips); extension
-build + 301/301 and frontend build + 31/31 passed. The MV3 console bridge now
-accepts only the exact development/commercial loopback origins on ports 5173
-and 8000; tests still reject arbitrary ports. No site/browser/AI action occurred.
-P2B packaging, signing, upgrade rollback and clean-machine acceptance remain
-explicitly incomplete.
+Remote clean-checkout Windows artifact build, code signing, installer/uninstall
+UX, and a genuinely toolchain-free Windows VM acceptance remain separate gates.

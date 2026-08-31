@@ -68,6 +68,9 @@ def test_build_reaudits_payload_and_emits_integrity_metadata() -> None:
     assert "Get-AuthenticodeSignature" in script
     assert '[string]$RequiredInnoVersion = "7.1.0"' in script
     assert "commercial_distribution_ready = $false" in script
+    assert script.index("Programs\\Inno Setup 7\\ISCC.exe") < script.index(
+        "Get-Command ISCC.exe"
+    )
 
 
 def test_clean_checkout_workflow_builds_and_uploads_installer() -> None:

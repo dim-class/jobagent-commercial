@@ -8,6 +8,9 @@
   Chrome/BOSS/AI 均未启动。产物 manifest 明确 `NotSigned`、`development_candidate`、
   `commercial_distribution_ready=false`。当前编译器显示 `Non-commercial use only`；签名、适用商业许可
   确认、干净无工具链 VM 与交互删除数据验收仍是 P2C-B 发布门槛，不能宣称正式商用发行。
+- 首次 installer CI run `33451647195` 在 payload/portable 构建审计成功后失败：runner 的 PATH 仍指向
+  预装 Inno 6，尽管前一步已安装固定 7.1.0。解析顺序已改为先找 7 的固定目录再退回 PATH，并新增
+  顺序契约测试；等待修复提交后的远程重跑，首次失败不能算远程 PASS。
 
 - Current (2026-09-01): Windows portable 候选修复了一个**正确性 bug**（不只是体验问题），
   已在真实产物上验证。用户目前只在 Windows 使用，本轮按此优先级推进。

@@ -127,6 +127,11 @@ port. The first sandboxed attempt failed only because the sandbox denied HKCU
 uninstall-key creation and Inno rolled every file back; the approved out-of-
 sandbox run passed. Do not mistake that environment denial for an installer bug.
 
+The first installer CI run (`33451647195`) exposed a different environment
+trap: `windows-2025` retained Inno 6 on PATH even after winget installed 7.1.0.
+The resolver must search the fixed Inno 7 directories before PATH; a contract
+test now locks this order. Do not simplify it back to `Get-Command` first.
+
 The interactive delete-data branch points at the real default
 `%LOCALAPPDATA%\JobAgent`. It is structurally tested, defaults to No, and was
 deliberately not clicked on the developer profile. Test that destructive branch

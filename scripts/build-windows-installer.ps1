@@ -35,21 +35,18 @@ function Resolve-Iscc([string]$ExplicitPath) {
         }
         return $resolved
     }
-    $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-    if ($command) { return $command.Source }
     $candidates = @(
         (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 7\ISCC.exe'),
-        (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'),
         (Join-Path $env:ProgramFiles 'Inno Setup 7\ISCC.exe'),
-        (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 7\ISCC.exe'),
-        (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe'),
-        (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe')
+        (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 7\ISCC.exe')
     )
     foreach ($candidate in $candidates) {
         if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
             return $candidate
         }
     }
+    $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
     throw 'Pinned Inno Setup 7.1.0 is required at build time. ISCC.exe was not found.'
 }
 

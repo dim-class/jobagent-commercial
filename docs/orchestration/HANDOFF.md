@@ -132,6 +132,13 @@ trap: `windows-2025` retained Inno 6 on PATH even after winget installed 7.1.0.
 The resolver must search the fixed Inno 7 directories before PATH; a contract
 test now locks this order. Do not simplify it back to `Get-Command` first.
 
+The fixed clean-checkout run `33451995662` passed every step, including artifact
+upload. Its downloaded `0.1.0-2` EXE matched the manifest SHA-256
+`398ab6bcfec4cddab3ba106ba878c63808d7b5284157a1395454ff659e48be3b` and
+reported Inno 7.1.0, `NotSigned`, `development_candidate`, and
+`commercial_distribution_ready=false`. This closes the P2C-A remote-build gate;
+it does not close signing, licensing, or clean-VM acceptance.
+
 The interactive delete-data branch points at the real default
 `%LOCALAPPDATA%\JobAgent`. It is structurally tested, defaults to No, and was
 deliberately not clicked on the developer profile. Test that destructive branch

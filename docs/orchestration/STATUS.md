@@ -10,7 +10,11 @@
   确认、干净无工具链 VM 与交互删除数据验收仍是 P2C-B 发布门槛，不能宣称正式商用发行。
 - 首次 installer CI run `33451647195` 在 payload/portable 构建审计成功后失败：runner 的 PATH 仍指向
   预装 Inno 6，尽管前一步已安装固定 7.1.0。解析顺序已改为先找 7 的固定目录再退回 PATH，并新增
-  顺序契约测试；等待修复提交后的远程重跑，首次失败不能算远程 PASS。
+  顺序契约测试；修复后的 clean-checkout installer CI run `33451995662` 已全部 PASS（构建、文件核验、
+  artifact 上传）。下载的 `0.1.0-2` 产物实际 SHA-256 与 manifest 完全一致：
+  `398ab6bcfec4cddab3ba106ba878c63808d7b5284157a1395454ff659e48be3b`；清单确认 Inno 7.1.0、
+  `NotSigned`、`development_candidate`、`commercial_distribution_ready=false`。P2C-A 远程构建门已通过，
+  但这不替代签名、适用商业许可确认或干净 VM 验收。
 
 - Current (2026-09-01): Windows portable 候选修复了一个**正确性 bug**（不只是体验问题），
   已在真实产物上验证。用户目前只在 Windows 使用，本轮按此优先级推进。

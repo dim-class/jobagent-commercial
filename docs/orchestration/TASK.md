@@ -66,6 +66,10 @@ and silent uninstall removed the program/registration while preserving the
 database and releasing the port. The interactive delete-data branch defaults
 to No and is structurally tested; it was deliberately not clicked in the real
 user profile. Full backend regression, frontend 31/31 and extension 301/301
-pass. Clean-checkout installer CI, Authenticode signing, applicable Inno Setup
-commercial licensing, and clean-VM interactive delete acceptance remain
-release gates until separately proven.
+pass. Clean-checkout installer CI run `33451995662` also passed: the downloaded
+`0.1.0-2` artifact used Inno Setup 7.1.0, its actual SHA-256 matched the
+manifest (`398ab6bcfec4cddab3ba106ba878c63808d7b5284157a1395454ff659e48be3b`),
+and the manifest remained fail-closed at `NotSigned`, `development_candidate`,
+and `commercial_distribution_ready=false`. Authenticode signing, confirmation
+of applicable Inno Setup commercial licensing, and clean-VM interactive delete
+acceptance remain release gates until separately proven.

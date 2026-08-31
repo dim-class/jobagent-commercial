@@ -1,0 +1,61 @@
+name: Windows installer candidate
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-installer:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            extension/package-lock.json
+      - name: Install backend packaging dependencies
+        shell: pwsh
+        run: |
+          python -m venv backend/.venv
+          backend/.venv/Scripts/python.exe -m pip install --upgrade pip
+          backend/.venv/Scripts/python.exe -m pip install -e "backend[packaging]"
+      - name: Install web dependencies
+        run: |
+          cd frontend
+          npm ci --no-audit --no-fund
+          cd ../extension
+          npm ci --no-audit --no-fund
+      - name: Install pinned Inno Setup compiler
+        shell: pwsh
+        run: winget install --id JRSoftware.InnoSetup.7 --version 7.1.0 --exact --source winget --accept-package-agreements --accept-source-agreements --silent
+      - name: Build and audit unsigned installer
+        shell: pwsh
+        run: ./scripts/build-windows-installer.ps1 -Version "0.1.0-${{ github.run_number }}"
+      - name: Verify installer files
+        shell: pwsh
+        run: |
+          Get-ChildItem -LiteralPath .artifacts/installer -Force
+          if (-not (Get-ChildItem -LiteralPath .artifacts/installer -Filter 'JobAgent-Setup-*.exe' -File)) { throw 'Installer EXE was not created.' }
+          if (-not (Test-Path -LiteralPath .artifacts/INSTALLER-SHA256SUMS.txt)) { throw 'Installer checksum is missing.' }
+          if (-not (Test-Path -LiteralPath .artifacts/INSTALLER-MANIFEST.json)) { throw 'Installer manifest is missing.' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: JobAgent-Windows-x64-installer-unsigned-${{ github.run_number }}
+          path: |
+            .artifacts/installer/*.exe
+            .artifacts/INSTALLER-SHA256SUMS.txt
+            .artifacts/INSTALLER-MANIFEST.json
+          if-no-files-found: error
+          retention-days: 14
+          include-hidden-files: true

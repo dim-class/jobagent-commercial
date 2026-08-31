@@ -1,80 +1,71 @@
-# Authorized task — P2B unsigned Windows portable candidate
+# Authorized task — P2C-A Windows installer candidate
+
+## Authorization
+
+The user resumed the active “任何人可用” productization goal on 2026-09-01.
+This bounded milestone follows the completed P2B portable candidate.
 
 ## Goal
 
-Produce and prove a self-contained Windows x64 release candidate that no
-longer needs a source checkout, Python or Node at normal runtime, while keeping
-all user data outside the bundle.
+Produce and prove an **unsigned, per-user Windows x64 installer candidate**
+that installs, upgrades and uninstalls JobAgent without requiring administrator
+rights, Python, Node or a source checkout at normal runtime.
 
 ## Scope
 
-- Add a pinned, repeatable PyInstaller onedir build containing the backend
-  runtime, compiled frontend, schema migrations, neutral strategy and the
-  exact unpacked MV3 extension release.
-- Add a release audit and per-file SHA-256 manifest that fail closed on missing
-  runtime parts or bundled databases, environment files, logs, browser
-  profiles, uploads and editable-install source paths.
-- Add safe start/stop process identity, first-run initialization, pre-upgrade
-  SQLite/strategy backup and automatic rollback if the new runtime never
-  becomes healthy.
-- Add an on-demand/tagged Windows GitHub Actions artifact workflow.
+- Compile the already-audited P2B bundle into one Inno Setup installer EXE.
+- Install under the current user's local Programs directory with one stable
+  AppId, Start Menu shortcuts, an optional desktop shortcut and Add/Remove
+  Programs uninstall support.
+- Stop only the recorded JobAgent process before upgrade/uninstall.
+- Preserve `%LOCALAPPDATA%\JobAgent` by default on uninstall. An interactive
+  uninstall may delete it only after a separate explicit warning and
+  confirmation; silent uninstall always preserves it.
+- Produce SHA-256 metadata and an auditable clean-checkout Windows workflow.
+- Add offline structural tests for the destructive and privilege boundaries.
 
 ## Boundaries
 
-- This milestone produces an **unsigned candidate**, not a signed installer or
-  generally available release.
+- This is still an **unsigned candidate**, not a generally available release.
+- Do not purchase or invent a signing certificate, publish a GitHub Release,
+  or claim SmartScreen trust.
 - No BOSS/Chrome action, task start, application, message, AI call, credential
   access or live user-data migration.
-- No `.env`, database, resume, log, browser profile, upload or local source path
-  may enter Git or the release artifact.
-- Do not publish a GitHub Release or claim clean-machine acceptance until a
-  separate machine without the development toolchain proves it.
+- Do not read, copy, bundle or delete the developer's real `data/`, `.env`,
+  resumes, browser profiles or logs.
+- A genuinely clean Windows machine/VM without the development toolchain is a
+  separate acceptance gate; CI is clean-checkout build evidence, not that VM.
 
 ## Acceptance
 
-- The tracked build script creates a ZIP, SHA256SUMS and internal file manifest.
-- The audit passes the real bundle and tests prove forbidden residue fails.
-- An extracted EXE passes doctor, serves HTML + healthy API from isolated data,
-  creates its neutral strategy/database, and stops only its recorded process.
-- A successful upgrade creates a database/strategy backup; a deliberately
-  failed startup restores both and does not advance the installed version.
-- Full backend tests pass and the remote Windows workflow builds the same
-  candidate from a clean checkout.
+- Installer build starts from the audited P2B bundle and fails closed if any
+  required payload or installer compiler is missing.
+- Setup is per-user/non-admin and creates the expected program and shortcuts.
+- Reinstall/upgrade uses the same AppId and keeps runtime data intact.
+- Interactive uninstall offers a clear keep/delete choice, defaults to keep;
+  silent uninstall keeps data without prompting.
+- Installer and checksum are built on a clean GitHub Windows runner.
+- Local isolated acceptance proves install, launch/health, upgrade and
+  uninstall-keep without touching real user data. The destructive interactive
+  delete branch is structurally tested here and must be clicked only in the
+  separate clean-VM acceptance, never in the developer's real Windows profile.
+- Full repository tests remain green.
 
 ## Result (local, 2026-09-01)
 
-The unsigned candidate is implemented and locally proven. PyInstaller 6.22.2
-built a 3222-file onedir bundle and the release audit found zero forbidden or
-missing items. The ZIP checksum matched after extraction; no `direct_url.json`
-or personal/runtime residue was present. The extracted EXE passed doctor,
-served HTML 200 with health/database `ok`, created isolated data, and its stop
-command matched and removed the recorded PID. Upgrade success created both
-SQLite and strategy backups. A forced port-conflict startup exited 3 and
-restored a custom database proof row and strategy, retained the old version,
-and removed its PID record. Full backend pytest reached 100% with exit 0.
+Implemented an Inno Setup 7.1.0 per-user installer with a stable AppId,
+Start Menu entry, optional desktop shortcut, guarded stop, and a default-keep
+uninstaller. The build re-audits the P2B payload and emits an installer SHA-256
+plus a manifest that explicitly records `NotSigned`,
+`development_candidate`, and `commercial_distribution_ready=false`.
 
-Remote clean-checkout Windows artifact build, code signing, installer/uninstall
-UX, and a genuinely toolchain-free Windows VM acceptance remain separate gates.
-
-## P2B remote acceptance (2026-09-01)
-
-Pushed `b5be113`, ran **Windows portable candidate** on GitHub Actions and
-verified the artifact end to end. Still an **unsigned candidate**, not the
-final commercial installer - signing, install/uninstall UX and a clean
-toolchain-free Windows acceptance remain P2C.
-
-- First remote run failed only at `upload-artifact`: the build and the audit
-  succeeded and the verify step listed a 100 MB ZIP, but `.artifacts` is
-  dot-prefixed and v4 skips hidden paths. Fixed in `a1e5612` with
-  `include-hidden-files: true`; the rerun passed every step.
-- Downloaded ZIP matches the declared SHA256 exactly. `SHA256SUMS.txt` is CRLF,
-  so `sha256sum -c` cannot consume it directly - noted for P2C.
-- Bundle carries the neutral strategy template only; no database, `.env`,
-  résumé or browser profile.
-- `--doctor` PASS. Running on an isolated port and data dir: `/health` returns
-  `status=ok` and `database=ok`, the root page returns HTTP 200, and `--stop`
-  removes the process, the PID record and the port binding.
-- A first attempt produced a false positive - the portable failed to bind port
-  8000 because a leftover dev backend held it, and the healthy `/health` came
-  from that dev server. Re-verified on `--port 8123`.
-- User data untouched: `data/` fingerprints identical before and after.
+An isolated two-version lifecycle passed: p2ca1 installed without admin rights,
+the installed frozen EXE returned health/database `ok` and HTML 200, p2ca2
+upgraded under the same AppId, the isolated database hash stayed unchanged,
+and silent uninstall removed the program/registration while preserving the
+database and releasing the port. The interactive delete-data branch defaults
+to No and is structurally tested; it was deliberately not clicked in the real
+user profile. Full backend regression, frontend 31/31 and extension 301/301
+pass. Clean-checkout installer CI, Authenticode signing, applicable Inno Setup
+commercial licensing, and clean-VM interactive delete acceptance remain
+release gates until separately proven.

@@ -139,11 +139,11 @@ Node；数据默认写入 `%LOCALAPPDATA%\JobAgent`，不会写入源码或提�
 基础，不是已签名安装器。详情见
 [`docs/product/WINDOWS_PACKAGING.md`](docs/product/WINDOWS_PACKAGING.md)。
 
-P2B 还提供可重复构建的**未签名 Windows x64 便携候选包**。它把 Python 运行时、编译前端、
-迁移和固定版本扩展打入 ZIP，最终用户运行时不需要安装 Python/Node；构建会拒绝 `.env`、数据库、
-简历/上传、日志、浏览器资料和本机构建路径，并生成 SHA-256。候选版仍需手工加载包内扩展，且
-尚未代码签名或通过无开发工具链的独立 VM 验收，因此不能当作正式安装器。构建与验收说明见上方
-Windows 文档。
+P2C-A 还提供可重复构建的**未签名 Windows x64 当前用户级安装候选**。它把已审计的 P2B bundle
+编译为单个安装 EXE，最终用户运行时不需要安装 Python/Node；支持开始菜单、覆盖升级和默认保留
+本地数据的卸载，并生成 SHA-256 与候选 manifest。扩展仍需手工加载，且尚未代码签名、确认适用的
+Inno Setup 商业许可或通过无开发工具链的独立 VM 验收，因此不能当作正式商用安装包。构建与验收
+说明见上方 Windows 文档。
 
 可随时执行不含密钥的运行自检：
 

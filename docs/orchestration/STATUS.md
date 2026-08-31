@@ -1,5 +1,14 @@
 # JobAgent Orchestration Status
 
+- Current (2026-09-01): P2C-A **未签名 Windows 当前用户级安装候选**已实现并通过本机隔离生命周期。
+  固定 Inno Setup 7.1.0 + 稳定 AppId；安装不需管理员权限，含开始菜单/可选桌面快捷方式，升级/卸载
+  只调用已安装 `JobAgent.exe --stop`。卸载默认保留 `%LOCALAPPDATA%\JobAgent`，静默卸载无条件保留；
+  交互删除需独立警告并默认 No。p2ca1→p2ca2 实测：doctor、health/database ok、HTML 200、同 AppId
+  升级、数据库哈希不变、静默卸载清理程序与注册项、保留数据并释放端口全部 PASS。真实用户数据未读写，
+  Chrome/BOSS/AI 均未启动。产物 manifest 明确 `NotSigned`、`development_candidate`、
+  `commercial_distribution_ready=false`。当前编译器显示 `Non-commercial use only`；签名、适用商业许可
+  确认、干净无工具链 VM 与交互删除数据验收仍是 P2C-B 发布门槛，不能宣称正式商用发行。
+
 - Current (2026-09-01): Windows portable 候选修复了一个**正确性 bug**（不只是体验问题），
   已在真实产物上验证。用户目前只在 Windows 使用，本轮按此优先级推进。
 - **端口占用会把失败的启动伪装成成功的启动。** 启动器过去在 uvicorn 尝试绑定**之前**就已经

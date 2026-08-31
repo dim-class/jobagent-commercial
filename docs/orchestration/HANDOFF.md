@@ -112,6 +112,28 @@ Changing it to UTF-8 would break the real console it is meant for.
 consume it; verified against the real artifact. Nothing else from P2B is
 outstanding.
 
+## P2C-A — the Windows installer candidate
+
+`scripts/build-windows-installer.ps1` re-audits the P2B bundle and compiles it
+with exactly Inno Setup 7.1.0. The installer is per-user/non-admin, has a stable
+AppId, Start Menu entry, optional desktop shortcut and uninstall registration.
+Its manifest must continue to say `NotSigned`, `development_candidate` and
+`commercial_distribution_ready=false` until the later release gates pass.
+
+Local isolated lifecycle passed with two versions: install, frozen EXE doctor,
+health/database ok, HTML 200, same-AppId upgrade, unchanged test database hash,
+silent uninstall, preserved data, removed install/registry state and released
+port. The first sandboxed attempt failed only because the sandbox denied HKCU
+uninstall-key creation and Inno rolled every file back; the approved out-of-
+sandbox run passed. Do not mistake that environment denial for an installer bug.
+
+The interactive delete-data branch points at the real default
+`%LOCALAPPDATA%\JobAgent`. It is structurally tested, defaults to No, and was
+deliberately not clicked on the developer profile. Test that destructive branch
+only on a clean disposable Windows user/VM. Also, the local compiler prints
+`Non-commercial use only`; confirm and satisfy applicable Inno Setup commercial
+licensing plus Authenticode signing before production distribution.
+
 ## M6 — the one genuinely dangerous area
 
 M6 is human-confirmed **single** application execution. Policy is in
@@ -150,8 +172,8 @@ Score distribution is poor: 0 jobs above 89, 72 of 130 below 60.
 
 ## Suggested next steps (none started, none authorized)
 
-1. **P2C**: signing, install/uninstall UX, and acceptance on a clean Windows
-   box with no Python/Node toolchain. Not begun.
+1. **P2C-B**: Authenticode signing, applicable Inno Setup commercial licensing,
+   and acceptance on a clean Windows box with no Python/Node toolchain.
 2. Windows launch polish the user has not asked for yet: what the console
    window does on a double-click, and whether `README-FIRST.txt` is readable
    enough for a first run.

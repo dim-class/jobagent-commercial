@@ -1,0 +1,81 @@
+name: CI
+
+# Everything this workflow runs is something that silently broke at least once
+# while nobody was watching: a test script that errored on a newer Node, a test
+# file no command picked up, a committed bundle that could not be rebuilt, and
+# fixtures that rotted when the calendar moved past a frozen date.
+#
+# Nothing here touches a recruitment site, a real database, or a paid model:
+# the suites are fixture-only and the OpenAI agent is always patched.
+
+on:
+  push:
+    branches: [commercial, main]
+  pull_request:
+  # Fixtures anchored to real time only rot once the clock moves, so a daily
+  # run catches that class of failure on its own schedule rather than on the
+  # next unrelated push.
+  schedule:
+    - cron: "0 21 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Pytest
+        working-directory: backend
+        # basetemp inside the workspace: the default temp dir has been denied
+        # by the OS before, which failed the run for reasons unrelated to code.
+        # Browser-dependent tests skip without Playwright browsers installed.
+        run: python -m pytest --basetemp=../.tmp/pytest-ci -q
+
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install
+        working-directory: extension
+        run: npm install --no-audit --no-fund
+      - name: Build
+        working-directory: extension
+        run: npm run build
+      - name: Test
+        working-directory: extension
+        # Includes the dist-freshness guard: a committed bundle that no longer
+        # matches src fails here rather than in Chrome.
+        run: npm test
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install
+        working-directory: frontend
+        run: npm install --no-audit --no-fund
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+      - name: Test
+        working-directory: frontend
+        run: npm test

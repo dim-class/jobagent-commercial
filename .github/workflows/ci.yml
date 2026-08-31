@@ -42,7 +42,9 @@ jobs:
         # basetemp inside the workspace: the default temp dir has been denied
         # by the OS before, which failed the run for reasons unrelated to code.
         # Browser-dependent tests skip without Playwright browsers installed.
-        run: python -m pytest --basetemp=../.tmp/pytest-ci -q
+        run: |
+          mkdir -p ../.tmp
+          python -m pytest --basetemp=../.tmp/pytest-ci -q
 
   extension:
     runs-on: ubuntu-latest

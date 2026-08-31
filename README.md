@@ -133,6 +133,19 @@ v0.2 的**浏览器采集**仍然保留，但许多招聘网站会拒绝向自�
 启动的服务时，双击 `Stop-JobAgent.cmd`；它只停止自己记录的监听进程，不会关闭其他 Python
 或 Node 程序。首次安装依赖仍需运行一次 `.\scripts\dev.ps1 setup`。
 
+商用分支另提供过渡性的 `Start-JobAgent-Commercial.cmd`：先在 `frontend` 目录执行一次
+`npm run build`，之后它只启动 FastAPI 一个进程，由后端直接提供已构建前端，日常运行不需要
+Node；数据默认写入 `%LOCALAPPDATA%\JobAgent`，不会写入源码或提交到 Git。这仍是 P2 的运行
+基础，不是已签名安装器。详情见
+[`docs/product/WINDOWS_PACKAGING.md`](docs/product/WINDOWS_PACKAGING.md)。
+
+可随时执行不含密钥的运行自检：
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m app.cli doctor
+```
+
 然后打开 <http://127.0.0.1:5173>。
 
 - `setup`：创建 `backend\.venv`、安装后端依赖与前端依赖，并在缺失时用

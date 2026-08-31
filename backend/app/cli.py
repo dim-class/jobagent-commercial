@@ -10,11 +10,15 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
+from pathlib import Path
 
 from app import __version__
 from app.core.config import get_settings
 from app.core.logging import ensure_utf8_stdout, setup_logging
+from app.core.paths import DATA_DIR, ENV_FILE_PATH, ensure_runtime_dirs
 
 
 def _cmd_init_db(_: argparse.Namespace) -> int:
@@ -60,6 +64,39 @@ def _cmd_info(_: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    """Check the local runtime without revealing configuration values."""
+    cfg = get_settings()
+    ensure_runtime_dirs()
+    checks = {
+        "data_directory": DATA_DIR.is_dir(),
+        "data_directory_writable": DATA_DIR.is_dir() and os.access(DATA_DIR, os.W_OK),
+        "strategy_file": cfg.strategy_file.is_file(),
+        "database_parent": Path(cfg.sqlalchemy_url.removeprefix("sqlite:///")).parent.is_dir()
+        if cfg.sqlalchemy_url.startswith("sqlite:///")
+        else True,
+        "frontend_bundle": (cfg.frontend_dist_path / "index.html").is_file()
+        if cfg.serve_frontend
+        else True,
+    }
+    payload = {
+        "ok": all(checks.values()),
+        "version": __version__,
+        "mode": "single_process" if cfg.serve_frontend else "development",
+        "checks": checks,
+        "openai_configured": cfg.openai_configured,
+        "env_file_present": ENV_FILE_PATH.is_file(),
+    }
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    else:
+        print(f"JobAgent doctor: {'PASS' if payload['ok'] else 'FAIL'}")
+        for name, passed in checks.items():
+            print(f"  {'OK' if passed else 'FAIL':4} {name}")
+        print(f"  INFO OpenAI configured: {'yes' if cfg.openai_configured else 'no (optional)'}")
+    return 0 if payload["ok"] else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.cli", description="AI Job Agent dev CLI")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -77,6 +114,9 @@ def main(argv: list[str] | None = None) -> int:
     ).set_defaults(func=_cmd_migrate)
 
     sub.add_parser("info", help="print non-secret configuration").set_defaults(func=_cmd_info)
+    doctor = sub.add_parser("doctor", help="check runtime files without printing secrets")
+    doctor.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    doctor.set_defaults(func=_cmd_doctor)
 
     args = parser.parse_args(argv)
     ensure_utf8_stdout()

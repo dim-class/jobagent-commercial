@@ -4,19 +4,19 @@ const fs = require('node:fs')
 const path = require('node:path')
 const vm = require('node:vm')
 const code = fs.readFileSync(path.join(__dirname, '../dist/console-bridge.js'), 'utf8')
-function bridge(mode) {
+function bridge(mode, origin = 'http://127.0.0.1:5173') {
   const calls = [], replies = []
   let listener
   const window = { addEventListener: (_, fn) => { listener = fn }, postMessage: msg => replies.push(msg) }
   window.top = window
-  const location = { origin: 'http://127.0.0.1:5173', pathname: '/', hash: '#/console' }
+  const location = { origin, pathname: '/', hash: '#/console' }
   const navigator = { userActivation: { isActive: false } }
   vm.runInNewContext(code, { window, location, navigator, chrome: { runtime: {
     lastError: mode === 'lastError' ? { message: 'Private runtime detail must not escape' } : undefined,
     sendMessage: (msg, reply) => { calls.push(msg); if (mode === 'throw') throw new Error('Private runtime detail');
       if (mode !== 'hang') reply({ ok: true, protocol: 1 }) },
   } } })
-  const send = (action, extras = {}, eventOverrides = {}) => listener({ source: window,
+  const send = (action, extras = {}, eventOverrides = {}) => listener?.({ source: window,
     origin: location.origin, data: { channel: 'jobagent-console-request', id: 'test', action, taskId: 5, ...extras }, ...eventOverrides })
   return { calls, replies, send, navigator, location }
 }
@@ -67,6 +67,16 @@ test('bridge forwards one allowlisted action on human activation', () => {
   assert.equal(env.replies.length, 1) // mutations never receive diagnostic receipts
 })
 
+test('bridge accepts the exact commercial loopback origin and rejects arbitrary ports', () => {
+  const commercial = bridge(undefined, 'http://127.0.0.1:8000')
+  commercial.send('status')
+  assert.equal(commercial.calls.length, 1)
+
+  const arbitrary = bridge(undefined, 'http://127.0.0.1:9999')
+  arbitrary.send('status')
+  assert.equal(arbitrary.calls.length, 0)
+})
+
 test('bridge forwards only bounded batch ids/cap fields on human activation', () => {
   const env = bridge()
   env.navigator.userActivation.isActive = true
@@ -89,7 +99,8 @@ test('bridge distinguishes missing worker response and invalid runtime without e
 })
 test('manifest bridge stays exact loopback and BOSS; no all-sites permission or external protocol', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../manifest.json'), 'utf8'))
-  assert.deepEqual(manifest.content_scripts[1].matches, ['http://127.0.0.1:5173/*', 'http://localhost:5173/*'])
+  assert.deepEqual(manifest.content_scripts[1].matches, ['http://127.0.0.1:5173/*', 'http://localhost:5173/*',
+    'http://127.0.0.1:8000/*', 'http://localhost:8000/*'])
   assert.deepEqual(manifest.host_permissions, ['http://127.0.0.1:8000/*', 'http://localhost:8000/*',
     'https://www.zhipin.com/*', 'http://127.0.0.1:5173/*', 'http://localhost:5173/*'])
   assert.equal(manifest.externally_connectable, undefined)

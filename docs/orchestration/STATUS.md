@@ -1,5 +1,18 @@
 # JobAgent Orchestration Status
 
+- Current (2026-08-31): “任何人可用”P2A 商用运行基础已实现并离线验收。新增
+  `JOBAGENT_DATA_DIR`/冻结运行时 `%LOCALAPPDATA%\JobAgent` 数据根，数据库、策略、简历、浏览器
+  资料与 `.env` 可完全脱离源码；首次启动只在缺失时复制中性策略，不覆盖既有用户。FastAPI 可由
+  `JOBAGENT_SERVE_FRONTEND=true` 直接提供已构建 React 前端，新增无敏感输出的
+  `app.cli doctor`、`app.portable` 单进程入口与过渡性的 `Start-JobAgent-Commercial.cmd`。
+  隔离端口/隔离数据目录生命周期实测：HTML 200、health/database ok、中性策略与新 DB 创建、仅停止
+  自有 PID，PASS。商用前端改走 8000 后同步补齐 MV3 控制台桥接：仅精确允许
+  `127.0.0.1/localhost × 5173/8000`，任意端口仍 fail closed。完整后端 1787 collected，退出码 0
+  （30 个既有环境 skip）；扩展 build + 301/301；前端 build + 31/31；PowerShell AST PASS。未访问
+  Chrome/BOSS、未启动任务、未调用 AI，个人
+  `data/` 未读写。P2 尚未完成：仍缺包含 Python 的版本化签名 artifact、升级备份/回滚、扩展正式
+  分发与无 Python/Node 干净 Windows 验收，当前不得宣称已有最终安装器。
+
 - Current (2026-08-31): 商用分支 `commercial` 已推送到私有仓库
   https://github.com/dim-class/jobagent-commercial ，**CI 三个 job 全绿**
   （run 33400062616：backend / extension / frontend）。旧仓库 `Qirui-JobAgent` 已归档。

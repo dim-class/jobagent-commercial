@@ -2240,7 +2240,10 @@ async function retryRunnerTerminal() {
 function isConsoleUrl(raw) {
     try {
         const url = new URL(raw || '');
-        return ['http://127.0.0.1:5173', 'http://localhost:5173'].includes(url.origin)
+        return [
+            'http://127.0.0.1:5173', 'http://localhost:5173',
+            'http://127.0.0.1:8000', 'http://localhost:8000',
+        ].includes(url.origin)
             && !url.username && !url.password && url.pathname === '/'
             && ['#/console', '#/queue', '#/recruiter'].includes(url.hash) && !url.search;
     }

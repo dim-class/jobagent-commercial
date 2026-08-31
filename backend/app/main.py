@@ -12,7 +12,8 @@ from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app import __version__
 from app.api.routes import api_router
@@ -31,6 +32,10 @@ logger = get_logger("app")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     ensure_runtime_dirs()
+    if settings.serve_frontend and not (settings.frontend_dist_path / "index.html").is_file():
+        raise RuntimeError(
+            f"Built frontend is missing: {settings.frontend_dist_path / 'index.html'}"
+        )
     init_db()
     try:
         strategy = load_strategy(force=True)
@@ -136,9 +141,16 @@ async def unhandled_error_handler(request: Request, exc: Exception) -> JSONRespo
 
 app.include_router(api_router)
 
+if settings.serve_frontend:
+    assets_dir = settings.frontend_dist_path / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="frontend-assets")
 
-@app.get("/", tags=["health"])
-def root() -> dict[str, object]:
+
+@app.get("/", tags=["health"], response_model=None)
+def root():
+    if settings.serve_frontend:
+        return FileResponse(settings.frontend_dist_path / "index.html")
     return {
         "name": "AI Job Agent",
         "version": __version__,

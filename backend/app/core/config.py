@@ -16,6 +16,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from app.core.paths import (
     BROWSER_PROFILES_DIR,
     CAREER_STRATEGY_PATH,
+    DATA_DIR,
+    ENV_FILE_PATH,
+    FRONTEND_DIST_DIR,
     PROJECT_ROOT,
     resolve_relative,
 )
@@ -25,7 +28,7 @@ class Settings(BaseSettings):
     """Runtime configuration, read once and cached."""
 
     model_config = SettingsConfigDict(
-        env_file=str(PROJECT_ROOT / ".env"),
+        env_file=str(ENV_FILE_PATH),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
@@ -38,7 +41,9 @@ class Settings(BaseSettings):
     openai_timeout_seconds: float = Field(default=120.0, alias="OPENAI_TIMEOUT_SECONDS")
 
     # --- storage ----------------------------------------------------------
-    database_url: str = Field(default="sqlite:///./data/jobagent.db", alias="DATABASE_URL")
+    database_url: str = Field(
+        default=f"sqlite:///{(DATA_DIR / 'jobagent.db').as_posix()}", alias="DATABASE_URL"
+    )
 
     # --- behaviour --------------------------------------------------------
     max_analyses_per_run: int = Field(default=50, alias="MAX_ANALYSES_PER_RUN")
@@ -54,6 +59,10 @@ class Settings(BaseSettings):
     app_host: str = Field(default="127.0.0.1", alias="APP_HOST")
     app_port: int = Field(default=8000, alias="APP_PORT")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    serve_frontend: bool = Field(default=False, alias="JOBAGENT_SERVE_FRONTEND")
+    frontend_dist_dir: str = Field(
+        default=str(FRONTEND_DIST_DIR), alias="JOBAGENT_FRONTEND_DIR"
+    )
     cors_origins: str = Field(
         default="http://127.0.0.1:5173,http://localhost:5173",
         alias="CORS_ORIGINS",
@@ -170,6 +179,10 @@ class Settings(BaseSettings):
         return resolve_relative(self.career_strategy_path)
 
     @property
+    def frontend_dist_path(self) -> Path:
+        return resolve_relative(self.frontend_dist_dir)
+
+    @property
     def sqlalchemy_url(self) -> str:
         """Absolute SQLAlchemy URL (relative sqlite paths anchor at the repo root)."""
         url = self.database_url
@@ -195,6 +208,7 @@ class Settings(BaseSettings):
             "prompt_version": self.prompt_version,
             "app_host": self.app_host,
             "app_port": self.app_port,
+            "serve_frontend": self.serve_frontend,
             "browser_profile_dir": self.browser_profile_dir,
             "browser_supported_hosts": self.browser_supported_hosts,
             "browser_channel": self.browser_channel,

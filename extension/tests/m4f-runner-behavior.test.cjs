@@ -327,6 +327,7 @@ const popupStart = { type: 'jobagent:runner-start', taskId: 5, candidateCap: 3,
   popupTarget: { tabId: 7, windowId: 2 } }
 
 const consoleSender = { tab: { id: 8 }, frameId: 0, url: 'http://127.0.0.1:5173/#/console' }
+const commercialConsoleSender = { ...consoleSender, url: 'http://127.0.0.1:8000/#/console' }
 const consoleStart = { type: 'jobagent:console-command', action: 'start', taskId: 5, candidateCap: 3 }
 function consoleEnv(taskOverrides = {}, storage) {
   const consoleTab = { id: 8, windowId: 2, url: consoleSender.url, active: true }
@@ -337,6 +338,14 @@ function consoleEnv(taskOverrides = {}, storage) {
   const env = loadBackground({ fetchImpl: router, respond: budgetResponder, consoleTab, storage })
   return { env, calls, consoleTab }
 }
+
+test('commercial single-process console origin is trusted without broadening arbitrary ports', async () => {
+  const { env, consoleTab, calls } = consoleEnv()
+  consoleTab.url = commercialConsoleSender.url
+  const reply = await env.send({ type: 'jobagent:console-command', action: 'status' }, commercialConsoleSender)
+  assert.equal(reply.ok, true)
+  assert.equal(calls.length, 0)
+})
 
 test('suspended M7 console command cannot open or scan a chat tab', async () => {
   const consoleTab = { id: 8, windowId: 2, url: 'http://127.0.0.1:5173/#/recruiter', active: true }

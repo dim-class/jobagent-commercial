@@ -13,8 +13,9 @@ records the things that are true right now and are easy to get wrong.
 | Remote | `https://github.com/dim-class/jobagent-commercial` (**private**) |
 | Archived old repo | `dim-class/Qirui-JobAgent` — unrelated history, 1 commit, read-only |
 
-Working tree is clean and `commercial` is in sync with `origin/commercial` at
-`b1cd433`.
+The verified clean commercial baseline before P2A work was `532f530`, in sync
+with `origin/commercial`. Always verify the current hash rather than relying on
+this historical handoff value.
 
 ## Personal vs commercial — do not break this
 

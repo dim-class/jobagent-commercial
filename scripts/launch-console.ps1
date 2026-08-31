@@ -14,6 +14,8 @@
 param(
     [switch]$Stop,
     [switch]$NoOpen,
+    [switch]$SingleProcess,
+    [string]$DataDir,
     [ValidateRange(1024, 65535)][int]$BackendPort = 8000,
     [ValidateRange(1024, 65535)][int]$FrontendPort = 5173
 )
@@ -26,7 +28,11 @@ $Python = Join-Path $BackendDir '.venv\Scripts\python.exe'
 $StateDir = Join-Path $Root '.tmp\launcher'
 $BackendPidFile = Join-Path $StateDir "backend-$BackendPort.pid"
 $FrontendPidFile = Join-Path $StateDir "frontend-$FrontendPort.pid"
-$ConsoleUrl = "http://127.0.0.1:$FrontendPort/#/console"
+$ConsoleUrl = if ($SingleProcess) {
+    "http://127.0.0.1:$BackendPort/#/setup"
+} else {
+    "http://127.0.0.1:$FrontendPort/#/console"
+}
 
 function Get-ListenerPid([int]$Port) {
     $match = netstat -ano | Select-String "^\s*TCP\s+127\.0\.0\.1:$Port\s+.*LISTENING\s+(\d+)\s*$" |
@@ -39,6 +45,14 @@ function Test-Http([string]$Url) {
     try {
         $response = Invoke-WebRequest -UseBasicParsing -Uri $Url -TimeoutSec 5
         return $response.StatusCode -ge 200 -and $response.StatusCode -lt 500
+    } catch { return $false }
+}
+
+function Test-SingleProcessFrontend([string]$Url) {
+    try {
+        $response = Invoke-WebRequest -UseBasicParsing -Uri $Url -TimeoutSec 5
+        return $response.StatusCode -eq 200 -and
+            $response.Headers['Content-Type'] -like 'text/html*'
     } catch { return $false }
 }
 
@@ -78,6 +92,10 @@ function Save-ListenerPid([int]$Port, [string]$Path) {
     Set-Content -LiteralPath $Path -Value $pidValue -Encoding ascii
 }
 
+function ConvertTo-PowerShellLiteral([string]$Value) {
+    return "'" + $Value.Replace("'", "''") + "'"
+}
+
 function Stop-OwnedListener([int]$Port, [string]$Path, [string]$Name) {
     if (-not (Test-Path -LiteralPath $Path)) {
         Write-Host "$Name was not started by the one-click launcher; leaving it unchanged."
@@ -106,6 +124,10 @@ if (-not (Test-Path -LiteralPath $Python)) {
     throw 'Backend environment is missing. Run scripts\dev.ps1 setup once before using the launcher.'
 }
 
+if ($SingleProcess -and -not (Test-Path -LiteralPath (Join-Path $FrontendDir 'dist\index.html'))) {
+    throw 'Built frontend is missing. Run npm run build in frontend before using single-process mode.'
+}
+
 $healthUrl = "http://127.0.0.1:$BackendPort/health"
 $startedBackend = $false
 if (-not (Test-Http $healthUrl)) {
@@ -119,20 +141,49 @@ if (-not (Test-Http $healthUrl)) {
     } else {
         $backendOut = Join-Path $StateDir 'backend.stdout.log'
         $backendErr = Join-Path $StateDir 'backend.stderr.log'
-        Start-Process -FilePath $Python `
-            -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', "$BackendPort") `
-            -WorkingDirectory $BackendDir -WindowStyle Hidden `
-            -RedirectStandardOutput $backendOut -RedirectStandardError $backendErr | Out-Null
+        if ($SingleProcess) {
+            $runtimeData = if ($DataDir) {
+                [System.IO.Path]::GetFullPath($DataDir)
+            } else {
+                Join-Path $env:LOCALAPPDATA 'JobAgent'
+            }
+            $frontendDist = Join-Path $FrontendDir 'dist'
+            $runtimeDataLiteral = ConvertTo-PowerShellLiteral $runtimeData
+            $frontendDistLiteral = ConvertTo-PowerShellLiteral $frontendDist
+            $pythonLiteral = ConvertTo-PowerShellLiteral $Python
+            $command = "`$env:JOBAGENT_DATA_DIR=$runtimeDataLiteral; " +
+                "`$env:JOBAGENT_SERVE_FRONTEND='true'; " +
+                "`$env:JOBAGENT_FRONTEND_DIR=$frontendDistLiteral; " +
+                "& $pythonLiteral -m uvicorn app.main:app --host 127.0.0.1 --port $BackendPort"
+            Start-Process -FilePath 'powershell.exe' `
+                -ArgumentList @('-NoProfile', '-Command', $command) `
+                -WorkingDirectory $BackendDir -WindowStyle Hidden `
+                -RedirectStandardOutput $backendOut -RedirectStandardError $backendErr | Out-Null
+        } else {
+            Start-Process -FilePath $Python `
+                -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', "$BackendPort") `
+                -WorkingDirectory $BackendDir -WindowStyle Hidden `
+                -RedirectStandardOutput $backendOut -RedirectStandardError $backendErr | Out-Null
+        }
         Wait-Http 'JobAgent backend' $healthUrl
         Save-ListenerPid $BackendPort $BackendPidFile
         $startedBackend = $true
         Write-Host 'JobAgent backend started.'
     }
 } else {
+    if ($SingleProcess -and -not (Test-SingleProcessFrontend "http://127.0.0.1:$BackendPort/")) {
+        throw "Port $BackendPort is running JobAgent development mode. Stop it before starting commercial mode."
+    }
     Write-Host 'JobAgent backend is already running; reusing it.'
 }
 
 try {
+    if ($SingleProcess) {
+        Write-Host 'JobAgent single-process frontend is served by the backend.'
+        Write-Host "JobAgent is ready: $ConsoleUrl"
+        if (-not $NoOpen) { Start-Process $ConsoleUrl }
+        exit 0
+    }
     $frontendUrl = "http://127.0.0.1:$FrontendPort/"
     if (-not (Test-Http $frontendUrl)) {
         if (Get-ListenerPid $FrontendPort) {
@@ -150,7 +201,9 @@ try {
             # npm.cmd delegates to node.exe by name. Explicitly hand its directory
             # to the hidden child because GUI-launched PowerShell can have a much
             # narrower PATH than an interactive terminal.
-            $command = "`$env:PATH='$nodeDir;'+`$env:PATH; & '$npm' run dev -- --host 127.0.0.1 --port $FrontendPort --strictPort"
+            $nodePathLiteral = ConvertTo-PowerShellLiteral ($nodeDir + ';')
+            $npmLiteral = ConvertTo-PowerShellLiteral $npm
+            $command = "`$env:PATH=$nodePathLiteral+`$env:PATH; & $npmLiteral run dev -- --host 127.0.0.1 --port $FrontendPort --strictPort"
             Start-Process -FilePath 'powershell.exe' `
                 -ArgumentList @('-NoProfile', '-Command', $command) `
                 -WorkingDirectory $FrontendDir -WindowStyle Hidden `

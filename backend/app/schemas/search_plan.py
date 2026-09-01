@@ -119,10 +119,29 @@ class SearchPlanTaskListResponse(BaseModel):
     items: list[SearchPlanTaskOut]
 
 
+class DirectionChoiceOut(BaseModel):
+    """One chosen direction and the local evidence behind it. Never a model call."""
+
+    keyword: str
+    reasons: list[str] = Field(default_factory=list)
+    jobs: int = 0
+    recommended: int = 0
+    recommend_rate: float | None = None
+    has_evidence: bool = False
+
+
 class QuickSearchPrepareResponse(BaseModel):
     tasks: list[SearchPlanTaskOut]
     active_resume_name: str
     keyword_source: str = "career_strategy"
+    #: Why these directions, in the order they were chosen. The user asked to
+    #: search directly and be told afterwards, so this is an explanation, not a
+    #: second confirmation step.
+    directions: list[DirectionChoiceOut] = Field(default_factory=list)
+    direction_notes: list[str] = Field(default_factory=list)
+    #: True when too few directions have real outcome history. The UI may offer
+    #: a paid AI pass; nothing here ever makes one.
+    needs_more_evidence: bool = False
 
 
 class SearchPlanOptionsResponse(BaseModel):

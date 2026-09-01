@@ -30,6 +30,7 @@ from app.core.errors import NotFoundError
 from app.db.session import get_db
 from app.models import JobSearchTask
 from app.schemas.search_plan import (
+    DirectionChoiceOut,
     FailRunRequest,
     PauseRunRequest,
     RecordRoundRequest,
@@ -121,11 +122,28 @@ def quick_prepare(
 ) -> QuickSearchPrepareResponse:
     """Prepare one fresh, resume-bound bounded search. No BOSS or AI action."""
     require_loopback(request)
-    tasks, resume_name = search_plan.prepare_resume_searches(
+    tasks, resume_name, ranking = search_plan.prepare_resume_searches(
         db, cities=payload.cities, target_count=payload.target_count
     )
     return QuickSearchPrepareResponse(
-        tasks=[_task_out(task) for task in tasks], active_resume_name=resume_name
+        tasks=[_task_out(task) for task in tasks],
+        active_resume_name=resume_name,
+        # Chosen directions only, in the order they were used - the tail of the
+        # ranking was not searched and would only be noise here.
+        directions=[
+            DirectionChoiceOut(
+                keyword=d.keyword,
+                reasons=d.reasons,
+                jobs=d.jobs,
+                recommended=d.recommended,
+                recommend_rate=d.recommend_rate,
+                has_evidence=d.has_evidence,
+            )
+            for d in ranking.directions
+            if d.keyword in {task.keywords for task in tasks}
+        ],
+        direction_notes=ranking.notes,
+        needs_more_evidence=ranking.needs_more_evidence,
     )
 
 

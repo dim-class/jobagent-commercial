@@ -21,6 +21,10 @@ from app.core.errors import ValidationError
 from app.models import JobSearchTask, SearchTaskRunStatus, TaskMode
 from app.services.boss_cities import city_id_for
 from app.services.job_matcher import get_active_resume
+from app.services.search_direction_ranking import (
+    DirectionRanking,
+    rank as rank_search_directions,
+)
 
 #: The initial configured inputs (CLAUDE.md M4e/M4f amendment). Callers may
 #: override either list; these are only the defaults.
@@ -84,7 +88,7 @@ def _resume_search_keyword(strategy: dict) -> str:
 
 def prepare_resume_searches(
     db: Session, *, cities: list[str], target_count: int
-) -> tuple[list[JobSearchTask], str]:
+) -> tuple[list[JobSearchTask], str, DirectionRanking]:
     """Create fresh pending tasks for the simplified multi-city workflow.
 
     Repeated searches intentionally create fresh task runs; canonical job
@@ -103,10 +107,12 @@ def prepare_resume_searches(
     # city x keyword, bounded by one comprehensive portfolio. One or two cities
     # can cover eight directions; four cities cover four directions each.
     strategy = load_strategy()
-    keywords = resume_search_keywords(
-        strategy,
-        limit=min(MAX_SEARCH_DIRECTIONS, max(1, MAX_BATCH_TASKS // len(normalized_cities))),
-    )
+    limit = min(MAX_SEARCH_DIRECTIONS, max(1, MAX_BATCH_TASKS // len(normalized_cities)))
+    # Ranked by what this resume actually says and by what each direction has
+    # historically surfaced - not by the order they happen to sit in the
+    # strategy file. Deterministic and free: see `search_direction_ranking`.
+    ranking = rank_search_directions(db, resume=resume, strategy=strategy)
+    keywords = ranking.top(limit) or resume_search_keywords(strategy, limit=limit)
     early_career_policy = str(strategy["early_career_policy"])
     previous = db.scalars(
         select(JobSearchTask)
@@ -135,12 +141,12 @@ def prepare_resume_searches(
     db.commit()
     for task in tasks:
         db.refresh(task)
-    return tasks, resume.display_name
+    return tasks, resume.display_name, ranking
 
 
 def prepare_resume_search(db: Session, *, city: str, target_count: int) -> tuple[JobSearchTask, str]:
     """Backward-compatible single-city wrapper around the multi-city path."""
-    tasks, resume_name = prepare_resume_searches(
+    tasks, resume_name, _ranking = prepare_resume_searches(
         db, cities=[city], target_count=target_count
     )
     return tasks[0], resume_name

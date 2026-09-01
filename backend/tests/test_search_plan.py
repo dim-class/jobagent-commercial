@@ -120,7 +120,9 @@ def test_prepare_resume_search_creates_a_fresh_bounded_resume_task(db, active_re
     assert first.resume_id == active_resume.id
     assert first.city == "北京"
     assert first.city_id == "101010100"
-    assert first.keywords == "云计算工程师"
+    from app.services.search_direction_ranking import _is_chinese
+
+    assert _is_chinese(first.keywords), "a Chinese direction still leads"
     assert first.max_candidates == 7
     assert first.run_status == SearchTaskRunStatus.pending
     assert first.mode.value == "manual_review_only"
@@ -130,7 +132,7 @@ def test_prepare_resume_search_creates_a_fresh_bounded_resume_task(db, active_re
 
 
 def test_prepare_resume_searches_creates_one_fresh_task_per_unique_city(db, active_resume):
-    tasks, resume_name = search_plan.prepare_resume_searches(
+    tasks, resume_name, _ranking = search_plan.prepare_resume_searches(
         db, cities=["北京", "上海", "北京"], target_count=4
     )
 
@@ -146,13 +148,22 @@ def test_prepare_resume_searches_creates_one_fresh_task_per_unique_city(db, acti
 
 def test_quick_search_expands_one_city_across_several_role_directions(db, active_resume):
     """One keyword only ever searched a slice of a multi-role strategy."""
-    tasks, _ = search_plan.prepare_resume_searches(db, cities=["杭州"], target_count=20)
+    tasks, _, _ranking = search_plan.prepare_resume_searches(db, cities=["杭州"], target_count=20)
 
     keywords = [task.keywords for task in tasks]
     assert len(tasks) == search_plan.MAX_SEARCH_DIRECTIONS
     assert len(set(keywords)) == len(keywords), "no city x keyword pair repeats"
     assert all(task.city == "杭州" for task in tasks)
-    assert keywords[0] == "云计算工程师", "a Chinese cloud role still leads"
+    # The lead is no longer a hardcoded role: it is whichever direction the
+    # résumé and past results rank first. What must hold is that a Chinese
+    # direction still leads an English one, because BOSS matches far fewer
+    # postings for the latter.
+    from app.services.search_direction_ranking import _is_chinese
+
+    assert _is_chinese(keywords[0]), "a Chinese direction still leads"
+    english = [k for k in keywords if not _is_chinese(k)]
+    if english:
+        assert keywords.index(english[0]) > 0
 
 
 @pytest.mark.parametrize(
@@ -163,7 +174,7 @@ def test_quick_search_expands_one_city_across_several_role_directions(db, active
 def test_quick_search_never_exceeds_the_comprehensive_batch_ceiling(
     db, active_resume, cities, expected_tasks
 ):
-    tasks, _ = search_plan.prepare_resume_searches(db, cities=cities, target_count=3)
+    tasks, _, _ranking = search_plan.prepare_resume_searches(db, cities=cities, target_count=3)
     assert len(tasks) == expected_tasks
     assert len(tasks) <= search_plan.MAX_BATCH_TASKS
 
@@ -175,7 +186,7 @@ def test_quick_search_directions_remain_bounded_even_with_many_configured_roles(
         "preferred_roles": [f"云方向{i}" for i in range(20)],
         "early_career_policy": "exclude",
     })
-    tasks, _ = search_plan.prepare_resume_searches(db, cities=["北京"], target_count=8)
+    tasks, _, _ranking = search_plan.prepare_resume_searches(db, cities=["北京"], target_count=8)
     assert len(tasks) == search_plan.MAX_SEARCH_DIRECTIONS == 8
 
 

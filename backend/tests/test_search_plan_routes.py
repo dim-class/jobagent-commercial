@@ -80,7 +80,17 @@ def test_quick_prepare_returns_a_fresh_resume_bound_bounded_task(client, active_
     # comprehensive-search ceiling.
     assert [task["city"] for task in body["tasks"]] == ["上海"] * 8 + ["北京"] * 8
     assert [task["city_id"] for task in body["tasks"]] == ["101020100"] * 8 + ["101010100"] * 8
-    assert body["tasks"][0]["keywords"] == "云计算工程师"
+    # Which direction leads is decided by the résumé and past results, not by a
+    # fixed role name. What must hold: a Chinese direction leads, and the
+    # response explains the choice, since the search runs without a second
+    # confirmation.
+    from app.services.search_direction_ranking import _is_chinese
+
+    assert _is_chinese(body["tasks"][0]["keywords"]), "a Chinese direction leads"
+    used = [d["keyword"] for d in body["directions"]]
+    assert used, "the response must say which directions it used"
+    assert set(used) == {task["keywords"] for task in body["tasks"]}
+    assert body["direction_notes"], "and why it chose them"
     assert len({task["keywords"] for task in body["tasks"]}) == 8
     assert all(task["max_candidates"] == 5 for task in body["tasks"])
     assert all(task["run_status"] == "pending" for task in body["tasks"])

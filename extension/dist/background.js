@@ -315,6 +315,15 @@ async function patchBatchForTask(taskId, patch) {
 }
 let salaryOcrBusy = false;
 let lastSalaryScreenshot = 0;
+/** Minimum spacing between two `captureVisibleTab` calls.
+ *
+ * Chrome itself rate-limits the API, so the spacing has to exist. What it must
+ * not do is *skip the salary*: the runner processes candidates back to back, so
+ * consecutive ones land inside this window routinely - 71 of 176 jobs in one
+ * real run came back with no salary for that reason alone, having never
+ * attempted a capture. Waiting out the remainder costs at most this much and
+ * gets the salary. */
+const SALARY_CAPTURE_INTERVAL_MS = 600;
 const SALARY_BACKFILL_KEY = 'jobagent_salary_backfill_pointer';
 let salaryBackfillBusy = false;
 async function getSalaryBackfillPointer() {
@@ -375,6 +384,31 @@ async function salaryCrop(screenshot, f) {
         bitmap.close();
     }
 }
+/** Turn a raw failure into a short, greppable category for the intake note.
+ *
+ * Deliberately coarse and allow-listed: the note is user-visible, and a raw
+ * Chrome error string could carry a URL. */
+function salaryFailureCategory(reason) {
+    const text = (reason || '').toLowerCase();
+    // Chrome refuses captureVisibleTab without an activeTab grant, which a
+    // worker-created tab never has. This is the expected miss, not a defect.
+    if (text.includes('activetab') || text.includes('permission') || text.includes('not allowed')) {
+        return 'no_capture_permission';
+    }
+    if (text.includes('timeout') || text.includes('timed out'))
+        return 'timeout';
+    // sendMessage rejects with this when no content script is listening yet.
+    if (text.includes('establish connection') || text.includes('receiving end')) {
+        return 'content_script_not_ready';
+    }
+    if (text.includes('frame_unavailable'))
+        return 'salary_frame_no_reply';
+    if (text.includes('abort'))
+        return 'ocr_aborted';
+    if (text.includes('failed to fetch') || text.includes('backend'))
+        return 'backend_unreachable';
+    return 'unavailable';
+}
 /** OCR may fill only a missing salary. It never changes candidate identity or imports. */
 async function supplementSalary(tabId, candidate, allowed) {
     if (candidate.salary_text || !candidate.title || !canonicalizeJobDetailUrl(candidate.source_url) || salaryOcrBusy)
@@ -420,9 +454,20 @@ async function supplementSalary(tabId, candidate, allowed) {
             if (next.status !== 'ok' || JSON.stringify(next.frame) !== JSON.stringify(frame))
                 throw new Error('salary_identity_or_region_changed');
         };
-        // Never retry or raise capture frequency when the last attempt was recent.
-        if (Date.now() - lastSalaryScreenshot < 600)
-            return note('rate_limited');
+        // Space captures out rather than dropping this one. This is a single
+        // bounded wait inside the already-running foreground operation, not a retry
+        // loop and not an increase in capture frequency: the interval below is
+        // still enforced, we simply arrive at it instead of giving up on it.
+        const sinceLast = Date.now() - lastSalaryScreenshot;
+        if (sinceLast < SALARY_CAPTURE_INTERVAL_MS) {
+            await new Promise((resolve) => setTimeout(resolve, SALARY_CAPTURE_INTERVAL_MS - sinceLast));
+            // The wait is a gap in which the human may have stopped, or the tab may
+            // have moved. Both must be honoured before the image is taken.
+            if (!await allowed())
+                throw new Error('salary_cancelled');
+            if (contextChanged)
+                throw new Error('salary_tab_changed');
+        }
         const windowId = await salaryForeground(tabId);
         if (!await allowed())
             throw new Error('salary_cancelled');
@@ -459,11 +504,20 @@ async function supplementSalary(tabId, candidate, allowed) {
         };
     }
     catch (error) {
-        const reason = error instanceof Error ? error.message : '';
+        // Read `.message` without `instanceof`: an Error thrown in another realm
+        // (a different execution context) is not an instance of *this* realm's
+        // Error, so `instanceof` silently discarded the reason and reported every
+        // such failure as the generic miss.
+        const raw = error?.message;
+        const reason = typeof raw === 'string' ? raw : '';
         // Identity/verification/cancellation is not an ordinary OCR miss: prevent import.
         if (['salary_login_required', 'salary_verification', 'salary_cancelled', 'salary_identity_or_region_changed', 'salary_tab_changed', 'salary_not_foreground'].includes(reason))
             throw error;
-        return note('unavailable');
+        // 'unavailable' was recorded for every non-fatal failure, which made 105
+        // jobs in one run indistinguishable: a missing activeTab grant, a timeout
+        // and an unreachable backend all read the same. Keep the category so the
+        // next run can be diagnosed from the intake note instead of guessed at.
+        return note(salaryFailureCategory(reason));
     }
     finally {
         chrome.tabs.onActivated?.removeListener(changed);

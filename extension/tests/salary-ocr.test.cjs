@@ -63,3 +63,40 @@ test('DOM month suffix cannot silently disappear in OCR',async()=>{const h=harne
 test('one request at a time; a concurrent call cannot screenshot',async()=>{let resolve;const gate=new Promise(r=>resolve=r);const h=harness();const first=h.run(candidate(),async()=>{await gate;return true});await h.run();resolve();await first;assert.equal(h.state.captures,1)})
 test('request timeout has bounded lifetime',async()=>{const h=harness();await assert.rejects(h.ctx.salaryBounded(new Promise(()=>{}),5),/salary_timeout/)})
 test('new/resumed runner cannot start during manual OCR',async()=>{const h=harness();vm.runInContext('salaryOcrBusy=true',h.ctx);assert.equal((await h.ctx.startRunner(1,3)).error,'salary_ocr_busy');assert.equal((await h.ctx.resumeRunner()).error,'salary_ocr_busy')})
+
+test('back-to-back candidates both get a salary instead of one being rate-limited',async()=>{
+  // The runner processes candidates one after another, so the second reliably
+  // lands inside the capture interval. Skipping it there cost 71 of 176 jobs
+  // their salary in one real run - they never attempted a capture at all.
+  const h=harness()
+  const first=await h.run()
+  assert.equal(first.salary_text,'8-13K')
+  const started=Date.now()
+  const second=await h.run()
+  const waited=Date.now()-started
+  assert.equal(second.salary_text,'8-13K','the second candidate must not lose its salary')
+  assert.equal(h.state.captures,2,'it waits for the interval rather than skipping the capture')
+  assert.ok(waited>=500,`it must still space captures out, waited ${waited}ms`)
+  assert.ok(!(second.warnings||[]).some(w=>w.includes('rate_limited')))
+})
+
+test('a stop during the capture-interval wait is honoured before the screenshot',async()=>{
+  // The wait is a gap in which the human may have hit stop. Nothing may be
+  // captured after that.
+  const h=harness()
+  await h.run()
+  let allowed=true
+  setTimeout(()=>{allowed=false},50)
+  await assert.rejects(h.run(candidate(),async()=>allowed),/salary_cancelled/)
+  assert.equal(h.state.captures,1,'no capture after the stop')
+})
+
+test('a failure is recorded by category, not as a single unusable label',async()=>{
+  // 105 jobs in one run all said "unavailable": a missing permission, a
+  // timeout and an unreachable backend were indistinguishable.
+  const h=harness({frame:()=>{throw new Error('Could not establish connection. Receiving end does not exist.')}})
+  const result=await h.run()
+  assert.equal(result.salary_text,null)
+  assert.ok((result.warnings||[]).some(w=>w.includes('content_script_not_ready')),
+    'the note must name the actual failure: '+JSON.stringify(result.warnings))
+})

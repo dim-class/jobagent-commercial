@@ -105,7 +105,7 @@ def test_the_upgrade_only_adds_the_orchestration_events_table(v11_db):
     before = {t: columns(v11_db, t) for t in TRACKED}
     assert upgrade(v11_db) == "upgraded"
 
-    assert current_revision_of(v11_db) == "0021_candidate_stage_policy"
+    assert current_revision_of(v11_db) == "0022_resume_direction_analyses"
     assert "orchestration_events" in set(tables(v11_db))
     for table, cols in before.items():
         after = columns(v11_db, table)
@@ -168,5 +168,5 @@ def test_a_v03_database_reaches_the_orchestration_events_schema_in_one_go(v03_db
     finally:
         engine.dispose()
 
-    assert current_revision_of(v03_db) == "0021_candidate_stage_policy"
+    assert current_revision_of(v03_db) == "0022_resume_direction_analyses"
     assert "orchestration_events" in set(tables(v03_db))

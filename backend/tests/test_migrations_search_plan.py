@@ -74,7 +74,7 @@ def current_revision_of(path: Path) -> str:
 def test_the_upgrade_adds_exactly_the_search_plan_columns(v12_db):
     before = columns(v12_db, "job_search_tasks")
     assert upgrade(v12_db) == "upgraded"
-    assert current_revision_of(v12_db) == "0021_candidate_stage_policy"
+    assert current_revision_of(v12_db) == "0022_resume_direction_analyses"
 
     after = columns(v12_db, "job_search_tasks")
     assert after - before == NEW_COLUMNS
@@ -158,5 +158,5 @@ def test_a_v03_database_reaches_the_search_plan_schema_in_one_go(v03_db):
     finally:
         engine.dispose()
 
-    assert current_revision_of(v03_db) == "0021_candidate_stage_policy"
+    assert current_revision_of(v03_db) == "0022_resume_direction_analyses"
     assert NEW_COLUMNS <= columns(v03_db, "job_search_tasks")

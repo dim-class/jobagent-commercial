@@ -1,6 +1,7 @@
 """ORM models. Importing this package registers every mapper."""
 
 from app.models.analysis import JobAnalysis
+from app.models.direction_analysis import ResumeDirectionAnalysis
 from app.models.enums import (
     BenefitKey,
     CLOSED_SEARCH_TASK_RUN_STATUSES,
@@ -112,6 +113,7 @@ __all__ = [
     "EventType",
     "Job",
     "JobAnalysis",
+    "ResumeDirectionAnalysis",
     "JobSourceName",
     "JobStatus",
     "MessageDirection",

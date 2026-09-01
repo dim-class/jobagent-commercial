@@ -120,7 +120,7 @@ class SearchPlanTaskListResponse(BaseModel):
 
 
 class DirectionChoiceOut(BaseModel):
-    """One chosen direction and the local evidence behind it. Never a model call."""
+    """One chosen direction and the evidence behind it."""
 
     keyword: str
     reasons: list[str] = Field(default_factory=list)
@@ -128,6 +128,36 @@ class DirectionChoiceOut(BaseModel):
     recommended: int = 0
     recommend_rate: float | None = None
     has_evidence: bool = False
+    #: 0-1. Read with `fit_source`: an AI judgement and a character-overlap
+    #: guess are not the same claim and must not render identically.
+    fit: float = 0.0
+    fit_source: str = "text"
+    #: True when the model proposed this keyword and the strategy file does not
+    #: contain it. Used for this search only; the strategy is never auto-edited.
+    suggested: bool = False
+
+
+class DirectionAnalysisPlanOut(BaseModel):
+    """What an AI direction analysis would cost right now. Reading is free."""
+
+    resume_id: int | None = None
+    resume_name: str = ""
+    model: str
+    candidates: list[str] = Field(default_factory=list)
+    cached: bool = False
+    #: 0 when cached, otherwise 1 - one call for the whole résumé, never one
+    #: per direction.
+    pending_calls: int = 0
+    openai_configured: bool = True
+    summary: str = ""
+    directions: list[DirectionChoiceOut] = Field(default_factory=list)
+
+
+class DirectionAnalysisRunRequest(BaseModel):
+    """Spending money needs an explicit confirmation, as everywhere else."""
+
+    confirmed: bool = False
+    force: bool = False
 
 
 class QuickSearchPrepareResponse(BaseModel):

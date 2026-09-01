@@ -2225,6 +2225,14 @@ export interface SearchPlanTask {
   updated_at: string
 }
 
+/** How a direction's fit was arrived at. These are not the same claim and the
+ *  UI must not render them identically:
+ *  - `ai`       a model read the résumé and judged this direction 0-100
+ *  - `text`     character overlap only - a weak stand-in, no AI pass yet
+ *  - `unjudged` an AI pass exists but skipped this direction, so there is no
+ *               comparable number and none was invented */
+export type DirectionFitSource = 'ai' | 'text' | 'unjudged'
+
 export interface DirectionChoice {
   keyword: string
   reasons: string[]
@@ -2232,6 +2240,23 @@ export interface DirectionChoice {
   recommended: number
   recommend_rate: number | null
   has_evidence: boolean
+  fit: number
+  fit_source: DirectionFitSource
+  /** Proposed by the model; deliberately not written into career_strategy.yaml. */
+  suggested: boolean
+}
+
+export interface DirectionAnalysisPlan {
+  resume_id: number | null
+  resume_name: string
+  model: string
+  candidates: string[]
+  cached: boolean
+  /** 0 when cached, otherwise 1 - one call for the whole résumé. */
+  pending_calls: number
+  openai_configured: boolean
+  summary: string
+  directions: DirectionChoice[]
 }
 
 export interface QuickSearchPrepareResponse {

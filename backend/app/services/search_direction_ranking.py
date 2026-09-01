@@ -1,4 +1,4 @@
-"""Which search directions actually suit this résumé - deterministic, zero AI.
+"""Which search directions actually suit this résumé.
 
 The comprehensive search used to take the first N entries of
 ``career_strategy.preferred_roles`` in configured order. That order has nothing
@@ -17,12 +17,20 @@ it only exists for directions that have already been searched.
 skills plus the strategy's `relevant_skills`. This is what lets a
 never-searched direction be ranked at all.
 
-Neither is a model call. Everything here is a count, a ratio or a substring
-test over rows the user already has, so re-running it is free and reproducible.
+The character-overlap fit is a weak stand-in and says so: `云计算工程师`,
+`云运维工程师` and `云平台工程师` all scored an identical 33% on one real
+résumé, and every point of it came from the shared suffix 工程师. It measures
+"this is an engineering role", not "this résumé supports this direction".
 
-When the pool is thin on both signals the result says so via
-``needs_more_evidence``; the caller may then *offer* a paid AI pass. Nothing
-here ever makes that call.
+**AI fit** - optional, and the reason this module is no longer zero-AI. When a
+cached `ResumeDirectionAnalysis` is passed in, its 0-100 judgement replaces the
+character overlap. It is *passed in*, never fetched: this module makes no model
+call, so ranking stays free and reproducible, and spending money remains the
+caller's explicit, confirmed decision.
+
+Evidence still outranks fit either way. A model reading a résumé is a better
+guess than counting bigrams, but it is still a guess about what BOSS will
+return; a direction that has already surfaced 28 jobs has told us the answer.
 """
 
 from __future__ import annotations
@@ -33,8 +41,18 @@ from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
 
 from app.models import Resume
+from app.schemas.direction import ResumeDirectionAnalysis
 from app.services import search_keyword_analytics as keyword_analytics
 from app.services.statistics import Confidence
+
+#: Tokens shared by nearly every Chinese engineering job title. Left in, they
+#: dominate the overlap: 云计算工程师 / 云运维工程师 / 云平台工程师 each scored
+#: an identical 33% on a real résumé purely because all three end in 工程师,
+#: which says nothing about whether that résumé fits any of them.
+_GENERIC_ROLE_TOKENS = frozenset(
+    {"工程", "程师", "工程师", "开发工程师", "技术", "高级", "资深", "初级", "专家",
+     "engineer", "senior", "junior", "staff", "specialist"}
+)
 
 #: BOSS's search is a Chinese UI: an English direction matches far fewer
 #: postings there. This is a ranking nudge, not an exclusion - an English
@@ -70,6 +88,14 @@ class DirectionScore:
     keyword: str
     score: float
     fit: float
+    #: 'ai' when a model judged this résumé against this direction, 'text' when
+    #: it is the character-overlap fallback. Shown to the user, because the two
+    #: are not equally trustworthy.
+    fit_source: str = "text"
+    #: True when the direction came from the model rather than the strategy
+    #: file. Used for this search only - `career_strategy.yaml` is never
+    #: auto-edited (CLAUDE.md).
+    suggested: bool = False
     #: None when this direction has never been searched.
     recommend_rate: float | None = None
     jobs: int = 0
@@ -123,15 +149,44 @@ def _resume_vocabulary(resume: Resume | None, strategy: dict) -> set[str]:
     return vocabulary
 
 
+def _text_fit(role: str, vocabulary: set[str]) -> float:
+    """Character overlap, with generic occupational tokens removed.
+
+    Without the stoplist every `…工程师` direction scores the same, which reads
+    like a measurement and is really just the suffix.
+    """
+    role_tokens = _tokens(role) - _GENERIC_ROLE_TOKENS
+    if not role_tokens:
+        return 0.0
+    return len(role_tokens & vocabulary) / len(role_tokens)
+
+
 def rank(
     db: Session,
     *,
     resume: Resume | None,
     strategy: dict,
+    ai: ResumeDirectionAnalysis | None = None,
 ) -> DirectionRanking:
-    """Order the strategy's directions by evidence first, then résumé fit."""
+    """Order the directions by evidence first, then résumé fit.
+
+    `ai` is an already-cached analysis or None. This function never fetches
+    one: paying for it is the caller's confirmed decision, so ranking itself
+    stays free.
+    """
     roles = [str(r).strip() for r in (strategy.get("preferred_roles") or []) if str(r).strip()]
-    if not roles:
+    ai_fits: dict[str, tuple[int, str]] = {}
+    suggested_roles: list[str] = []
+    if ai is not None:
+        for item in ai.directions:
+            ai_fits[item.keyword.strip()] = (item.fit, item.reason.strip())
+        for item in ai.suggested:
+            keyword = item.keyword.strip()
+            if keyword and keyword not in roles and keyword not in ai_fits:
+                ai_fits[keyword] = (item.fit, item.reason.strip())
+                suggested_roles.append(keyword)
+
+    if not roles and not suggested_roles:
         return DirectionRanking(
             notes=["职业策略里没有岗位方向，请先在设置中添加。"], needs_more_evidence=True
         )
@@ -141,15 +196,31 @@ def rank(
     cohorts = {c.keyword: c for c in analytics.cohorts}
 
     scored: list[DirectionScore] = []
-    for role in dict.fromkeys(roles):
+    for role in dict.fromkeys([*roles, *suggested_roles]):
         reasons: list[str] = []
-        role_tokens = _tokens(role)
-        fit = (
-            len(role_tokens & vocabulary) / len(role_tokens) if role_tokens else 0.0
-        )
+        judged = ai_fits.get(role)
+        if judged is not None:
+            fit = judged[0] / 100
+            fit_source = "ai"
+            reasons.append(f"AI 判断简历支撑度 {judged[0]}/100：{judged[1]}")
+        elif ai is not None:
+            # An AI analysis exists but skipped this direction (the prompt says
+            # to cover every one, so this is a model defect). A character count
+            # is not a judgement and must not be ranked against one: 云运维工程师
+            # can score a perfect character overlap purely by appearing verbatim
+            # in the résumé, which would beat a direction the model actually
+            # assessed at 95/100. No comparable measurement, so none is invented.
+            fit = 0.0
+            fit_source = "unjudged"
+            reasons.append("AI 未覆盖此方向，没有可比较的匹配度")
+        else:
+            fit = _text_fit(role, vocabulary)
+            fit_source = "text"
+            if fit > 0:
+                reasons.append(f"与简历用词重合度 {fit:.0%}（未经 AI 判断）")
         score = fit
-        if fit > 0:
-            reasons.append(f"与简历技能重合度 {fit:.0%}")
+        if role in suggested_roles:
+            reasons.append("AI 依据简历补充的方向，未写入职业策略")
 
         if _is_chinese(role):
             score += _CHINESE_BONUS
@@ -177,6 +248,8 @@ def rank(
                 keyword=role,
                 score=round(score, 4),
                 fit=round(fit, 4),
+                fit_source=fit_source,
+                suggested=role in suggested_roles,
                 recommend_rate=rate,
                 jobs=jobs or 0,
                 recommended=recommended or 0,
@@ -187,7 +260,7 @@ def rank(
 
     # Highest score first; ties break on evidence, then on the configured order
     # so the result is stable rather than arbitrary.
-    order = {role: i for i, role in enumerate(dict.fromkeys(roles))}
+    order = {role: i for i, role in enumerate(dict.fromkeys([*roles, *suggested_roles]))}
     scored.sort(key=lambda d: (-d.score, not d.has_evidence, order[d.keyword]))
 
     evidenced = sum(1 for d in scored if d.has_evidence)
@@ -211,9 +284,17 @@ def _build_notes(ranking: DirectionRanking, evidenced: int) -> list[str]:
         notes.append(
             f"「{direction.keyword}」已搜过 {direction.jobs} 个岗位且无一推荐，已排到最后。"
         )
-    if ranking.needs_more_evidence:
+    suggested = [d.keyword for d in ranking.directions if d.suggested]
+    if suggested:
         notes.append(
-            f"目前只有 {evidenced} 个方向有足够的历史样本，排序主要依据简历技能重合度；"
+            "AI 依据简历补充了这些方向：" + "、".join(suggested)
+            + "。本次搜索会用到，但不会自动写进职业策略。"
+        )
+    if ranking.needs_more_evidence:
+        by_ai = any(d.fit_source == "ai" for d in ranking.directions)
+        basis = "AI 对简历的判断" if by_ai else "简历用词重合度（未经 AI 判断，参考价值有限）"
+        notes.append(
+            f"目前只有 {evidenced} 个方向有足够的历史样本，排序主要依据{basis}；"
             "多搜几轮后这个排序会更可靠。"
         )
     return notes

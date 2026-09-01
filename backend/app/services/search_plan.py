@@ -20,6 +20,7 @@ from app.core.career_strategy import load_strategy
 from app.core.errors import ValidationError
 from app.models import JobSearchTask, SearchTaskRunStatus, TaskMode
 from app.services.boss_cities import city_id_for
+from app.services import direction_analysis
 from app.services.job_matcher import get_active_resume
 from app.services.search_direction_ranking import (
     DirectionRanking,
@@ -110,8 +111,14 @@ def prepare_resume_searches(
     limit = min(MAX_SEARCH_DIRECTIONS, max(1, MAX_BATCH_TASKS // len(normalized_cities)))
     # Ranked by what this resume actually says and by what each direction has
     # historically surfaced - not by the order they happen to sit in the
-    # strategy file. Deterministic and free: see `search_direction_ranking`.
-    ranking = rank_search_directions(db, resume=resume, strategy=strategy)
+    # strategy file. The AI view is used only if it is already cached: this
+    # path never triggers a paid call, so preparing a search stays free.
+    ranking = rank_search_directions(
+        db,
+        resume=resume,
+        strategy=strategy,
+        ai=direction_analysis.cached_analysis(db),
+    )
     keywords = ranking.top(limit) or resume_search_keywords(strategy, limit=limit)
     early_career_policy = str(strategy["early_career_policy"])
     previous = db.scalars(

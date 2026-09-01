@@ -30,6 +30,8 @@ from app.core.errors import NotFoundError
 from app.db.session import get_db
 from app.models import JobSearchTask
 from app.schemas.search_plan import (
+    DirectionAnalysisPlanOut,
+    DirectionAnalysisRunRequest,
     DirectionChoiceOut,
     FailRunRequest,
     PauseRunRequest,
@@ -47,7 +49,14 @@ from app.schemas.search_plan import (
     AutoMatchReview,
 )
 from app.services.boss_cities import BOSS_CITY_IDS
-from app.services import boss_search_url, search_plan, search_task_runner, task_console, bounded_matching
+from app.services import (
+    boss_search_url,
+    bounded_matching,
+    direction_analysis,
+    search_plan,
+    search_task_runner,
+    task_console,
+)
 
 router = APIRouter(prefix="/api/tasks", tags=["search-plan"])
 
@@ -138,12 +147,69 @@ def quick_prepare(
                 recommended=d.recommended,
                 recommend_rate=d.recommend_rate,
                 has_evidence=d.has_evidence,
+                fit=d.fit,
+                fit_source=d.fit_source,
+                suggested=d.suggested,
             )
             for d in ranking.directions
             if d.keyword in {task.keywords for task in tasks}
         ],
         direction_notes=ranking.notes,
         needs_more_evidence=ranking.needs_more_evidence,
+    )
+
+
+def _direction_plan_out(plan: direction_analysis.DirectionPlan) -> DirectionAnalysisPlanOut:
+    result = plan.result
+    return DirectionAnalysisPlanOut(
+        resume_id=plan.resume_id,
+        resume_name=plan.resume_name,
+        model=plan.model,
+        candidates=plan.candidates,
+        cached=plan.cached,
+        pending_calls=plan.pending_calls,
+        openai_configured=plan.openai_configured,
+        summary=result.summary if result else "",
+        directions=[
+            DirectionChoiceOut(
+                keyword=item.keyword,
+                reasons=[item.reason],
+                fit=item.fit / 100,
+                fit_source="ai",
+                suggested=suggested,
+            )
+            for suggested, items in ((False, result.directions), (True, result.suggested))
+            for item in items
+        ]
+        if result
+        else [],
+    )
+
+
+@router.get("/search-plan/direction-plan", response_model=DirectionAnalysisPlanOut)
+def direction_plan(request: Request, db: Session = Depends(get_db)) -> DirectionAnalysisPlanOut:
+    """Pure read: what an AI direction analysis would cost, plus the cached one.
+
+    Reading this never calls a model, so the console may load it on open.
+    """
+    require_loopback(request)
+    return _direction_plan_out(direction_analysis.plan(db))
+
+
+@router.post("/search-plan/direction-analyze", response_model=DirectionAnalysisPlanOut)
+def direction_analyze(
+    request: Request,
+    payload: DirectionAnalysisRunRequest,
+    db: Session = Depends(get_db),
+) -> DirectionAnalysisPlanOut:
+    """The one endpoint here that spends money, and only with `confirmed=true`.
+
+    Exactly one call covering the whole résumé. A cached answer is returned
+    without spending unless `force` is set.
+    """
+    require_loopback(request)
+    return _direction_plan_out(
+        direction_analysis.run(db, confirmed=payload.confirmed, force=payload.force)
     )
 
 

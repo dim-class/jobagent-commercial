@@ -106,7 +106,7 @@ def test_the_upgrade_only_adds_the_supervised_session_tables(v12_db):
     before = {t: columns(v12_db, t) for t in TRACKED}
     assert upgrade(v12_db) == "upgraded"
 
-    assert current_revision_of(v12_db) == "0021_candidate_stage_policy"
+    assert current_revision_of(v12_db) == "0022_resume_direction_analyses"
     assert {"supervised_sessions", "supervised_session_events"} <= set(tables(v12_db))
     for table, cols in before.items():
         after = columns(v12_db, table)
@@ -186,5 +186,5 @@ def test_a_v03_database_reaches_the_supervised_session_schema_in_one_go(v03_db):
     finally:
         engine.dispose()
 
-    assert current_revision_of(v03_db) == "0021_candidate_stage_policy"
+    assert current_revision_of(v03_db) == "0022_resume_direction_analyses"
     assert {"supervised_sessions", "supervised_session_events"} <= set(tables(v03_db))

@@ -9,6 +9,7 @@ import type {
   SearchKeywordAnalytics,
   SalaryBackfillRun,
   QuickSearchPrepareResponse,
+  DirectionAnalysisPlan,
   SearchPlanOptions,
   AutoMatchReview,
   AnalysisResponse,
@@ -242,6 +243,15 @@ export const api = {
   prepareResumeSearch: (cities: string[], targetCount: number) =>
     request<QuickSearchPrepareResponse>('/api/tasks/search-plan/quick-prepare', {
       method: 'POST', body: JSON.stringify({ cities, target_count: targetCount }),
+    }),
+  // Free: reading the plan never calls a model.
+  getDirectionPlan: (signal?: AbortSignal) =>
+    request<DirectionAnalysisPlan>('/api/tasks/search-plan/direction-plan', { signal }),
+  // The one call that spends. Exactly one, for the whole résumé.
+  analyzeDirections: (force = false) =>
+    request<DirectionAnalysisPlan>('/api/tasks/search-plan/direction-analyze', {
+      method: 'POST',
+      body: JSON.stringify({ confirmed: true, force }),
     }),
   // Free: a local aggregate over analyses you already paid for.
   searchKeywordAnalytics: () =>

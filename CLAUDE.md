@@ -1284,6 +1284,57 @@ credentials, bypasses verification, retries invisibly or runs after a worker res
 searches, scrolls, applies, favorites or messages. Offline implementation acceptance does not
 authorize starting the real maintenance run; that remains a separate human action in the console.
 
+### Résumé -> search directions (the second agent)
+
+```
+résumé + strategy  -> ResumeDirectionAgent -> per-direction fit 0-100
+                                              + suggested Chinese keywords
+        combined with
+past outcomes per keyword (zero AI, v0.6 statistics)
+        -> ranked directions -> the comprehensive search
+```
+
+The second agent in the codebase, and only because there is a genuine second
+job: `JobMatchAgent` answers "does this JD fit this résumé", which cannot
+answer "what should I be searching for at all".
+
+It exists because the deterministic fallback it replaces was measuring the
+wrong thing. Character overlap gave `云计算工程师`, `云运维工程师` and
+`云平台工程师` an identical 33% on a real résumé, and every point came from the
+shared suffix 工程师. It read like a measurement and was really just "this is an
+engineering role". `_GENERIC_ROLE_TOKENS` now strips those, but a stripped
+character count is still a weak stand-in - hence the agent.
+
+Rules that are load-bearing:
+
+- **ranking never calls a model.** `search_direction_ranking.rank()` takes the
+  analysis as an argument. Paying for one is the caller's confirmed decision,
+  so preparing or re-running a search stays free;
+- **plan then confirm**, the same shape as `resume_comparison` and
+  `task_matching`. `direction_analysis.plan()` is a pure read the console loads
+  on open; `run()` requires `confirmed=true`. **One call covers the whole
+  résumé** - never one per direction;
+- **a cached answer needs no API key.** The key gate lives in the agent, so
+  reading an answer already paid for works without one;
+- `direction_cache_key = sha256(resume_hash, strategy_hash, candidates, model,
+  DIRECTION_PROMPT_VERSION)`. A new résumé, an edited strategy, an added
+  direction or a changed prompt all re-analyse; nothing else does;
+- **an AI judgement and a character count are different claims and must never
+  be ranked against each other.** When an analysis exists but skipped a
+  direction, that direction is `unjudged` with fit 0 - a perfect character
+  overlap (`云运维工程师` appearing verbatim in the résumé) would otherwise
+  outrank a direction the model actually assessed at 95/100. The frontend
+  renders the three sources differently for the same reason;
+- **evidence still outranks fit.** A model reading a résumé is a better guess
+  than counting bigrams, but it is still a guess about what BOSS will return; a
+  direction that already surfaced 28 jobs has told us the answer;
+- **suggested keywords are used, never written.** The model may propose Chinese
+  keywords the strategy lacks (a résumé saying 基础设施工程师 while the strategy
+  only lists the English `Infrastructure Engineer`). They join *this* search and
+  are labelled `AI 补充`; `career_strategy.yaml` is never auto-edited;
+- the agent scores directions only. It never picks a job, never writes
+  `Job.status`, and never triggers a search - a human still starts that.
+
 ### Caching (mandatory)
 
 `analysis_cache_key = sha256(resume_hash, strategy_hash, jd_hash, model, prompt_version)`
@@ -1372,6 +1423,9 @@ Unique indexes that matter: `jobs.content_hash`, `(jobs.source, external_id)`,
   never delete a resume that an application references - archive it.
 - Never fill the job x resume score matrix automatically. Spending money
   requires an explicit confirmation showing the exact number of calls.
+- Never let direction ranking call a model on its own, and never rank an AI
+  fit against a character-overlap number - they are different claims.
+- Never write an AI-suggested keyword into `career_strategy.yaml`.
 - Never infer interview rounds from a pre-v0.8 event, and never let
   recruiter-message analysis create an interview on its own.
 - Never count a candidate withdrawal as an employer rejection, and never

@@ -5,7 +5,7 @@ import { Alert, Card, Modal } from '@/components/ui'
 import { assessConsoleConnection, ConsoleConnectionError, consoleExtension,
   DEFAULT_BATCH_CANDIDATE_CAP, MAX_CONSOLE_BATCH_TASKS, selectBoundedPendingTasks } from '@/pages/consoleExtension'
 import type { ConsoleAction, ConsoleReply } from '@/pages/consoleExtension'
-import type { DirectionChoice, SearchKeywordAnalytics, SearchPlanOptions, SearchPlanTask } from '@/types'
+import type { DirectionAnalysisPlan, DirectionChoice, SearchKeywordAnalytics, SearchPlanOptions, SearchPlanTask } from '@/types'
 
 function taskStatusLabel(task: SearchPlanTask): string {
   if (task.state === 'paused_login_required' || task.paused_reason === 'login_required') return '需要登录 BOSS'
@@ -32,6 +32,11 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
   //: confirmation, so this is the after-the-fact explanation.
   const [chosen, setChosen] = useState<DirectionChoice[]>([])
   const [chosenNotes, setChosenNotes] = useState<string[]>([])
+  //: The AI's read of the résumé. Loaded on open because reading is free; the
+  //: analysis itself only runs on an explicit click.
+  const [aiPlan, setAiPlan] = useState<DirectionAnalysisPlan | null>(null)
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
   const [selected, setSelected] = useState<number | null>(null)
   const [connection, setConnection] = useState<ConsoleReply | null>(null)
   const [backendReady, setBackendReady] = useState(false)
@@ -130,8 +135,29 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     void api.searchKeywordAnalytics()
       .then(value => { if (alive) setKeywordStats(value) })
       .catch(() => { if (alive) setKeywordStats(null) })
+    // Reading the direction plan calls no model, so it is safe on open. It
+    // reports whether an analysis is cached and what a new one would cost.
+    void api.getDirectionPlan()
+      .then(value => { if (alive) setAiPlan(value) })
+      .catch(() => { if (alive) setAiPlan(null) })
     return () => { alive = false }
   }, [])
+
+  /** The only place this feature spends money, and only on a click. */
+  async function analyzeDirections(force: boolean) {
+    if (aiBusy) return
+    setAiBusy(true); setAiError(null)
+    try {
+      setAiPlan(await api.analyzeDirections(force))
+      // The chosen-directions table was produced by the previous ranking and
+      // is now stale, so it is cleared rather than left showing old reasons.
+      setChosen([]); setChosenNotes([])
+    } catch (err) {
+      setAiError(err instanceof ApiError ? err.message : 'AI 方向分析失败')
+    } finally {
+      setAiBusy(false)
+    }
+  }
 
   // Only status reads on mount/visibility or an explicit refresh. No task auto-start.
   useEffect(() => {
@@ -342,30 +368,97 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     </div> : <p className="small faint mt-1">只需选择城市和数量；系统会从当前简历关联的职业策略中选取最多 8 个相关方向，组合成一次综合搜索。</p>}
 
 
+    {aiPlan ? (
+      <div className="card-block mt-1">
+        <div>
+          <strong>简历方向分析</strong>
+          <span className="small faint">
+            {aiPlan.cached
+              ? ` · 已分析并缓存，${aiPlan.model}，重复使用不再收费`
+              : ' · 尚未分析，当前排序只能靠用词重合度猜测'}
+          </span>
+        </div>
+        {aiPlan.summary ? <p className="small mt-1">{aiPlan.summary}</p> : null}
+        {!aiPlan.openai_configured ? (
+          <p className="small faint mt-1">未配置 OPENAI_API_KEY，无法进行 AI 方向分析。</p>
+        ) : !aiPlan.resume_id ? (
+          <p className="small faint mt-1">尚未设置「当前分析简历」，请先在简历页上传或激活一份。</p>
+        ) : (
+          <div className="row mt-1">
+            <button
+              type="button"
+              className="btn-sm"
+              disabled={aiBusy}
+              onClick={() => void analyzeDirections(aiPlan.cached)}
+            >
+              {aiBusy
+                ? '分析中…'
+                : aiPlan.cached
+                  ? '重新分析（1 次调用）'
+                  : `用 AI 分析我的方向（${aiPlan.pending_calls} 次调用）`}
+            </button>
+            <span className="small faint">
+              一次调用覆盖全部 {aiPlan.candidates.length} 个方向；简历或职业策略变了会自动重新分析。
+            </span>
+          </div>
+        )}
+        {aiError ? <p className="small mt-1">{aiError}</p> : null}
+        {aiPlan.directions.length ? (
+          <table className="mt-1">
+            <thead><tr><th>方向</th><th>简历支撑度</th><th>依据</th></tr></thead>
+            <tbody>
+              {aiPlan.directions.map(d => (
+                <tr key={d.keyword}>
+                  <td className="nowrap">
+                    {d.keyword}
+                    {d.suggested ? <span className="chip" style={{ marginLeft: 6 }}>AI 补充</span> : null}
+                  </td>
+                  <td className="nowrap">{Math.round(d.fit * 100)}/100</td>
+                  <td className="small">{d.reasons.join('；') || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : null}
+      </div>
+    ) : null}
+
     {chosen.length ? (
-    <div className="card-block mt-1">
-    <div><strong>本次选用的岗位方向</strong>
-    <span className="small faint"> · 依据简历与历史结果，本地计算，不消耗 AI 额度</span>
-    </div>
-    <table className="mt-1">
-    <thead><tr><th>方向</th><th>历史</th><th>依据</th></tr></thead>
-    <tbody>
-    {chosen.map(d => (
-    <tr key={d.keyword}>
-    <td className="nowrap">{d.keyword}</td>
-    <td className="nowrap">
-    {d.jobs ? `${d.recommended}/${d.jobs}` : '—'}
-    {d.jobs && !d.has_evidence ? <span className="small faint"> 样本不足</span> : null}
-    </td>
-    <td className="small">{d.reasons.join('；') || '—'}</td>
-    </tr>
-    ))}
-    </tbody>
-    </table>
-    {chosenNotes.map(line => (
-    <p key={line} className="small faint mt-1">{line}</p>
-    ))}
-    </div>
+      <div className="card-block mt-1">
+        <div><strong>本次选用的岗位方向</strong>
+          <span className="small faint"> · 结合简历判断与历史结果，排序本身不消耗 AI 额度</span>
+        </div>
+        <table className="mt-1">
+          <thead><tr><th>方向</th><th>历史</th><th>匹配度</th><th>依据</th></tr></thead>
+          <tbody>
+            {chosen.map(d => (
+              <tr key={d.keyword}>
+                <td className="nowrap">
+                  {d.keyword}
+                  {d.suggested ? <span className="chip" style={{ marginLeft: 6 }}>AI 补充</span> : null}
+                </td>
+                <td className="nowrap">
+                  {d.jobs ? `${d.recommended}/${d.jobs}` : '—'}
+                  {d.jobs && !d.has_evidence ? <span className="small faint"> 样本不足</span> : null}
+                </td>
+                {/* An AI judgement and a character count are different claims,
+                    so they never render as the same bare number. */}
+                <td className="nowrap small">
+                  {d.fit_source === 'ai'
+                    ? `${Math.round(d.fit * 100)}/100`
+                    : d.fit_source === 'unjudged'
+                      ? '未判断'
+                      : `用词重合 ${Math.round(d.fit * 100)}%`}
+                </td>
+                <td className="small">{d.reasons.join('；') || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {chosenNotes.map(line => (
+          <p key={line} className="small faint mt-1">{line}</p>
+        ))}
+      </div>
     ) : null}
 
     <button type="button" className="btn-sm mt-1" aria-expanded={showAdvanced}

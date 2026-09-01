@@ -77,6 +77,15 @@ export default function ConsolePage() {
   const [tasksLoading, setTasksLoading] = useState(true)
   const [resumes, setResumes] = useState<ResumeListItem[]>([])
   const [feedback, setFeedback] = useState<Feedback>(null)
+  //: Missing salaries are invisible until you open a collapsed section three
+  //: screens down, so the count is surfaced where the user already is. Reading
+  //: the plan calls no model and starts no browser work.
+  const [missingSalaries, setMissingSalaries] = useState<number | null>(null)
+  //: Set when the pointer opens the section, consumed once the panel has
+  //: actually rendered. A ref rather than state, and an effect rather than
+  //: requestAnimationFrame: rAF fires before React commits, so the scroll
+  //: looked up an element that did not exist yet and silently did nothing.
+  const pendingSalaryScroll = useRef(false)
   const [showAdvancedConsole, setShowAdvancedConsole] = useState(false)
 
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null)
@@ -177,7 +186,23 @@ export default function ConsolePage() {
     void loadTasks()
     void loadAttention()
     api.listResumes().then(setResumes).catch(() => setResumes([]))
+    api.getSalaryBackfillPlan()
+      .then(plan => setMissingSalaries(plan.salary_missing))
+      .catch(() => setMissingSalaries(null))
   }, [loadTasks, loadAttention])
+
+  useEffect(() => {
+    if (!showAdvancedConsole || !pendingSalaryScroll.current) return
+    pendingSalaryScroll.current = false
+    // Instant, not smooth. `behavior: 'smooth'` is silently a no-op in some
+    // environments - verified here, where it left the button doing nothing at
+    // all while 'auto' worked. The point of this control is to get you to the
+    // panel you could not find; an animation is not worth a chance of that
+    // failing quietly.
+    document
+      .getElementById('salary-backfill')
+      ?.scrollIntoView({ behavior: 'auto', block: 'center' })
+  }, [showAdvancedConsole])
 
   const loadCandidates = useCallback(async (taskId: number) => {
     setCandidatesLoading(true)
@@ -421,6 +446,24 @@ export default function ConsolePage() {
           {showAdvancedConsole ? '收起更多功能' : '更多功能'}
         </button>
       </div>
+
+      {missingSalaries ? (
+        <div className="row mb-1">
+          <span className="small">
+            {missingSalaries} 个岗位缺少薪资（BOSS 用特殊字体渲染，抓取时读不到）。
+          </span>
+          <button
+            type="button"
+            className="btn-sm"
+            onClick={() => {
+              pendingSalaryScroll.current = true
+              setShowAdvancedConsole(true)
+            }}
+          >
+            去补全薪资
+          </button>
+        </div>
+      ) : null}
 
       {feedback ? (
         <Alert tone={feedback.tone} onDismiss={() => setFeedback(null)}>

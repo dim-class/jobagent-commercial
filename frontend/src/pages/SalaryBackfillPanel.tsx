@@ -83,7 +83,7 @@ export default function SalaryBackfillPanel() {
   const remaining = run ? run.total_jobs - run.processed_jobs : 0
   const continuous = !!run && run.session_cap > 3
 
-  return <section className="card" style={{ marginTop: 16 }}>
+  return <section id="salary-backfill" className="card" style={{ marginTop: 16 }}>
     <h2>历史缺薪回填</h2>
     <p>只处理已入库的 BOSS 详情链接；通过现有 canonical intake 补薪，不新建岗位。</p>
     {plan && <p>岗位 {plan.total_jobs} 个 · 已有薪资 {plan.salary_present} 个 ·

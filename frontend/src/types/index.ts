@@ -2225,10 +2225,22 @@ export interface SearchPlanTask {
   updated_at: string
 }
 
+export interface DirectionChoice {
+  keyword: string
+  reasons: string[]
+  jobs: number
+  recommended: number
+  recommend_rate: number | null
+  has_evidence: boolean
+}
+
 export interface QuickSearchPrepareResponse {
   tasks: SearchPlanTask[]
   active_resume_name: string
   keyword_source: 'career_strategy'
+  directions: DirectionChoice[]
+  direction_notes: string[]
+  needs_more_evidence: boolean
 }
 
 export interface SearchPlanOptions {

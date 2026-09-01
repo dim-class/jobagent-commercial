@@ -5,7 +5,7 @@ import { Alert, Card, Modal } from '@/components/ui'
 import { assessConsoleConnection, ConsoleConnectionError, consoleExtension,
   DEFAULT_BATCH_CANDIDATE_CAP, MAX_CONSOLE_BATCH_TASKS, selectBoundedPendingTasks } from '@/pages/consoleExtension'
 import type { ConsoleAction, ConsoleReply } from '@/pages/consoleExtension'
-import type { SearchKeywordAnalytics, SearchPlanOptions, SearchPlanTask } from '@/types'
+import type { DirectionChoice, SearchKeywordAnalytics, SearchPlanOptions, SearchPlanTask } from '@/types'
 
 function taskStatusLabel(task: SearchPlanTask): string {
   if (task.state === 'paused_login_required' || task.paused_reason === 'login_required') return '需要登录 BOSS'
@@ -28,6 +28,10 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
   const [tasks, setTasks] = useState<SearchPlanTask[]>([])
   const [portfolioTaskIds, setPortfolioTaskIds] = useState<number[]>([])
   const [keywordStats, setKeywordStats] = useState<SearchKeywordAnalytics | null>(null)
+  //: Why these directions were chosen. The search runs without a second
+  //: confirmation, so this is the after-the-fact explanation.
+  const [chosen, setChosen] = useState<DirectionChoice[]>([])
+  const [chosenNotes, setChosenNotes] = useState<string[]>([])
   const [selected, setSelected] = useState<number | null>(null)
   const [connection, setConnection] = useState<ConsoleReply | null>(null)
   const [backendReady, setBackendReady] = useState(false)
@@ -182,6 +186,8 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
         tasks: nextTasks.map(row => ({ id: row.id, city: row.city, keywords: row.keywords })),
         cap: targetCount,
       })
+      setChosen(prepared.directions || [])
+      setChosenNotes(prepared.direction_notes || [])
       const directions = [...new Set(nextTasks.map(row => row.keywords).filter(Boolean))]
       setMessage(`已根据当前简历「${prepared.active_resume_name}」准备综合搜索：`
         + `${cities.length} 个城市、${directions.length} 个方向，共 ${nextTasks.length} 个有限搜索单元。`)
@@ -336,6 +342,32 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     </div> : <p className="small faint mt-1">只需选择城市和数量；系统会从当前简历关联的职业策略中选取最多 8 个相关方向，组合成一次综合搜索。</p>}
 
 
+    {chosen.length ? (
+    <div className="card-block mt-1">
+    <div><strong>本次选用的岗位方向</strong>
+    <span className="small faint"> · 依据简历与历史结果，本地计算，不消耗 AI 额度</span>
+    </div>
+    <table className="mt-1">
+    <thead><tr><th>方向</th><th>历史</th><th>依据</th></tr></thead>
+    <tbody>
+    {chosen.map(d => (
+    <tr key={d.keyword}>
+    <td className="nowrap">{d.keyword}</td>
+    <td className="nowrap">
+    {d.jobs ? `${d.recommended}/${d.jobs}` : '—'}
+    {d.jobs && !d.has_evidence ? <span className="small faint"> 样本不足</span> : null}
+    </td>
+    <td className="small">{d.reasons.join('；') || '—'}</td>
+    </tr>
+    ))}
+    </tbody>
+    </table>
+    {chosenNotes.map(line => (
+    <p key={line} className="small faint mt-1">{line}</p>
+    ))}
+    </div>
+    ) : null}
+
     <button type="button" className="btn-sm mt-1" aria-expanded={showAdvanced}
       onClick={() => setShowAdvanced(current => !current)}>
       {showAdvanced ? '收起高级设置' : '高级设置与诊断'}
@@ -348,7 +380,7 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
         <p>诊断码：{diagnosticCode} · 最近检查：{checkedAt}{checking ? ' · 检查中…' : ''}</p>
       </section>
       <button className="btn btn-secondary" disabled={busy || checking} onClick={() => void refresh()}>刷新连接</button>
-      {keywordStats && keywordStats.cohorts.some(c => c.actionable) ? (
+    {keywordStats && keywordStats.cohorts.some(c => c.actionable) ? (
         <section className="mt-1" aria-label="搜索方向历史表现">
           <div><strong>搜索方向历史表现</strong><span className="small faint"> · 本地统计，不消耗 AI 额度</span></div>
           <table className="mt-1"><thead><tr><th>方向</th><th>岗位</th><th>均分</th><th>推荐率（95% 区间）</th></tr></thead>

@@ -479,8 +479,12 @@ test('console status exposes no browser/session secrets or discovery history and
   assert.deepEqual(Object.keys(reply.runner).sort(), ['candidateCap', 'paid', 'paused', 'phase', 'taskId'])
   assert.equal(reply.extensionVersion, '0.1.1')
   assert.equal(reply.protocol, 1)
+  // Declared per feature, so the console can tell an out-of-date *loaded*
+  // extension from a missing one: a fresh dist/ on disk changes nothing until
+  // Chrome reloads it, and a run behaving like the old build is otherwise very
+  // hard to distinguish from a broken new one.
   assert.deepEqual(Array.from(reply.capabilities), ['console-search-v1', 'console-batch-v1',
-    'salary-backfill-v1', 'human-confirmed-apply-v1'])
+    'salary-backfill-v1', 'human-confirmed-apply-v1', 'skip-stored-candidates-v1'])
   assert.deepEqual(Object.keys(reply).sort(), ['batch', 'capabilities', 'extensionVersion', 'ok', 'protocol', 'runner', 'salaryBackfill'])
   assert.equal(reply.salaryBackfill, null)
   assert.equal(env.tabsCreateCalls.length, 0)

@@ -2773,8 +2773,12 @@ async function consoleCommand(message, sender) {
         const batch = await getBatchPointer();
         const salaryBackfill = await getSalaryBackfillPointer();
         return { ok: true, protocol: 1, extensionVersion: chrome.runtime.getManifest().version,
+            // Declared per feature so the console can tell an out-of-date *loaded*
+            // extension from a missing one. A fresh `dist/` on disk means nothing
+            // until Chrome reloads the extension, and a run that silently behaves
+            // like the old build is very hard to tell apart from a broken new one.
             capabilities: ['console-search-v1', 'console-batch-v1', 'salary-backfill-v1',
-                'human-confirmed-apply-v1'], runner: pointer ? {
+                'human-confirmed-apply-v1', 'skip-stored-candidates-v1'], runner: pointer ? {
                 taskId: pointer.taskId, phase: pointer.phase, paused: pointer.pauseRequested,
                 paid: pointer.autoMatch === true, candidateCap: pointer.candidateCap,
             } : null, batch: batch ? {

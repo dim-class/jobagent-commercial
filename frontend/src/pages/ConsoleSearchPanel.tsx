@@ -386,6 +386,16 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     </div> : <p className="small faint mt-1">只需选择城市和数量；系统会从当前简历关联的职业策略中选取最多 8 个相关方向，组合成一次综合搜索。</p>}
 
 
+    {connection?.capabilities && !connection.capabilities.includes('skip-stored-candidates-v1') ? (
+      <div className="card-block mt-1" role="alert">
+        <strong>浏览器里加载的扩展是旧版本。</strong>
+        <p className="small mt-1">
+          它仍会把候选名额花在已入库的岗位上，所以本次搜索的新增数会明显偏低。
+          请打开 <code>chrome://extensions</code>，在 JobAgent 上点一次「重新加载」，再刷新本页。
+        </p>
+      </div>
+    ) : null}
+
     {aiPlan ? (
       <div className="card-block mt-1">
         <div>

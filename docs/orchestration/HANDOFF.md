@@ -159,6 +159,40 @@ only on a clean disposable Windows user/VM. Also, the local compiler prints
 `Non-commercial use only`; confirm and satisfy applicable Inno Setup commercial
 licensing plus Authenticode signing before production distribution.
 
+## P2C-A3 — Chrome Web Store submission candidate
+
+`scripts/build-extension-store.py` derives a store manifest from the checked-in
+development manifest. Do not delete port 5173 from `extension/manifest.json`:
+local Vite development still needs it. The store transform removes 5173 and
+pins the final permissions/hosts; changing either side requires updating the
+package contract tests and the submission disclosures together.
+
+The ZIP is an exact allow-list of compiled runtime, popup assets and PNG icons.
+It uses sorted entries, fixed timestamps/permissions and emits SHA-256 plus
+`EXTENSION-STORE-MANIFEST.json`. Two builds from the same checkout currently
+produce SHA-256
+`f551a91e53770218d43397674788aacb1a4a8cb84f0f87a1db4e40bd7e1c57ee`.
+The GitHub workflow is deliberately artifact-only: do not add store tokens or
+publication until the owner separately authorizes and completes the dashboard
+privacy/legal work.
+
+One important audit finding was fixed here: the M7 recruiter-chat scanner had
+been suspended at its console command but its full parser/traversal remained in
+the compiled extension. It is now absent from extension source, dist and store
+package. The old fixture remains tests-only and backend historical schema/API
+were not treated as a browser capability. Do not restore M7 selectors, message
+types, traversal or transport without a new product/privacy milestone.
+
+The icon source is `extension/assets/jobagent-icon.svg`; committed PNGs are
+mechanical renders at 16/32/48/128. It deliberately uses no BOSS name, logo or
+trade dress. Store screenshots must come from a clean demo-data environment,
+not the user's existing screenshots or database.
+
+What remains manual: owner review/contact details, a public HTTPS privacy-policy
+URL, store developer account/agreement/fees, clean real-product screenshot and
+promo asset, dashboard privacy declarations, upload and human review. Until
+those pass, the extension is a `store_submission_candidate`, not published.
+
 ## M6 — the one genuinely dangerous area
 
 M6 is human-confirmed **single** application execution. Policy is in

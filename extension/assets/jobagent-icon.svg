@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">JobAgent</title>
+  <desc id="desc">A blue briefcase with a green verified check.</desc>
+  <defs>
+    <linearGradient id="case" x1="24" y1="24" x2="104" y2="108" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="30" width="96" height="82" rx="22" fill="url(#case)"/>
+  <path d="M46 34v-7c0-6 5-11 11-11h14c6 0 11 5 11 11v7" fill="none" stroke="#dbeafe" stroke-width="8" stroke-linecap="round"/>
+  <path d="M16 62h96" stroke="#bfdbfe" stroke-width="7"/>
+  <rect x="57" y="56" width="14" height="17" rx="4" fill="#fff"/>
+  <circle cx="91" cy="91" r="22" fill="#10b981" stroke="#fff" stroke-width="6"/>
+  <path d="m81 91 7 7 14-16" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

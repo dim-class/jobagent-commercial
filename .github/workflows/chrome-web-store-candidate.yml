@@ -1,0 +1,57 @@
+name: Chrome Web Store candidate
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build and test extension
+        working-directory: extension
+        run: |
+          npm ci
+          npm run build
+          npm test
+
+      - name: Build deterministic store candidate
+        run: python scripts/build-extension-store.py
+
+      - name: Rebuild and prove byte reproducibility
+        shell: bash
+        run: |
+          cp .artifacts/chrome-web-store/EXTENSION-STORE-MANIFEST.json "$RUNNER_TEMP/first-manifest.json"
+          cp .artifacts/chrome-web-store/EXTENSION-SHA256SUMS.txt "$RUNNER_TEMP/first-sha.txt"
+          python scripts/build-extension-store.py
+          cmp "$RUNNER_TEMP/first-manifest.json" .artifacts/chrome-web-store/EXTENSION-STORE-MANIFEST.json
+          cmp "$RUNNER_TEMP/first-sha.txt" .artifacts/chrome-web-store/EXTENSION-SHA256SUMS.txt
+
+      - name: Upload unsigned submission candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: JobAgent-Chrome-Web-Store-candidate
+          path: |
+            .artifacts/chrome-web-store/JobAgent-BOSS-Detector-*.zip
+            .artifacts/chrome-web-store/EXTENSION-SHA256SUMS.txt
+            .artifacts/chrome-web-store/EXTENSION-STORE-MANIFEST.json
+          if-no-files-found: error
+          retention-days: 14

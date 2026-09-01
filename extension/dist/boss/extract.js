@@ -43,7 +43,6 @@ var BossExtract = (function () {
     const MAX_DIAGNOSTIC_SAMPLE_CHARS = 40;
     /** A node's own subtree must be this small before it earns a text sample. */
     const MAX_DIAGNOSTIC_SAMPLE_SUBTREE = 12;
-    const m7VisitedConversationKeys = new Set();
     // ------------------------------------------------------------------ utils
     function text(node) {
         if (!node)
@@ -271,17 +270,6 @@ var BossExtract = (function () {
                 continue;
             const label = text(node).slice(0, 40);
             if (BossSelectors.LOGIN_HINTS.some((hint) => label.indexOf(hint) !== -1))
-                return true;
-        }
-        return false;
-    }
-    /** M7 may not inspect the page body; only the named verification roots. */
-    function hasVisibleVerificationRoot(doc) {
-        for (const node of Array.from(doc.querySelectorAll(BossSelectors.VERIFICATION_ROOT.join(',')))) {
-            if (!salaryRendered(node))
-                continue;
-            const notice = text(node).slice(0, 400).toLowerCase();
-            if (BossSelectors.VERIFICATION_HINTS.some((hint) => notice.includes(hint.toLowerCase())))
                 return true;
         }
         return false;
@@ -1257,162 +1245,6 @@ var BossExtract = (function () {
             observed_external_id: preflight.observed_external_id,
         };
     }
-    /** M7: one bounded, pure read of the already-selected foreground chat. */
-    function scanCurrentBossConversation(doc, currentUrl) {
-        let parsed;
-        try {
-            parsed = new URL(currentUrl);
-        }
-        catch {
-            return { status: 'wrong_page' };
-        }
-        if (parsed.origin !== REQUIRED_NAV_ORIGIN || parsed.pathname !== '/web/geek/chat') {
-            return { status: 'wrong_page' };
-        }
-        if (looksLikeLoginRequired(doc, currentUrl))
-            return { status: 'login_required' };
-        if (hasVisibleVerificationRoot(doc))
-            return { status: 'verification' };
-        const roots = pickAll(doc, BossSelectors.CHAT_CONVERSATION).nodes.filter(salaryRendered);
-        if (!roots.length)
-            return { status: 'conversation_missing' };
-        if (roots.length !== 1)
-            return { status: 'conversation_ambiguous' };
-        const lists = pickAll(roots[0], BossSelectors.CHAT_MESSAGE_LIST).nodes.filter(salaryRendered);
-        if (lists.length !== 1)
-            return { status: lists.length ? 'conversation_ambiguous' : 'conversation_missing' };
-        const items = Array.from(lists[0].querySelectorAll(BossSelectors.CHAT_MESSAGE_ITEM.join(',')));
-        if (items.length > 100)
-            return { status: 'too_many_messages' };
-        const messages = [];
-        for (const item of items) {
-            const textNode = pickNode(item, BossSelectors.CHAT_MESSAGE_TEXT).node;
-            if (!textNode)
-                continue; // cards/system notices are not text messages
-            const body = text(textNode);
-            if (!body)
-                continue;
-            if (body.length > 10000)
-                return { status: 'message_too_large' };
-            const sourceId = (item.getAttribute('data-mid') || '').trim();
-            if (!sourceId || sourceId.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(sourceId)) {
-                return { status: 'message_identity_missing' };
-            }
-            const mine = item.classList.contains('item-myself');
-            const friend = item.classList.contains('item-friend');
-            if (mine === friend)
-                return { status: 'message_direction_ambiguous' };
-            messages.push({
-                source_message_id: sourceId,
-                direction: mine ? 'user' : 'recruiter',
-                text: body,
-                source_message_time_text: pick(item, BossSelectors.CHAT_MESSAGE_TIME).value,
-            });
-        }
-        if (!messages.length)
-            return { status: 'no_text_messages' };
-        const recruiter = pick(roots[0], BossSelectors.CHAT_HEADER_RECRUITER).value;
-        const company = pick(roots[0], BossSelectors.CHAT_HEADER_COMPANY).value;
-        const position = pick(roots[0], BossSelectors.CHAT_HEADER_POSITION).value;
-        const jobLink = pickNode(roots[0], BossSelectors.CHAT_HEADER_JOB_LINK).node;
-        const sourceUrl = cleanUrl(jobLink?.getAttribute('href'));
-        const externalId = externalIdOf(sourceUrl);
-        return {
-            status: 'ok',
-            page_url: parsed.origin + parsed.pathname,
-            recruiter_name: recruiter,
-            company,
-            title: position,
-            source_url: externalId ? sourceUrl : null,
-            external_id: externalId,
-            messages,
-        };
-    }
-    /** Select the next not-yet-visited rendered chat-list item, once. */
-    function selectNextBossConversation(doc, currentUrl) {
-        let parsed;
-        try {
-            parsed = new URL(currentUrl);
-        }
-        catch {
-            return { status: 'wrong_page' };
-        }
-        if (parsed.origin !== REQUIRED_NAV_ORIGIN || parsed.pathname !== '/web/geek/chat') {
-            return { status: 'wrong_page' };
-        }
-        if (looksLikeLoginRequired(doc, currentUrl))
-            return { status: 'login_required' };
-        if (hasVisibleVerificationRoot(doc))
-            return { status: 'verification' };
-        const lists = pickAll(doc, BossSelectors.CHAT_LIST).nodes.filter(salaryRendered);
-        if (lists.length !== 1)
-            return { status: lists.length ? 'list_ambiguous' : 'list_missing' };
-        const items = Array.from(lists[0].querySelectorAll(BossSelectors.CHAT_LIST_ITEM.join(',')))
-            .filter(salaryRendered);
-        for (const item of items) {
-            const controls = pickAll(item, BossSelectors.CHAT_LIST_CONTROL).nodes.filter(salaryRendered);
-            if (controls.length !== 1)
-                return { status: controls.length ? 'control_ambiguous' : 'control_missing' };
-            const recruiter = pick(item, BossSelectors.CHAT_LIST_RECRUITER).value;
-            const company = pick(item, BossSelectors.CHAT_LIST_COMPANY).value;
-            const identityBox = text(item.querySelector('.name-box')).slice(0, 256);
-            const key = `${recruiter || ''}\u0000${company || ''}\u0000${identityBox}`;
-            if (!recruiter || m7VisitedConversationKeys.has(key))
-                continue;
-            m7VisitedConversationKeys.add(key);
-            controls[0].click();
-            return { status: 'selected', recruiter_name: recruiter, company };
-        }
-        return { status: 'exhausted' };
-    }
-    /** One bounded scroll of the unique rendered conversation list. */
-    function scrollBossConversationList(doc, currentUrl) {
-        let parsed;
-        try {
-            parsed = new URL(currentUrl);
-        }
-        catch {
-            return { status: 'wrong_page' };
-        }
-        if (parsed.origin !== REQUIRED_NAV_ORIGIN || parsed.pathname !== '/web/geek/chat') {
-            return { status: 'wrong_page' };
-        }
-        if (looksLikeLoginRequired(doc, currentUrl))
-            return { status: 'login_required' };
-        if (hasVisibleVerificationRoot(doc))
-            return { status: 'verification' };
-        const lists = pickAll(doc, BossSelectors.CHAT_LIST).nodes.filter(salaryRendered);
-        if (lists.length !== 1)
-            return { status: lists.length ? 'list_ambiguous' : 'list_missing' };
-        const list = lists[0];
-        const before = list.scrollTop;
-        const step = Math.max(120, Math.min(list.clientHeight || 600, 800));
-        list.scrollTop = Math.min(list.scrollHeight, before + step);
-        return { status: list.scrollTop > before ? 'scrolled' : 'end' };
-    }
-    /** Start one new human-confirmed traversal and return the list to its top. */
-    function resetBossConversationTraversal(doc, currentUrl) {
-        let parsed;
-        try {
-            parsed = new URL(currentUrl);
-        }
-        catch {
-            return { status: 'wrong_page' };
-        }
-        if (parsed.origin !== REQUIRED_NAV_ORIGIN || parsed.pathname !== '/web/geek/chat') {
-            return { status: 'wrong_page' };
-        }
-        if (looksLikeLoginRequired(doc, currentUrl))
-            return { status: 'login_required' };
-        if (hasVisibleVerificationRoot(doc))
-            return { status: 'verification' };
-        const lists = pickAll(doc, BossSelectors.CHAT_LIST).nodes.filter(salaryRendered);
-        if (lists.length !== 1)
-            return { status: lists.length ? 'list_ambiguous' : 'list_missing' };
-        m7VisitedConversationKeys.clear();
-        lists[0].scrollTop = 0;
-        return { status: 'reset' };
-    }
     // ------------------------------------------------------------------- api
     function detect(doc, url) {
         const result = {
@@ -1475,10 +1307,6 @@ var BossExtract = (function () {
         captureAndMerge,
         preflightConfirmedApplication,
         executeConfirmedApplication,
-        scanCurrentBossConversation,
-        selectNextBossConversation,
-        scrollBossConversationList,
-        resetBossConversationTraversal,
         salaryFrame,
         MAX_DESCRIPTION_CHARS,
         MAX_CARDS,

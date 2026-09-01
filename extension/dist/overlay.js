@@ -57,22 +57,6 @@
     const REQUIRED_ORIGIN = 'https://www.zhipin.com';
     const BAR_ID = 'jobagent-session-bar';
     const STATUS_ID = 'jobagent-session-status-line';
-    const M7_BAR_ID = 'jobagent-m7-status-bar';
-    function renderM7Status(state) {
-        document.getElementById(M7_BAR_ID)?.remove();
-        const bar = document.createElement('div');
-        bar.id = M7_BAR_ID;
-        const color = state.phase === 'complete' ? '#087f5b' : state.phase === 'failed' ? '#b42318' : '#0f3d91';
-        bar.setAttribute('style', `position:fixed;top:0;left:0;right:0;z-index:2147483647;` +
-            `background:${color};color:#fff;font:13px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",` +
-            `"Microsoft YaHei",sans-serif;padding:8px 14px;box-shadow:0 1px 4px rgba(0,0,0,.3);`);
-        const phase = state.phase === 'complete' ? '扫描完成' : state.phase === 'failed' ? '扫描停止' : '扫描中';
-        bar.textContent = `JobAgent HR沟通 · ${phase} · 已处理 ${state.conversations} · ` +
-            `已关联 ${state.matched} · 跳过 ${state.skipped} · 可见消息 ${state.observed} · ` +
-            `新增 ${state.imported} · 重复 ${state.duplicates} · 滚动 ${state.scroll_rounds}/5` +
-            (state.detail ? ` · ${state.detail}` : '');
-        document.documentElement.appendChild(bar);
-    }
     //: Cards already opened (success) or already tried and failed this page
     //: load - the loop guard.
     const handledUrls = new Set();
@@ -811,13 +795,6 @@
                     renderRunnerBar(runnerMsg.state);
                 else
                     removeRunnerBar();
-                sendResponse({ ok: true });
-                return false;
-            }
-            if (msg.type === 'jobagent:m7-status') {
-                const m7 = message;
-                if (m7.state)
-                    renderM7Status(m7.state);
                 sendResponse({ ok: true });
                 return false;
             }

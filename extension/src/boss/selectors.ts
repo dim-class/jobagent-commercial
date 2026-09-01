@@ -360,37 +360,4 @@ var BossSelectors = {
    */
   DIAGNOSTIC_COMPANY_ROOT: ['.job-boss-info', '.job-detail-company'] as string[],
 
-  // M7: live-observed current-conversation structure plus the bounded M7b
-  // conversation list. `li[role=listitem]` / `.friend-content` are also
-  // corroborated by the public BossHunter implementation; execution still
-  // requires one unique visible list root/control and never touches inputs.
-  CHAT_LIST: ['.user-list', '.chat-list'] as string[],
-  CHAT_LIST_ITEM: ['li[role="listitem"]'] as string[],
-  CHAT_LIST_CONTROL: ['.friend-content'] as string[],
-  CHAT_LIST_RECRUITER: ['.name-text'] as string[],
-  CHAT_LIST_COMPANY: ['.name-box .company-name', '.name-box span:nth-of-type(2)'] as string[],
-  CHAT_CONVERSATION: ['.chat-container.page-container .chat-wrap .chat-conversation'] as string[],
-  CHAT_MESSAGE_LIST: [
-    '.message-content .chat-record .chat-message ul.im-list',
-    '.message-content .chat-record .chat-message',
-  ] as string[],
-  CHAT_MESSAGE_ITEM: ['li.message-item'] as string[],
-  CHAT_MESSAGE_TEXT: ['.text-content'] as string[],
-  CHAT_MESSAGE_TIME: ['.item-time .time'] as string[],
-  CHAT_HEADER_RECRUITER: [
-    '.top-info-content .user-info-wrap .name', '.user-info-wrap .name',
-    '.top-info-content .user-info-wrap', '.user-info-wrap',
-  ] as string[],
-  CHAT_HEADER_COMPANY: [
-    '.top-info-content .user-info-wrap .company-name', '.user-info-wrap .company-name',
-    '.top-info-content .user-info-wrap .company', '.user-info-wrap .company',
-  ] as string[],
-  CHAT_HEADER_POSITION: [
-    '.top-info-content .chat-position-content .position-main', '.chat-position-content .position-main',
-  ] as string[],
-  CHAT_HEADER_JOB_LINK: [
-    '.top-info-content .chat-position-content a[href*="/job_detail/"]',
-    '.chat-position-content a[href*="/job_detail/"]',
-    '.top-info-content a[href*="/job_detail/"]',
-  ] as string[],
 }

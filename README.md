@@ -141,9 +141,11 @@ Node；数据默认写入 `%LOCALAPPDATA%\JobAgent`，不会写入源码或提�
 
 P2C-A 还提供可重复构建的**未签名 Windows x64 当前用户级安装候选**。它把已审计的 P2B bundle
 编译为单个安装 EXE，最终用户运行时不需要安装 Python/Node；支持开始菜单、覆盖升级和默认保留
-本地数据的卸载，并生成 SHA-256 与候选 manifest。扩展仍需手工加载，且尚未代码签名、确认适用的
-Inno Setup 商业许可或通过无开发工具链的独立 VM 验收，因此不能当作正式商用安装包。构建与验收
-说明见上方 Windows 文档。
+本地数据的卸载，并生成 SHA-256 与候选 manifest。扩展目前仍需手工加载，Windows 安装器尚未代码
+签名、确认适用的 Inno Setup 商业许可或通过无开发工具链的独立 VM 验收，因此不能当作正式商用
+安装包。P2C-A3 已准备可复现的 Chrome Web Store ZIP、最小权限 manifest、自有图标与隐私/权限披露
+草案，但尚未上传或审核；说明见
+[`docs/product/CHROME_WEB_STORE_SUBMISSION.md`](docs/product/CHROME_WEB_STORE_SUBMISSION.md)。
 
 可随时执行不含密钥的运行自检：
 

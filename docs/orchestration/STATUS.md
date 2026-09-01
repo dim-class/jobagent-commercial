@@ -1,5 +1,15 @@
 # JobAgent Orchestration Status
 
+- Current (2026-09-01): P2C-A3 **Chrome Web Store 提交候选**已完成本地实现与回归。新增
+  `scripts/build-extension-store.py`，从开发 manifest 派生仅含 `activeTab` / `scripting` / `storage`
+  以及 BOSS + loopback 8000 的商店 manifest，彻底移除 5173；ZIP 只含 17 个白名单运行文件，
+  固定条目顺序/时间戳，并输出 SHA-256 与机器清单。两次独立构建字节一致，当前 0.1.20 候选哈希为
+  `f551a91e53770218d43397674788aacb1a4a8cb84f0f87a1db4e40bd7e1c57ee`。发布运行时已删除此前暂停但
+  仍编译存在的 M7 BOSS 聊天扫描器；历史后端 schema/API 未重新开放，商店包与“不扫描沟通”承诺一致。
+  新增中性自有图标、隐私政策草案、权限/数据披露/商店文案和 artifact-only workflow。完整后端 pytest
+  100%（既有 cache warning）、扩展 build + 301/301、前端 production build + 31/31、focused
+  商店包/DOM 56/56 均 PASS。尚未上传或发布；仍需公开隐私 URL、无个人信息截图/宣传图、开发者账号
+  与人工审核，不能声称已上架。
 - Current (2026-09-01): P2C-A2 **可重复 Windows 安装生命周期发布门禁**已通过。远程 run
   `33474909477` 在一次性 `windows-2025` runner 上构建 `-a/-b` 两版，并实际完成当前用户安装、
   无 Python/Node runtime PATH 的冻结 EXE doctor/启动、health/database ok、前端 HTTP 200、受保护停止、

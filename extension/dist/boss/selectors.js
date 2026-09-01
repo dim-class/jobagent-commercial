@@ -321,37 +321,4 @@ var BossSelectors = {
      * current standalone page, so keep it solely as an older-layout fallback.
      */
     DIAGNOSTIC_COMPANY_ROOT: ['.job-boss-info', '.job-detail-company'],
-    // M7: live-observed current-conversation structure plus the bounded M7b
-    // conversation list. `li[role=listitem]` / `.friend-content` are also
-    // corroborated by the public BossHunter implementation; execution still
-    // requires one unique visible list root/control and never touches inputs.
-    CHAT_LIST: ['.user-list', '.chat-list'],
-    CHAT_LIST_ITEM: ['li[role="listitem"]'],
-    CHAT_LIST_CONTROL: ['.friend-content'],
-    CHAT_LIST_RECRUITER: ['.name-text'],
-    CHAT_LIST_COMPANY: ['.name-box .company-name', '.name-box span:nth-of-type(2)'],
-    CHAT_CONVERSATION: ['.chat-container.page-container .chat-wrap .chat-conversation'],
-    CHAT_MESSAGE_LIST: [
-        '.message-content .chat-record .chat-message ul.im-list',
-        '.message-content .chat-record .chat-message',
-    ],
-    CHAT_MESSAGE_ITEM: ['li.message-item'],
-    CHAT_MESSAGE_TEXT: ['.text-content'],
-    CHAT_MESSAGE_TIME: ['.item-time .time'],
-    CHAT_HEADER_RECRUITER: [
-        '.top-info-content .user-info-wrap .name', '.user-info-wrap .name',
-        '.top-info-content .user-info-wrap', '.user-info-wrap',
-    ],
-    CHAT_HEADER_COMPANY: [
-        '.top-info-content .user-info-wrap .company-name', '.user-info-wrap .company-name',
-        '.top-info-content .user-info-wrap .company', '.user-info-wrap .company',
-    ],
-    CHAT_HEADER_POSITION: [
-        '.top-info-content .chat-position-content .position-main', '.chat-position-content .position-main',
-    ],
-    CHAT_HEADER_JOB_LINK: [
-        '.top-info-content .chat-position-content a[href*="/job_detail/"]',
-        '.chat-position-content a[href*="/job_detail/"]',
-        '.top-info-content a[href*="/job_detail/"]',
-    ],
 };

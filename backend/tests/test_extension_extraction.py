@@ -668,22 +668,17 @@ async def test_the_extractor_never_submits_or_navigates(extension_code):
 
 
 @pytest.mark.asyncio
-async def test_only_the_named_m4_m6_and_m7_click_primitives_exist(extension_code):
-    """Pin the three and only three explicitly authorized click call sites.
+async def test_only_the_named_m4_and_m6_click_primitives_exist(extension_code):
+    """Pin the two and only two explicitly authorized click call sites.
 
     M4 uses `clickAnchor` for supervised card traversal. M6 has one separate
     call after the background worker has atomically claimed one per-job human
     approval and the content script has repeated exact identity preflight.
-    M7 adds one bounded conversation-list selection click after explicit human
-    confirmation. A fourth call site fails this test.
+    The suspended M7 chat scanner has no runtime click or parser surface.
     """
-    assert extension_code.count(".click(") == 3, (
-        "only the named M4 navigation, M6 single-application and M7 chat-list clicks "
-        "are authorized"
-    )
+    assert extension_code.count(".click(") == 2, "only M4 navigation and M6 single application are authorized"
     assert "anchor.click()" in extension_code
     assert "control.node.click()" in extension_code
-    assert "controls[0].click()" in extension_code
 
 
 @pytest.mark.asyncio
@@ -931,72 +926,3 @@ async def test_the_search_split_pane_is_not_an_application_surface(preflight):
         "boss_search_split_pane_live_shape.html", url=SEARCH_URL
     )
     assert result["status"] != "ok"
-
-
-# --------------------------------------------------------------------------
-# M7: one explicitly triggered, current rendered BOSS conversation only.
-# --------------------------------------------------------------------------
-
-CHAT_URL = "https://www.zhipin.com/web/geek/chat?securityId=not-persisted"
-
-
-async def test_m7_extracts_only_text_messages_with_stable_source_ids(browser_page, extension_bundle):
-    await _load_fixture(
-        browser_page, extension_bundle, "boss_chat_current_conversation.html", url=CHAT_URL
-    )
-    result = await browser_page.evaluate(
-        "() => BossExtract.scanCurrentBossConversation(document, document.location.href)"
-    )
-    assert result["status"] == "ok"
-    assert result["page_url"] == "https://www.zhipin.com/web/geek/chat"
-    assert [m["source_message_id"] for m in result["messages"]] == ["msg-1001", "msg-1003"]
-    assert [m["direction"] for m in result["messages"]] == ["user", "recruiter"]
-    assert result["source_url"] == "https://www.zhipin.com/job_detail/m7-job-1.html"
-    assert result["external_id"] == "m7-job-1"
-    assert all("竞争者" not in m["text"] for m in result["messages"])
-    assert "securityId" not in str(result)
-
-
-async def test_m7_refuses_wrong_path_and_missing_data_mid(browser_page, extension_bundle):
-    await _load_fixture(
-        browser_page, extension_bundle, "boss_chat_current_conversation.html", url=DETAIL_URL
-    )
-    wrong = await browser_page.evaluate(
-        "() => BossExtract.scanCurrentBossConversation(document, document.location.href)"
-    )
-    assert wrong["status"] == "wrong_page"
-
-    await _load_fixture(
-        browser_page, extension_bundle, "boss_chat_current_conversation.html", url=CHAT_URL
-    )
-    await browser_page.evaluate("document.querySelector('[data-mid=msg-1003]').removeAttribute('data-mid')")
-    missing = await browser_page.evaluate(
-        "() => BossExtract.scanCurrentBossConversation(document, document.location.href)"
-    )
-    assert missing["status"] == "message_identity_missing"
-
-
-async def test_m7_selects_each_rendered_conversation_at_most_once(browser_page, extension_bundle):
-    await _load_fixture(
-        browser_page, extension_bundle, "boss_chat_current_conversation.html", url=CHAT_URL
-    )
-    first = await browser_page.evaluate(
-        "() => BossExtract.selectNextBossConversation(document, document.location.href)"
-    )
-    second = await browser_page.evaluate(
-        "() => BossExtract.selectNextBossConversation(document, document.location.href)"
-    )
-    exhausted = await browser_page.evaluate(
-        "() => BossExtract.selectNextBossConversation(document, document.location.href)"
-    )
-    assert first == {"status": "selected", "recruiter_name": "招聘方甲", "company": "示例科技"}
-    assert second == {"status": "selected", "recruiter_name": "招聘方乙", "company": "另一家公司"}
-    assert exhausted == {"status": "exhausted"}
-    reset = await browser_page.evaluate(
-        "() => BossExtract.resetBossConversationTraversal(document, document.location.href)"
-    )
-    again = await browser_page.evaluate(
-        "() => BossExtract.selectNextBossConversation(document, document.location.href)"
-    )
-    assert reset == {"status": "reset"}
-    assert again["recruiter_name"] == "招聘方甲"

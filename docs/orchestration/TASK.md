@@ -1,75 +1,56 @@
-# Authorized task — P2C-A Windows installer candidate
+# Authorized task — P2C-A2 repeatable Windows installer lifecycle gate
 
 ## Authorization
 
-The user resumed the active “任何人可用” productization goal on 2026-09-01.
-This bounded milestone follows the completed P2B portable candidate.
+The active user goal is to make JobAgent usable by anyone. After P2C-A passed
+local lifecycle and clean-checkout build acceptance, Codex continued with the
+next bounded, no-purchase productization step on 2026-09-01.
 
 ## Goal
 
-Produce and prove an **unsigned, per-user Windows x64 installer candidate**
-that installs, upgrades and uninstalls JobAgent without requiring administrator
-rights, Python, Node or a source checkout at normal runtime.
+Turn the currently manual installer lifecycle evidence into a repeatable
+GitHub Windows release gate: install, run the frozen product without relying on
+Python or Node from `PATH`, upgrade under the stable AppId, and silently
+uninstall while preserving the default per-user data directory.
 
 ## Scope
 
-- Compile the already-audited P2B bundle into one Inno Setup installer EXE.
-- Install under the current user's local Programs directory with one stable
-  AppId, Start Menu shortcuts, an optional desktop shortcut and Add/Remove
-  Programs uninstall support.
-- Stop only the recorded JobAgent process before upgrade/uninstall.
-- Preserve `%LOCALAPPDATA%\JobAgent` by default on uninstall. An interactive
-  uninstall may delete it only after a separate explicit warning and
-  confirmation; silent uninstall always preserves it.
-- Produce SHA-256 metadata and an auditable clean-checkout Windows workflow.
-- Add offline structural tests for the destructive and privilege boundaries.
+- Add a Windows-only acceptance script that is hard-gated to an ephemeral
+  GitHub Actions runner and refuses to run when JobAgent data, installation, or
+  uninstall registration already exists.
+- Build two installer versions from the same audited portable payload.
+- Install the first version as the current user without administrator rights.
+- Run `--doctor`, start the installed frozen EXE with browser opening disabled,
+  verify `/health` and the compiled frontend, and stop through JobAgent's own
+  process-identity guard.
+- Upgrade to the second version under the same AppId and prove the database and
+  a test sentinel survive.
+- Silently uninstall, prove program/registration removal, default data
+  preservation, and port release, then clean only runner-owned test state.
+- Add offline contract tests that lock the destructive and CI boundaries.
 
 ## Boundaries
 
-- This is still an **unsigned candidate**, not a generally available release.
-- Do not purchase or invent a signing certificate, publish a GitHub Release,
-  or claim SmartScreen trust.
-- No BOSS/Chrome action, task start, application, message, AI call, credential
-  access or live user-data migration.
-- Do not read, copy, bundle or delete the developer's real `data/`, `.env`,
-  resumes, browser profiles or logs.
-- A genuinely clean Windows machine/VM without the development toolchain is a
-  separate acceptance gate; CI is clean-checkout build evidence, not that VM.
+- Do not run this lifecycle script on the developer's Windows profile. It may
+  target the default `%LOCALAPPDATA%\JobAgent` only after proving it is an
+  ephemeral GitHub runner and that the target did not exist beforehand.
+- Do not touch Chrome, BOSS, real resumes, real databases, credentials, AI, or
+  any recruitment action.
+- Do not weaken installer data-preservation defaults or process-identity checks.
+- A GitHub runner still contains build tools. Sanitizing runtime `PATH` proves
+  the frozen EXE does not resolve Python/Node there; it does not replace the
+  later genuinely toolchain-free disposable Windows VM acceptance.
+- Keep the artifact unsigned and explicitly non-commercial-ready. Do not buy or
+  invent signing or Inno Setup licensing evidence.
 
 ## Acceptance
 
-- Installer build starts from the audited P2B bundle and fails closed if any
-  required payload or installer compiler is missing.
-- Setup is per-user/non-admin and creates the expected program and shortcuts.
-- Reinstall/upgrade uses the same AppId and keeps runtime data intact.
-- Interactive uninstall offers a clear keep/delete choice, defaults to keep;
-  silent uninstall keeps data without prompting.
-- Installer and checksum are built on a clean GitHub Windows runner.
-- Local isolated acceptance proves install, launch/health, upgrade and
-  uninstall-keep without touching real user data. The destructive interactive
-  delete branch is structurally tested here and must be clicked only in the
-  separate clean-VM acceptance, never in the developer's real Windows profile.
-- Full repository tests remain green.
-
-## Result (local, 2026-09-01)
-
-Implemented an Inno Setup 7.1.0 per-user installer with a stable AppId,
-Start Menu entry, optional desktop shortcut, guarded stop, and a default-keep
-uninstaller. The build re-audits the P2B payload and emits an installer SHA-256
-plus a manifest that explicitly records `NotSigned`,
-`development_candidate`, and `commercial_distribution_ready=false`.
-
-An isolated two-version lifecycle passed: p2ca1 installed without admin rights,
-the installed frozen EXE returned health/database `ok` and HTML 200, p2ca2
-upgraded under the same AppId, the isolated database hash stayed unchanged,
-and silent uninstall removed the program/registration while preserving the
-database and releasing the port. The interactive delete-data branch defaults
-to No and is structurally tested; it was deliberately not clicked in the real
-user profile. Full backend regression, frontend 31/31 and extension 301/301
-pass. Clean-checkout installer CI run `33451995662` also passed: the downloaded
-`0.1.0-2` artifact used Inno Setup 7.1.0, its actual SHA-256 matched the
-manifest (`398ab6bcfec4cddab3ba106ba878c63808d7b5284157a1395454ff659e48be3b`),
-and the manifest remained fail-closed at `NotSigned`, `development_candidate`,
-and `commercial_distribution_ready=false`. Authenticode signing, confirmation
-of applicable Inno Setup commercial licensing, and clean-VM interactive delete
-acceptance remain release gates until separately proven.
+- Offline tests prove the script requires GitHub Actions plus `RUNNER_TEMP`,
+  refuses pre-existing state, uses only the stable per-user install/data roots,
+  invokes JobAgent's guarded stop, and always cleans runner-owned state.
+- The installer workflow builds two versions, runs the lifecycle gate before
+  upload, and uploads only the final unsigned candidate plus integrity metadata.
+- A clean remote run proves doctor, health/database `ok`, frontend HTTP 200,
+  stable-AppId upgrade, unchanged database hash, preserved sentinel/default
+  data, silent uninstall cleanup, and released port.
+- Full backend, frontend, and extension regressions remain green.

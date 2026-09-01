@@ -6,6 +6,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 INSTALLER = REPO / "packaging" / "jobagent-installer.iss"
 BUILD_SCRIPT = REPO / "scripts" / "build-windows-installer.ps1"
+LIFECYCLE_SCRIPT = REPO / "scripts" / "test-windows-installer-lifecycle.ps1"
 WORKFLOW = REPO / ".github" / "workflows" / "windows-installer.yml"
 
 
@@ -82,3 +83,52 @@ def test_clean_checkout_workflow_builds_and_uploads_installer() -> None:
     assert "JobAgent-Setup-*.exe" in workflow
     assert "INSTALLER-SHA256SUMS.txt" in workflow
     assert "include-hidden-files: true" in workflow
+    assert '"$baseVersion-a"' in workflow
+    assert '"$baseVersion-b" -SkipPortableBuild' in workflow
+    assert "test-windows-installer-lifecycle.ps1" in workflow
+    assert workflow.index("test-windows-installer-lifecycle.ps1") < workflow.index(
+        "actions/upload-artifact@v4"
+    )
+
+
+def test_lifecycle_gate_is_ephemeral_runner_only_and_refuses_existing_state() -> None:
+    script = _text(LIFECYCLE_SCRIPT)
+
+    assert "$env:GITHUB_ACTIONS -ne 'true'" in script
+    assert "$env:RUNNER_TEMP" in script
+    assert "Refusing pre-existing JobAgent installation" in script
+    assert "Refusing pre-existing JobAgent user data" in script
+    assert "Refusing pre-existing JobAgent uninstall registration" in script
+    assert "Assert-ChildPath $InstallRoot $LocalAppData" in script
+    assert "Assert-ChildPath $DataRoot $LocalAppData" in script
+    assert "Assert-ChildPath $WorkRoot $env:RUNNER_TEMP" in script
+
+
+def test_lifecycle_gate_proves_frozen_runtime_upgrade_and_preservation() -> None:
+    script = _text(LIFECYCLE_SCRIPT)
+
+    assert "Get-Command python.exe" in script
+    assert "Get-Command node.exe" in script
+    assert "--doctor" in script
+    assert "--no-open" in script
+    assert "Wait-Healthy" in script
+    assert "health.status -eq 'ok'" in script
+    assert "health.database -eq 'ok'" in script
+    assert "Get-FileHash -LiteralPath $Database" in script
+    assert "installer-lifecycle-sentinel.txt" in script
+    assert "Same-AppId upgrade" in script
+    assert "Silent uninstall" in script
+    assert "Test-PortFree $Port" in script
+
+
+def test_lifecycle_cleanup_uses_guarded_product_stop_and_exact_runner_targets() -> None:
+    script = _text(LIFECYCLE_SCRIPT)
+    lowered = script.lower()
+
+    assert "& $Executable --data-dir $DataRoot --stop" in script
+    assert "Remove-Item -LiteralPath $InstallRoot -Recurse -Force" in script
+    assert "Remove-Item -LiteralPath $DataRoot -Recurse -Force" in script
+    assert "Remove-Item -LiteralPath $WorkRoot -Recurse -Force" in script
+    assert "remove-item -path" not in lowered
+    assert "taskkill" not in lowered
+    assert "stop-process" not in lowered

@@ -39,9 +39,24 @@ jobs:
       - name: Install pinned Inno Setup compiler
         shell: pwsh
         run: winget install --id JRSoftware.InnoSetup.7 --version 7.1.0 --exact --source winget --accept-package-agreements --accept-source-agreements --silent
-      - name: Build and audit unsigned installer
+      - name: Build two audited unsigned installer versions
         shell: pwsh
-        run: ./scripts/build-windows-installer.ps1 -Version "0.1.0-${{ github.run_number }}"
+        run: |
+          $baseVersion = "0.1.0-${{ github.run_number }}"
+          ./scripts/build-windows-installer.ps1 -Version "$baseVersion-a"
+          New-Item -ItemType Directory -Path .artifacts/lifecycle -Force | Out-Null
+          Copy-Item -LiteralPath ".artifacts/installer/JobAgent-Setup-$baseVersion-a-Windows-x64.exe" `
+            -Destination ".artifacts/lifecycle/JobAgent-Setup-$baseVersion-a-Windows-x64.exe"
+          ./scripts/build-windows-installer.ps1 -Version "$baseVersion-b" -SkipPortableBuild
+          Copy-Item -LiteralPath ".artifacts/installer/JobAgent-Setup-$baseVersion-b-Windows-x64.exe" `
+            -Destination ".artifacts/lifecycle/JobAgent-Setup-$baseVersion-b-Windows-x64.exe"
+      - name: Exercise install upgrade and silent uninstall
+        shell: pwsh
+        run: |
+          $baseVersion = "0.1.0-${{ github.run_number }}"
+          ./scripts/test-windows-installer-lifecycle.ps1 `
+            -FirstInstaller ".artifacts/lifecycle/JobAgent-Setup-$baseVersion-a-Windows-x64.exe" `
+            -SecondInstaller ".artifacts/lifecycle/JobAgent-Setup-$baseVersion-b-Windows-x64.exe"
       - name: Verify installer files
         shell: pwsh
         run: |

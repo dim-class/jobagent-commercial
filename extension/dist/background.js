@@ -1606,7 +1606,16 @@ async function runScrollRound(taskId, runToken, tabId) {
     const duplicateCount = afterUrls.size - newCount;
     if (!await rememberRenderedCandidates(taskId, runToken, stableResult))
         return { status: 'stopped' };
-    return { status: 'ok', observed: afterUrls.size, new: newCount, duplicate: duplicateCount };
+    // `observed` is a per-round DELTA, because the backend accumulates it
+    // (`task.observed_count += observed`). Reporting the whole rendered list
+    // re-counted every card on every scroll: BOSS keeps ~20 cards in the DOM, so
+    // three rounds over 30 distinct jobs reported 60, and the console showed
+    // "已发现 960" for a run that had actually seen 480 cards and imported 65.
+    // `newCount` is already a delta - it is measured against `seenUrls`, which
+    // persists across rounds - so it is the honest thing to accumulate.
+    // `duplicate` stays the whole-list re-render count: that is render churn,
+    // useful for diagnosing a stuck list, and is not what 已发现 shows.
+    return { status: 'ok', observed: newCount, new: newCount, duplicate: duplicateCount };
 }
 /** Only a real action popup may defer focus validation until it closes. */
 async function bindPopupTarget(value, sender) {

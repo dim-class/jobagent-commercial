@@ -351,8 +351,17 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
         {portfolioCities.join('、')} · {portfolioDirections.length} 个岗位方向 · {portfolioTasks.length} 个有限搜索单元
       </div>
       <div className="mt-1">
-        整体进度：{portfolioCompleted}/{portfolioTasks.length} · 已发现 {portfolioObserved} 个 · 已入库 {portfolioImported} 个
+        整体进度：{portfolioCompleted}/{portfolioTasks.length} · 看到岗位卡片 {portfolioObserved} 张 · 新入库 {portfolioImported} 个
       </div>
+      {/* "已发现 960 · 已入库 65" invited exactly the wrong reading: that 895
+          jobs were lost. Cards seen and jobs imported are different quantities
+          measured at different stages, so the line now says which is which. */}
+      {portfolioObserved > portfolioImported ? (
+        <div className="small faint">
+          两者不该相等：每个方向最多只打开 {portfolioTasks[0]?.max_candidates ?? 20} 个岗位详情，
+          且同一岗位在不同方向、不同轮次里会重复出现——已在库中的不会重复入库。
+        </div>
+      ) : null}
       {portfolioTasks.some(row => row.state === 'paused_login_required' || row.paused_reason === 'login_required')
         ? <div className="small text-danger mt-1" role="alert">请在当前 BOSS 标签页完成登录；登录成功后回到这里点击“恢复”。JobAgent 不会读取或填写登录凭据。</div>
         : null}
@@ -523,7 +532,7 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
           {connection.batch.taskIds.length}（任务 #{connection.batch.currentTaskId}）</p>}
       </section>
       {task ? <section className="mt-1" aria-label="当前单任务详情">
-        <p><strong>{task.city} · {task.keywords}</strong> · {taskStatusLabel(task)} · 已发现 {task.observed_jobs} · 已入库 {task.imported_jobs}</p>
+        <p><strong>{task.city} · {task.keywords}</strong> · {taskStatusLabel(task)} · 看到 {task.observed_jobs} 张 · 新入库 {task.imported_jobs} 个</p>
         <div className="actions">
           <button className="btn btn-primary" disabled={busy || checking || !backendReady || !connection
             || !!connection.runner || batchActive || task.state !== 'pending'} onClick={() => void command('start')}>开始单任务</button>

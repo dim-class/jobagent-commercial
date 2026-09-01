@@ -31,9 +31,24 @@ def make_job(db) -> Job:
     return job
 
 
+def test_the_apply_feature_is_off_unless_a_human_turns_it_on():
+    """The safe default belongs to the declared field, not to a local .env.
+
+    Asserting it through loaded settings made the suite depend on the developer's
+    own configuration: enabling the flag in `.env` to try the feature turned a
+    policy guarantee into a failing test, which says nothing about the code.
+    """
+    from app.core.config import Settings
+
+    assert Settings.model_fields["human_confirmed_apply_enabled"].default is False
+    assert Settings.model_fields["auto_apply"].default is False
+
+
 def test_feature_flag_is_only_an_entry_gate(client, db, active_resume, settings, monkeypatch):
     job = make_job(db)
     payload = {"resume_id": active_resume.id, "answers_source": SOURCE, "confirmed": True}
+    # Set it explicitly rather than inheriting whatever `.env` happens to say.
+    monkeypatch.setattr(settings, "human_confirmed_apply_enabled", False)
     response = client.post(f"/api/application-approvals/jobs/{job.id}", json=payload)
     assert response.status_code == 403
 

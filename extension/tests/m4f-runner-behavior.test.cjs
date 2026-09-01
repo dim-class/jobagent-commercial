@@ -1118,7 +1118,12 @@ test('batch inventory follows same-size virtual cards and remembers reappearing 
   await env.send({ type: 'jobagent:runner-start', taskId: 5, candidateCap: 20 })
   await settle()
   const rounds = calls.filter(c => /\/run\/round$/.test(c.url)).map(c => JSON.parse(c.init.body))
-  assert.deepEqual(rounds.map(r => [r.observed, r.new, r.duplicate]), [[1, 1, 0], [1, 1, 0], [1, 0, 1]])
+  // `observed` is a delta, so a re-rendered card adds nothing to it. Summing the
+  // whole rendered list each round is what made the console read 已发现 960 for a
+  // run that saw 480 cards. `duplicate` still reports the re-render (churn).
+  assert.deepEqual(rounds.map(r => [r.observed, r.new, r.duplicate]), [[1, 1, 0], [1, 1, 0], [0, 0, 1]])
+  assert.equal(rounds.reduce((sum, r) => sum + r.observed, 0), 2,
+    'cumulative observed equals the number of distinct cards seen')
   assert.ok(afterScrollDetects < 15, 'same-count replacement does not exhaust every stabilization wait')
   assert.equal(opensOf(env).length, 3, 'reappearing a is not processed twice')
   const broadcasts = env.tabsSendMessageCalls.filter(c => c.message.type === 'jobagent:runner-state' && c.message.state)
@@ -1224,7 +1229,8 @@ test('a candidate URL differing only by query string is treated as the same iden
   const roundCall = calls.find((c) => /\/run\/round$/.test(c.url))
   assert.ok(roundCall, 'a round was recorded')
   const body = JSON.parse(roundCall.init.body)
-  assert.equal(body.observed, 2)
+  // Delta, not list size: only the one genuinely new card counts as observed.
+  assert.equal(body.observed, 1)
   assert.equal(body.new, 1, "'a' under a different query must not count as new")
   assert.equal(body.duplicate, 1)
 })

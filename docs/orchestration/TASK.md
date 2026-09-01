@@ -54,3 +54,26 @@ uninstall while preserving the default per-user data directory.
   stable-AppId upgrade, unchanged database hash, preserved sentinel/default
   data, silent uninstall cleanup, and released port.
 - Full backend, frontend, and extension regressions remain green.
+
+## Result (2026-09-01)
+
+Implemented `scripts/test-windows-installer-lifecycle.ps1` with an explicit
+GitHub Actions/`RUNNER_TEMP` gate, refusal of any pre-existing JobAgent install,
+data, or uninstall registration, exact runner-owned cleanup targets, and no
+browser or recruitment behavior. The installer workflow now builds `-a` and
+`-b` candidates from one audited payload and runs the lifecycle before upload.
+
+Remote run `33474909477` passed every step. It installed the first version,
+ran doctor and the frozen server with Python/Node absent from runtime `PATH`,
+verified health/database `ok` and frontend HTTP 200, stopped through the product
+guard, upgraded under the stable AppId without changing the database or test
+sentinel, then silently uninstalled while preserving default user data and
+releasing the port. The downloaded final `0.1.0-3-b` EXE matched manifest
+SHA-256 `d3e1787980c852e9297b92b7a522f6c28742b347fc137fdc270b9a8e40b1c235`.
+It remains `NotSigned`, `development_candidate`, and
+`commercial_distribution_ready=false`. Regular CI run `33474896134`, full
+local backend regression, frontend 31/31, and extension 301/301 all passed.
+
+This closes the repeatable clean-runner lifecycle gate. It does not replace a
+genuinely toolchain-free disposable Windows VM, Authenticode signing,
+applicable Inno Setup commercial licensing, or extension distribution.

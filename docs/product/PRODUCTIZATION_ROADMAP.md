@@ -38,7 +38,9 @@ JobAgent 是本地优先的求职 Agent。用户上传自己的简历、设置�
 当前进度：P2C-A 已在 P2B bundle 之上构建**未签名、当前用户级 Windows x64 安装候选**，包含 Python
 后端运行时、已构建 React 前端、迁移、中性策略和固定版本 MV3 扩展；产物审计、文件清单与 ZIP
 SHA-256 均已加入。安装、运行、覆盖升级、默认保留数据卸载已在隔离目录实测。它仍未签名，
-Inno Setup 商业许可尚未确认，也没有在完全没有开发工具链的独立 Windows VM 上验收。
+Inno Setup 商业许可尚未确认，也没有在完全没有开发工具链的独立 Windows VM 上验收。P2C-A2 已把
+安装、冻结运行、同 AppId 升级和静默卸载保留数据变成 GitHub 一次性 Windows runner 的重复发布门禁；
+运行时 PATH 明确不含 Python/Node，但 runner 本身仍有构建工具，不能替代最终干净 VM。
 
 验收：
 

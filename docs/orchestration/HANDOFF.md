@@ -139,6 +139,19 @@ reported Inno 7.1.0, `NotSigned`, `development_candidate`, and
 `commercial_distribution_ready=false`. This closes the P2C-A remote-build gate;
 it does not close signing, licensing, or clean-VM acceptance.
 
+P2C-A2 added a second, stronger gate. `scripts/test-windows-installer-lifecycle.ps1`
+is deliberately unusable outside GitHub Actions with `RUNNER_TEMP`, refuses any
+pre-existing JobAgent install/data/uninstall registration, and removes only the
+exact state it created on that disposable runner. Workflow run `33474909477`
+passed real install, sanitized-PATH frozen doctor/start, health/database and
+frontend checks, guarded stop, same-AppId upgrade, database/sentinel
+preservation, silent uninstall, registration/program cleanup, and port release.
+The final `0.1.0-3-b` EXE independently matched SHA-256
+`d3e1787980c852e9297b92b7a522f6c28742b347fc137fdc270b9a8e40b1c235`.
+Do not weaken the runner-only or pre-existing-state guards to make it runnable
+on a developer profile. The runner still has toolchains installed; the script
+only proves the frozen runtime does not resolve Python/Node from `PATH`.
+
 The interactive delete-data branch points at the real default
 `%LOCALAPPDATA%\JobAgent`. It is structurally tested, defaults to No, and was
 deliberately not clicked on the developer profile. Test that destructive branch

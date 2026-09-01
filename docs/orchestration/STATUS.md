@@ -1,5 +1,13 @@
 # JobAgent Orchestration Status
 
+- Current (2026-09-01): P2C-A2 **可重复 Windows 安装生命周期发布门禁**已通过。远程 run
+  `33474909477` 在一次性 `windows-2025` runner 上构建 `-a/-b` 两版，并实际完成当前用户安装、
+  无 Python/Node runtime PATH 的冻结 EXE doctor/启动、health/database ok、前端 HTTP 200、受保护停止、
+  同 AppId 升级、数据库哈希与 sentinel 保持、静默卸载保留默认数据、清理程序/注册项及释放端口；随后
+  artifact 核验与上传成功。最终 `0.1.0-3-b` SHA-256 为
+  `d3e1787980c852e9297b92b7a522f6c28742b347fc137fdc270b9a8e40b1c235`，下载后独立复算一致，仍明确
+  `NotSigned` / `development_candidate` / `commercial_distribution_ready=false`。对应常规 CI
+  `33474896134` 三个 job 全绿。runner 本身仍装有构建工具，因此不能冒充真正无工具链 VM 验收。
 - Current (2026-09-01): P2C-A **未签名 Windows 当前用户级安装候选**已实现并通过本机隔离生命周期。
   固定 Inno Setup 7.1.0 + 稳定 AppId；安装不需管理员权限，含开始菜单/可选桌面快捷方式，升级/卸载
   只调用已安装 `JobAgent.exe --stop`。卸载默认保留 `%LOCALAPPDATA%\JobAgent`，静默卸载无条件保留；

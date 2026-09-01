@@ -21,6 +21,10 @@
 - 卸载默认保留 `%LOCALAPPDATA%\JobAgent`。交互卸载只有在独立警告中再次选择“是”才删除；
   静默卸载始终保留。安装器 manifest 明确标记 `NotSigned`、`development_candidate` 和
   `commercial_distribution_ready=false`。
+- GitHub installer workflow 会从同一已审计 payload 构建两个版本，并在上传前于一次性 Windows runner
+  实际执行安装、无 Python/Node runtime PATH 启动、健康/前端检查、同 AppId 升级、静默卸载保留数据、
+  注册项/程序清理与端口释放。脚本遇到已有 JobAgent 安装、数据或卸载注册会 fail closed，且拒绝在
+  GitHub Actions runner 之外运行。
 
 ## 构建候选包
 
@@ -38,11 +42,15 @@ cd ..
 `JobAgent.exe`。Chrome 扩展仍需在 `chrome://extensions` 选择包内 `extension/` 进行开发者模式
 加载；停止时运行 `Stop-JobAgent.cmd`。用户数据不会写回解压目录。
 
-## 本机隔离验收
+## 本机与远程隔离验收
 
 两个连续候选版本已在仓库内隔离目录完成：非管理员安装、冻结 EXE doctor、health/database ok、
 根页面 HTTP 200、同 AppId 升级、数据库哈希不变、静默卸载保留数据、程序目录/卸载注册清理和
 端口释放全部 PASS。没有启动 Chrome/BOSS，也没有读取或修改真实用户数据。
+
+远程 run `33474909477` 把同一生命周期作为可重复发布门禁执行并通过。最终 artifact 的实际 SHA-256
+与 manifest 完全一致；运行时 PATH 已移除 Python/Node。该 runner 仍安装了构建工具，因此这里只能证明
+冻结 EXE 不从 PATH 解析它们，不能替代真正无开发工具链的独立 Windows VM。
 
 ## 还没有完成，不能对外宣称
 

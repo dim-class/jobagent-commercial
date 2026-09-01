@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "JobAgent BOSS Detector",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "description": "通过本地 JobAgent 控制台显式启动有限 BOSS 搜索采集并支持逐岗位确认投递。不批量投递、不扫描沟通、不后台、不自动重试或跟进。",
 
   "permissions": ["activeTab", "scripting", "storage"],

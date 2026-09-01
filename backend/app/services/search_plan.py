@@ -41,10 +41,11 @@ DEFAULT_KEYWORDS: list[str] = [
 QUICK_SEARCH_NOTE = "quick_resume_search:v1"
 
 
-#: One confirmed batch may run at most five tasks (CLAUDE.md M4g; enforced in
-#: `consoleExtension.selectBoundedPendingTasks`). city x keyword can never
-#: exceed it, and nothing here may raise it.
-MAX_BATCH_TASKS = 5
+#: P3A keeps the broader personal search finite while allowing several resume
+#: directions across several cities. The frontend bridge and MV3 worker enforce
+#: this same ceiling before any browser side effect.
+MAX_BATCH_TASKS = 16
+MAX_SEARCH_DIRECTIONS = 8
 MAX_SELECTED_CITIES = 4
 
 
@@ -99,12 +100,12 @@ def prepare_resume_searches(
     # city cannot leave a partially prepared batch behind.
     city_ids = {city: city_id_for(city) for city in normalized_cities}
     resume = get_active_resume(db)
-    # city x keyword, bounded by the same five-task batch ceiling the console
-    # confirmation enforces. One city therefore searches up to five of the
-    # user's own role directions; four cities get one each. Never more.
+    # city x keyword, bounded by one comprehensive portfolio. One or two cities
+    # can cover eight directions; four cities cover four directions each.
     strategy = load_strategy()
     keywords = resume_search_keywords(
-        strategy, limit=max(1, MAX_BATCH_TASKS // len(normalized_cities))
+        strategy,
+        limit=min(MAX_SEARCH_DIRECTIONS, max(1, MAX_BATCH_TASKS // len(normalized_cities))),
     )
     early_career_policy = str(strategy["early_career_policy"])
     previous = db.scalars(

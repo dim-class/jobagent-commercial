@@ -12,7 +12,7 @@ then asked to continue. This records task scope, not an OS/browser permission gr
   identity checks, deduplication, intake, progress and pause/cancel.
 - Daily search starts from the local console, not a sequence of popup clicks. One
   explicit confirmation may authorize either one task or an exact finite M4g batch of
-  1–5 already-pending tasks. This is not a scheduler: keep one foreground tab/task,
+  1–16 already-pending tasks. This is not a scheduler: keep one foreground tab/task,
   <=20 candidates and <=5 scroll rounds per task, and never auto-resume after restart.
   The first M4g live acceptance requires a separate visible confirmation and is capped at
   two tasks with one candidate attempt each.

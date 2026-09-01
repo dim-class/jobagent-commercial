@@ -134,11 +134,10 @@ def test_prepare_resume_searches_creates_one_fresh_task_per_unique_city(db, acti
         db, cities=["北京", "上海", "北京"], target_count=4
     )
 
-    # Two cities -> two role directions each, still under the five-task ceiling.
-    assert [task.city for task in tasks] == ["北京", "北京", "上海", "上海"]
-    assert [task.city_id for task in tasks] == [
-        "101010100", "101010100", "101020100", "101020100",
-    ]
+    # Two cities cover eight configured directions, still under the portfolio ceiling.
+    assert len(tasks) == 16
+    assert [task.city for task in tasks] == ["北京"] * 8 + ["上海"] * 8
+    assert [task.city_id for task in tasks] == ["101010100"] * 8 + ["101020100"] * 8
     assert all(task.resume_id == active_resume.id for task in tasks)
     assert all(task.max_candidates == 4 for task in tasks)
     assert all(task.run_status == SearchTaskRunStatus.pending for task in tasks)
@@ -150,7 +149,7 @@ def test_quick_search_expands_one_city_across_several_role_directions(db, active
     tasks, _ = search_plan.prepare_resume_searches(db, cities=["杭州"], target_count=20)
 
     keywords = [task.keywords for task in tasks]
-    assert len(tasks) == search_plan.MAX_BATCH_TASKS
+    assert len(tasks) == search_plan.MAX_SEARCH_DIRECTIONS
     assert len(set(keywords)) == len(keywords), "no city x keyword pair repeats"
     assert all(task.city == "杭州" for task in tasks)
     assert keywords[0] == "云计算工程师", "a Chinese cloud role still leads"
@@ -158,15 +157,26 @@ def test_quick_search_expands_one_city_across_several_role_directions(db, active
 
 @pytest.mark.parametrize(
     "cities, expected_tasks",
-    [(["北京"], 5), (["北京", "上海"], 4), (["北京", "上海", "广州"], 3),
-     (["北京", "上海", "广州", "杭州"], 4)],
+    [(["北京"], 8), (["北京", "上海"], 16), (["北京", "上海", "广州"], 15),
+     (["北京", "上海", "广州", "杭州"], 16)],
 )
-def test_quick_search_never_exceeds_the_five_task_batch_ceiling(
+def test_quick_search_never_exceeds_the_comprehensive_batch_ceiling(
     db, active_resume, cities, expected_tasks
 ):
     tasks, _ = search_plan.prepare_resume_searches(db, cities=cities, target_count=3)
     assert len(tasks) == expected_tasks
     assert len(tasks) <= search_plan.MAX_BATCH_TASKS
+
+
+def test_quick_search_directions_remain_bounded_even_with_many_configured_roles(
+    db, active_resume, monkeypatch
+):
+    monkeypatch.setattr(search_plan, "load_strategy", lambda: {
+        "preferred_roles": [f"云方向{i}" for i in range(20)],
+        "early_career_policy": "exclude",
+    })
+    tasks, _ = search_plan.prepare_resume_searches(db, cities=["北京"], target_count=8)
+    assert len(tasks) == search_plan.MAX_SEARCH_DIRECTIONS == 8
 
 
 def test_resume_keywords_are_deterministic_chinese_first_and_deduplicated():

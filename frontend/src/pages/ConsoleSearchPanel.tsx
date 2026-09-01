@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { ApiError, api } from '@/api/client'
 import { Alert, Card, Modal } from '@/components/ui'
 import { assessConsoleConnection, ConsoleConnectionError, consoleExtension,
-  DEFAULT_BATCH_CANDIDATE_CAP, selectBoundedPendingTasks } from '@/pages/consoleExtension'
+  DEFAULT_BATCH_CANDIDATE_CAP, MAX_CONSOLE_BATCH_TASKS, selectBoundedPendingTasks } from '@/pages/consoleExtension'
 import type { ConsoleAction, ConsoleReply } from '@/pages/consoleExtension'
 import type { SearchKeywordAnalytics, SearchPlanOptions, SearchPlanTask } from '@/types'
 
@@ -22,10 +22,11 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
   const [hasRoles, setHasRoles] = useState(false)
   const [setupLoaded, setSetupLoaded] = useState(false)
   const [cap, setCap] = useState(3)
-  const [targetCount, setTargetCount] = useState(3)
+  const [targetCount, setTargetCount] = useState(8)
   const [batchSize, setBatchSize] = useState(2)
   const [batchCap, setBatchCap] = useState(DEFAULT_BATCH_CANDIDATE_CAP)
   const [tasks, setTasks] = useState<SearchPlanTask[]>([])
+  const [portfolioTaskIds, setPortfolioTaskIds] = useState<number[]>([])
   const [keywordStats, setKeywordStats] = useState<SearchKeywordAnalytics | null>(null)
   const [selected, setSelected] = useState<number | null>(null)
   const [connection, setConnection] = useState<ConsoleReply | null>(null)
@@ -50,6 +51,15 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
   const alive = useRef(true)
   const refreshSequence = useRef(0)
   const task = tasks.find(row => row.id === selected)
+  const activePortfolioIds = connection?.batch?.taskIds?.length ? connection.batch.taskIds : portfolioTaskIds
+  const portfolioTasks = activePortfolioIds
+    .map(id => tasks.find(row => row.id === id))
+    .filter((row): row is SearchPlanTask => Boolean(row))
+  const portfolioCities = [...new Set(portfolioTasks.map(row => row.city).filter(Boolean))]
+  const portfolioDirections = [...new Set(portfolioTasks.map(row => row.keywords).filter(Boolean))]
+  const portfolioCompleted = portfolioTasks.filter(row => row.state === 'completed').length
+  const portfolioObserved = portfolioTasks.reduce((total, row) => total + row.observed_jobs, 0)
+  const portfolioImported = portfolioTasks.reduce((total, row) => total + row.imported_jobs, 0)
 
   const loadSetup = useCallback(async () => {
     try {
@@ -151,8 +161,8 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       setError('岗位数量必须是 1–20 的整数。')
       return
     }
-    if (cities.length > 1 && !connection?.capabilities?.includes('console-batch-v1')) {
-      setError('当前扩展版本不支持多城市串行搜索，请更新扩展后刷新连接。')
+    if (!connection?.capabilities?.includes('console-batch-v1')) {
+      setError('当前扩展版本不支持综合搜索，请更新扩展后刷新连接。')
       return
     }
     admission.current = true; setBusy(true); setError(''); setMessage('')
@@ -163,25 +173,18 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       const nextIds = new Set(nextTasks.map(row => row.id))
       setTasks(current => [...current.filter(row => !nextIds.has(row.id)), ...nextTasks])
       setSelected(nextTasks[0].id)
+      setPortfolioTaskIds(nextTasks.map(row => row.id))
       setCap(targetCount)
       onSelect(nextTasks[0].id)
-      if (nextTasks.length === 1) {
-        const nextTask = nextTasks[0]
-        setConfirmation({
-          action: 'start', taskId: nextTask.id, city: nextTask.city,
-          keywords: nextTask.keywords, cap: targetCount,
-        })
-      } else {
-        setBatchSize(nextTasks.length)
-        setBatchCap(targetCount)
-        setBatchConfirmation({
-          tasks: nextTasks.map(row => ({ id: row.id, city: row.city, keywords: row.keywords })),
-          cap: targetCount,
-        })
-      }
+      setBatchSize(nextTasks.length)
+      setBatchCap(targetCount)
+      setBatchConfirmation({
+        tasks: nextTasks.map(row => ({ id: row.id, city: row.city, keywords: row.keywords })),
+        cap: targetCount,
+      })
       const directions = [...new Set(nextTasks.map(row => row.keywords).filter(Boolean))]
-      setMessage(`已使用当前简历「${prepared.active_resume_name}」的岗位方向准备 ${nextTasks.length} 个搜索任务`
-        + `（城市 × 方向）：${directions.join('、')}。确认后串行搜索，最多 5 个任务。`)
+      setMessage(`已根据当前简历「${prepared.active_resume_name}」准备综合搜索：`
+        + `${cities.length} 个城市、${directions.length} 个方向，共 ${nextTasks.length} 个有限搜索单元。`)
     } catch (err) {
       setError(err instanceof Error ? err.message : '准备简历匹配搜索失败')
     } finally {
@@ -263,7 +266,7 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       const result = await consoleExtension(action, undefined, approvedBatchCap, taskIds)
       if (!result.ok) throw new Error(result.error || '批次操作未确认，请刷新状态。')
       setMessage(action === 'start-batch'
-        ? '有界批次已接收。扩展只会按确认顺序串行运行；任何失败或验证都会停止后续任务。'
+        ? '综合搜索已接收。扩展一次只运行一个搜索单元；任何失败或验证都会停止后续搜索。'
         : '批次请求已接收，请刷新状态确认。')
       await refresh()
     } catch (err) { setError(err instanceof Error ? err.message : '批次请求失败') }
@@ -273,7 +276,7 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
   const owned = connection?.runner?.taskId === selected
   const batchActive = connection?.batch?.state === 'running' || connection?.batch?.state === 'paused'
   const setupReady = setupLoaded && hasResume && hasRoles && cities.length > 0
-  return <Card title="搜索适合我的岗位" sub="选择城市和数量；岗位方向取自当前简历策略，一次最多 5 个「城市 × 方向」组合。">
+  return <Card title="搜索适合我的岗位" sub="选择城市和数量；JobAgent 会综合当前简历与职业方向，覆盖多个相关岗位方向。">
     <div className="row mb-1">
       <span className={`badge ${backendReady && connection ? 'badge-good' : 'badge-neutral'}`}>
         {backendReady && connection ? '已准备好' : '连接未就绪'}
@@ -302,7 +305,7 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
               return [...current, option]
             })} />{option}</label>)}</div>
       </fieldset>
-      <label>每个方向搜索岗位数量（1–20）<input type="number" min={1} max={20} value={targetCount}
+      <label>每个方向希望搜索的岗位数（1–20）<input type="number" min={1} max={20} value={targetCount}
         onChange={e => setTargetCount(Number(e.target.value))} /></label>
       <button className="btn btn-primary" disabled={busy || checking || !backendReady || !connection
         || !setupReady || !!connection.runner || batchActive}>
@@ -310,63 +313,27 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       </button>
     </form>
 
-    {task ? <div className="card-block mt-1">
-      <div><strong>{task.city} · {task.keywords}</strong></div>
-      <div className="small faint">状态：{taskStatusLabel(task)} · 已发现 {task.observed_jobs} 个 · 已入库 {task.imported_jobs} 个</div>
-      {task.state === 'paused_login_required' || task.paused_reason === 'login_required'
+    {portfolioTasks.length ? <div className="card-block mt-1">
+      <div><strong>本次综合搜索</strong></div>
+      <div className="small faint">
+        {portfolioCities.join('、')} · {portfolioDirections.length} 个岗位方向 · {portfolioTasks.length} 个有限搜索单元
+      </div>
+      <div className="mt-1">
+        整体进度：{portfolioCompleted}/{portfolioTasks.length} · 已发现 {portfolioObserved} 个 · 已入库 {portfolioImported} 个
+      </div>
+      {portfolioTasks.some(row => row.state === 'paused_login_required' || row.paused_reason === 'login_required')
         ? <div className="small text-danger mt-1" role="alert">请在当前 BOSS 标签页完成登录；登录成功后回到这里点击“恢复”。JobAgent 不会读取或填写登录凭据。</div>
         : null}
       <div className="actions mt-1">
-        <button className="btn btn-primary" disabled={busy || checking || !backendReady || !connection
-          || !!connection.runner || batchActive || task.state !== 'pending'}
-          onClick={() => void command('start')}>开始搜索</button>
-        {owned ? <>
-          <button className="btn btn-secondary" disabled={busy || batchActive}
-            onClick={() => void command('pause')}>暂停</button>
-          <button className="btn btn-secondary" disabled={busy || checking || !backendReady || batchActive
-            || !connection?.runner?.paused || connection.runner.paid}
-            onClick={() => void command('resume')}>恢复</button>
-          <button className="btn btn-secondary" disabled={busy || batchActive}
-            onClick={() => void command('cancel')}>取消</button>
-        </> : null}
-        <button className="btn btn-secondary" onClick={() => onSelect(task.id)}>查看候选岗位</button>
+        <button className="btn btn-secondary" disabled={busy || !batchActive || !connection?.runner}
+          onClick={() => void batchCommand('pause-batch')}>暂停</button>
+        <button className="btn btn-secondary" disabled={busy || checking || !backendReady || !batchActive
+          || !connection?.batch?.requiresResume} onClick={() => void batchCommand('resume-batch')}>恢复</button>
+        <button className="btn btn-secondary" disabled={busy || !batchActive || !connection?.runner}
+          onClick={() => void batchCommand('cancel-batch')}>取消</button>
+        <Link className="btn btn-secondary" to="/jobs">查看岗位库</Link>
       </div>
-    </div> : <p className="small faint mt-1">只需选择城市和数量；岗位方向来自当前简历与职业策略，一次最多 5 个「城市 × 方向」组合（城市越多，每个城市分到的方向越少）。</p>}
-
-    {keywordStats && keywordStats.cohorts.some(c => c.actionable) ? (
-      <div className="card-block mt-1">
-        <div><strong>搜索方向表现</strong>
-          <span className="small faint"> · 本地统计，不消耗 AI 额度</span>
-        </div>
-        <table className="mt-1">
-          <thead>
-            <tr><th>方向</th><th>岗位</th><th>均分</th><th>推荐率（95% 区间）</th></tr>
-          </thead>
-          <tbody>
-            {keywordStats.cohorts.filter(c => c.actionable).map(c => (
-              <tr key={c.keyword}>
-                <td>{c.keyword}</td>
-                <td className="nowrap">{c.jobs}</td>
-                <td className="nowrap">{c.average_score ?? '—'}</td>
-                <td className="nowrap">
-                  {c.recommend_rate === null
-                    ? '—'
-                    : `${c.recommended}/${c.jobs} · ${(c.recommend_rate * 100).toFixed(0)}%`}
-                  {c.interval_low !== null && c.interval_high !== null ? (
-                    <span className="small faint">
-                      {' '}[{(c.interval_low * 100).toFixed(0)}–{(c.interval_high * 100).toFixed(0)}%]
-                    </span>
-                  ) : null}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {keywordStats.observations.map(line => (
-          <p key={line} className="small faint mt-1">{line}</p>
-        ))}
-      </div>
-    ) : null}
+    </div> : <p className="small faint mt-1">只需选择城市和数量；系统会从当前简历关联的职业策略中选取最多 8 个相关方向，组合成一次综合搜索。</p>}
 
 
     <button type="button" className="btn-sm mt-1" aria-expanded={showAdvanced}
@@ -381,6 +348,19 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
         <p>诊断码：{diagnosticCode} · 最近检查：{checkedAt}{checking ? ' · 检查中…' : ''}</p>
       </section>
       <button className="btn btn-secondary" disabled={busy || checking} onClick={() => void refresh()}>刷新连接</button>
+      {keywordStats && keywordStats.cohorts.some(c => c.actionable) ? (
+        <section className="mt-1" aria-label="搜索方向历史表现">
+          <div><strong>搜索方向历史表现</strong><span className="small faint"> · 本地统计，不消耗 AI 额度</span></div>
+          <table className="mt-1"><thead><tr><th>方向</th><th>岗位</th><th>均分</th><th>推荐率（95% 区间）</th></tr></thead>
+            <tbody>{keywordStats.cohorts.filter(c => c.actionable).map(c => <tr key={c.keyword}>
+              <td>{c.keyword}</td><td>{c.jobs}</td><td>{c.average_score ?? '—'}</td>
+              <td>{c.recommend_rate === null ? '—' : `${c.recommended}/${c.jobs} · ${(c.recommend_rate * 100).toFixed(0)}%`}
+                {c.interval_low !== null && c.interval_high !== null
+                  ? <span className="small faint"> [{(c.interval_low * 100).toFixed(0)}–{(c.interval_high * 100).toFixed(0)}%]</span> : null}</td>
+            </tr>)}</tbody></table>
+          {keywordStats.observations.map(line => <p key={line} className="small faint mt-1">{line}</p>)}
+        </section>
+      ) : null}
       <form onSubmit={prepare} className="form-grid mt-1">
         <label>自定义搜索城市<select value={city} onChange={e => setCity(e.target.value)}>
           {searchOptions?.supported_cities.map(option => <option key={option} value={option}>{option}</option>)}
@@ -399,8 +379,8 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
 
       <section aria-label="有界搜索批次" className="mt-1">
         <h3>批量搜索</h3>
-        <p className="small faint">按任务列表顺序运行最多 5 个待执行任务。</p>
-        <label>任务数（1–5）<input type="number" min={1} max={5} value={batchSize}
+        <p className="small faint">内部逐个运行最多 {MAX_CONSOLE_BATCH_TASKS} 个待执行搜索单元。</p>
+        <label>搜索单元数（1–{MAX_CONSOLE_BATCH_TASKS}）<input type="number" min={1} max={MAX_CONSOLE_BATCH_TASKS} value={batchSize}
           disabled={busy || batchActive} onChange={e => setBatchSize(Number(e.target.value))} /></label>
         <label>每个任务候选上限（1–20）<input type="number" min={1} max={20} value={batchCap}
           disabled={busy || batchActive} onChange={e => setBatchCap(Number(e.target.value))} /></label>
@@ -417,6 +397,18 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
         {connection?.batch && <p className="small">批次：{connection.batch.state} · 当前 {connection.batch.currentIndex + 1}/
           {connection.batch.taskIds.length}（任务 #{connection.batch.currentTaskId}）</p>}
       </section>
+      {task ? <section className="mt-1" aria-label="当前单任务详情">
+        <p><strong>{task.city} · {task.keywords}</strong> · {taskStatusLabel(task)} · 已发现 {task.observed_jobs} · 已入库 {task.imported_jobs}</p>
+        <div className="actions">
+          <button className="btn btn-primary" disabled={busy || checking || !backendReady || !connection
+            || !!connection.runner || batchActive || task.state !== 'pending'} onClick={() => void command('start')}>开始单任务</button>
+          {owned ? <><button className="btn btn-secondary" disabled={busy || batchActive} onClick={() => void command('pause')}>暂停单任务</button>
+            <button className="btn btn-secondary" disabled={busy || checking || !backendReady || batchActive
+              || !connection?.runner?.paused || connection.runner.paid} onClick={() => void command('resume')}>恢复单任务</button>
+            <button className="btn btn-secondary" disabled={busy || batchActive} onClick={() => void command('cancel')}>取消单任务</button></> : null}
+          <button className="btn btn-secondary" onClick={() => onSelect(task.id)}>查看该任务候选</button>
+        </div>
+      </section> : null}
     </div> : null}
     {confirmation && <Modal title="确认免费采集" onClose={() => setConfirmation(null)} footer={<>
       <button className="btn btn-secondary" autoFocus onClick={() => setConfirmation(null)}>暂不执行</button>
@@ -432,9 +424,15 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       <button className="btn btn-primary" disabled={busy || checking || !backendReady || !connection}
         onClick={() => void batchCommand('start-batch', true)}>确认开始批次</button>
     </>}>
-      <p>将按以下固定顺序串行运行 {batchConfirmation.tasks.length} 个任务：</p>
-      <ol>{batchConfirmation.tasks.map(row => <li key={row.id}>#{row.id} · {row.city} · {row.keywords}</li>)}</ol>
-      <p>每个任务最多 {batchConfirmation.cap} 个候选尝试、5 次滚动；失败、取消、验证或前台丢失会停止整批，不会继续下一个。</p>
+      <p>这次综合搜索将覆盖：</p>
+      <p><strong>城市：</strong>{[...new Set(batchConfirmation.tasks.map(row => row.city).filter(Boolean))].join('、')}</p>
+      <p><strong>岗位方向：</strong>{[...new Set(batchConfirmation.tasks.map(row => row.keywords).filter(Boolean))].join('、')}</p>
+      <p>共 {batchConfirmation.tasks.length} 个有限搜索单元；每个方向最多 {batchConfirmation.cap} 个候选尝试、5 次滚动。</p>
+      {/* The unit count alone understates the session: a comprehensive
+          portfolio can be several times longer than a single search. Show
+          the ceiling that actually determines how long the browser runs. */}
+      <p><strong>最多 {batchConfirmation.tasks.length * batchConfirmation.cap} 次候选尝试</strong>，全部在前台可见的 BOSS 标签页里逐个进行，会持续较长时间。中途可以随时暂停或取消。</p>
+      <p>系统内部一次只执行一个；失败、取消、验证或前台丢失会停止整批，不会自动继续。</p>
       <p>无定时后台启动、无 AI 匹配费用，不投递、不收藏、不发消息。</p>
     </Modal>}
     {error && <p role="alert">{error}</p>}{message && <p role="status">{message}</p>}

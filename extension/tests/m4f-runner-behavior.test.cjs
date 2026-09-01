@@ -490,6 +490,18 @@ test('console status exposes no browser/session secrets or discovery history and
   assert.equal(pointerOf(env).taskId, 5)
 })
 
+test('console status accepts one persisted sixteen-unit comprehensive batch', async () => {
+  const taskIds = Array.from({ length: 16 }, (_, index) => index + 1)
+  const { env } = consoleEnv({}, { [BATCH_KEY]: {
+    taskIds, candidateCap: 8, currentIndex: 7, state: 'paused', tabId: 7,
+    lastError: null, updatedAt: new Date().toISOString(),
+  } })
+  const reply = await env.send({ type: 'jobagent:console-command', action: 'status' }, consoleSender)
+  assert.deepEqual(Array.from(reply.batch.taskIds), taskIds)
+  assert.equal(reply.batch.currentTaskId, 8)
+  assert.equal(reply.batch.candidateCap, 8)
+})
+
 test('M6 queue command claims exactly once before one click and records only unknown', async () => {
   const detailUrl = 'https://www.zhipin.com/job_detail/m6job.html'
   const approval = {
@@ -554,8 +566,8 @@ test('bounded console batch validates once, reuses one BOSS tab and advances two
   assert.equal(env.storageData[BATCH_KEY].currentIndex, 1)
 })
 
-test('bounded batch rejects invalid, duplicate or over-five task lists before browser work', async () => {
-  for (const taskIds of [[], [5, 5], [1, 2, 3, 4, 5, 6], [5, '6']]) {
+test('bounded batch rejects invalid, duplicate or over-sixteen task lists before browser work', async () => {
+  for (const taskIds of [[], [5, 5], Array.from({ length: 17 }, (_, index) => index + 1), [5, '6']]) {
     const { env, calls } = consoleEnv()
     const result = await env.send({ type: 'jobagent:console-command', action: 'start-batch',
       taskIds, candidateCap: 1 }, consoleSender)

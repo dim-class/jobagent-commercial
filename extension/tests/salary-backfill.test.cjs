@@ -22,5 +22,5 @@ test('salary backfill is explicit, bounded and uses canonical intake', () => {
 test('console bridge requires a real user activation for every write', () => {
   assert.match(bridge, /start-salary-backfill/)
   assert.match(bridge, /navigator\.userActivation\.isActive/)
-  assert.equal(manifest.version, '0.1.20')
+  assert.equal(manifest.version, '0.1.21')
 })

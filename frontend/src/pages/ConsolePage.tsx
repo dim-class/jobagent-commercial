@@ -407,7 +407,7 @@ export default function ConsolePage() {
         <div>
           <h1>搜索适合我的岗位</h1>
           <p>
-            只需选择意向城市和岗位数量；JobAgent 会从当前简历策略选择岗位方向并有限搜索。
+            只需选择意向城市和岗位数量；JobAgent 会综合当前简历与职业方向，搜索多个相关岗位方向。
           </p>
         </div>
       </header>

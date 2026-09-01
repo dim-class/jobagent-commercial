@@ -29,3 +29,12 @@ test('console search reads backend capabilities and saved strategy instead of ci
 test('search capability request is read-only', () => {
   assert.match(client, /getSearchPlanOptions:[\s\S]*request<SearchPlanOptions>\('\/api\/tasks\/search-plan\/options', \{ signal \}\)/)
 })
+
+test('personal quick search is aggregate, broader and does not expose execution order', () => {
+  assert.match(consolePanel, /useState\(8\)/)
+  assert.match(consolePanel, /本次综合搜索/)
+  assert.match(consolePanel, /整体进度/)
+  assert.match(consolePanel, /最多 8 个相关方向/)
+  assert.doesNotMatch(consolePanel, /将按以下固定顺序/)
+  assert.doesNotMatch(consolePanel, /<ol>/)
+})

@@ -25,7 +25,7 @@ def test_search_plan_options_are_backend_owned_and_loopback_only(client):
     assert response.json() == {
         "supported_cities": ["北京", "上海", "广州", "杭州"],
         "max_selected_cities": 4,
-        "max_batch_tasks": 5,
+        "max_batch_tasks": 16,
     }
 
 
@@ -76,14 +76,12 @@ def test_quick_prepare_returns_a_fresh_resume_bound_bounded_task(client, active_
     body = response.json()
     assert body["active_resume_name"] == active_resume.display_name
     assert body["keyword_source"] == "career_strategy"
-    # Two cities x two of the strategy's role directions, under the five-task
-    # batch ceiling. One keyword only ever searched a slice of the strategy.
-    assert [task["city"] for task in body["tasks"]] == ["上海", "上海", "北京", "北京"]
-    assert [task["city_id"] for task in body["tasks"]] == [
-        "101020100", "101020100", "101010100", "101010100",
-    ]
+    # Two cities x eight of the strategy's role directions, under the bounded
+    # comprehensive-search ceiling.
+    assert [task["city"] for task in body["tasks"]] == ["上海"] * 8 + ["北京"] * 8
+    assert [task["city_id"] for task in body["tasks"]] == ["101020100"] * 8 + ["101010100"] * 8
     assert body["tasks"][0]["keywords"] == "云计算工程师"
-    assert len({task["keywords"] for task in body["tasks"]}) == 2
+    assert len({task["keywords"] for task in body["tasks"]}) == 8
     assert all(task["max_candidates"] == 5 for task in body["tasks"])
     assert all(task["run_status"] == "pending" for task in body["tasks"])
 

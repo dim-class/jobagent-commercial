@@ -44,7 +44,7 @@ test('batch request carries only the approved task ids and cap', async t => {
   env.reply()
   assert.equal((await promise).ok, true)
 })
-test('bounded batch selection honors the explicitly chosen 1-5 task count', () => {
+test('bounded batch selection honors the explicitly chosen 1-16 task count', () => {
   assert.equal(DEFAULT_BATCH_CANDIDATE_CAP, 1)
   const tasks = [
     { id: 7, state: 'pending' }, { id: 8, state: 'completed' },
@@ -52,7 +52,9 @@ test('bounded batch selection honors the explicitly chosen 1-5 task count', () =
   ]
   assert.deepEqual(selectBoundedPendingTasks(tasks, 2).map(task => task.id), [7, 13])
   assert.deepEqual(selectBoundedPendingTasks(tasks, 1).map(task => task.id), [7])
-  for (const count of [0, 6, 1.5, NaN]) assert.throws(() => selectBoundedPendingTasks(tasks, count), /1–5/)
+  const broad = Array.from({ length: 18 }, (_, index) => ({ id: index + 1, state: 'pending' }))
+  assert.equal(selectBoundedPendingTasks(broad, 16).length, 16)
+  for (const count of [0, 17, 1.5, NaN]) assert.throws(() => selectBoundedPendingTasks(tasks, count), /1–16/)
 })
 test('unrelated windows, origins and request ids cannot acknowledge a command', async t => {
   const env = setup(t)

@@ -1,64 +1,58 @@
-# Authorized task — P2C-A3 Chrome Web Store submission candidate
+# Authorized task — P3A personal comprehensive resume search
 
 ## Authorization
 
-The active user goal is to make JobAgent usable by anyone. After the Windows
-installer lifecycle passed, Codex continued with the next bounded,
-no-purchase productization step on 2026-09-01.
+The user explicitly requested on 2026-09-01 that the personal console stop
+presenting a short ordered list of narrow searches and instead prepare one
+broader search based on the active resume and intended career directions.
 
 ## Goal
 
-Produce a reproducible, reviewable Chrome Web Store candidate for the existing
-JobAgent MV3 extension so ordinary users will not ultimately depend on Chrome
-developer mode. This milestone prepares the package and disclosure evidence;
-it does not upload or publish anything.
+Turn the existing quick SearchPlan entry point into one bounded comprehensive
+search portfolio. The user selects cities and a desired per-direction job
+count; JobAgent derives several directions from the active resume-linked career
+strategy, executes the existing tasks safely in sequence, and presents one
+aggregate batch rather than an implementation-order list.
 
 ## Scope
 
-- Keep the unpacked development manifest for local work, but generate a store
-  manifest that omits the Vite-only localhost port 5173.
-- Add neutral JobAgent-owned extension icons without using BOSS branding.
-- Remove the suspended M7 BOSS-chat scanner from extension runtime code. The
-  store package must match the current promise that JobAgent does not scan
-  recruiter conversations.
-- Build a deterministic ZIP whose manifest is at the archive root and whose
-  contents are limited to compiled runtime assets, popup assets, and icons.
-- Fail closed on unexpected permissions, hosts, files, remote-hosted code, or
-  other disallowed browser primitives; emit SHA-256 and machine-readable
-  package metadata.
-- Document the extension single purpose, permission justifications, local data
-  handling, draft listing copy, and the remaining manual store-dashboard work.
-- Add an artifact-only GitHub Actions workflow. It may build and test the
-  candidate but must not authenticate to or publish through Chrome Web Store.
+- Reuse the active resume and its existing local career strategy; do not add an
+  AI call for keyword generation.
+- Cover at most eight distinct preferred-role directions and at most sixteen
+  city x direction tasks per explicit confirmation.
+- Default the personal quick search to eight candidate attempts per direction,
+  while preserving the existing editable 1–20 bound.
+- Keep internal execution sequential in one visible normal-Chrome BOSS tab.
+- Replace the ordered confirmation list and primary per-task presentation with
+  an aggregate summary of cities, directions, task progress and collected jobs.
+- Keep custom tasks, task history, connection diagnostics and low-level batch
+  controls under advanced settings.
+- Update backend, frontend and extension validators together; bump the unpacked
+  extension version because its accepted batch protocol changes.
 
 ## Boundaries
 
-- Do not operate Chrome, BOSS, user sessions, resumes, databases, AI, or any
-  recruitment action.
-- Do not add telemetry, a remote developer service, credentials, remote-hosted
-  code, broad host access, CAPTCHA handling, stealth, or fingerprint behavior.
-- Do not re-enable M7 chat scanning. Backend historical schema/API code is not
-  a browser capability and is outside this removal unless a normal regression
-  proves a required compatibility adjustment.
-- Do not enable M6, automatic application, bulk application, or messaging.
-- Do not create a Chrome Web Store account, accept agreements, pay a fee,
-  upload assets, publish, or claim store approval.
-- Privacy policy and listing text are submission drafts until the owner reviews
-  them and publishes the privacy policy at a stable public URL.
+- No real BOSS operation, browser control, user-data mutation, paid AI call,
+  application, favorite, recruiter message, CAPTCHA handling, stealth,
+  credential/session access, background timer, automatic retry or task start.
+- Canonical intake, job persistence/deduplication, login/verification pauses,
+  per-task candidate cap, five-scroll cap and stop-on-failure behavior remain
+  unchanged.
+- A comprehensive search still requires one explicit in-page confirmation and
+  never resumes automatically after a browser/worker restart.
+- The broader batch limit supersedes only the M4g five-task ceiling; all other
+  M4/M4g safety rules remain in force.
 
 ## Acceptance
 
-- Two package builds from the same checkout are byte-identical.
-- The ZIP contains a root manifest, 16/32/48/128 PNG icons, popup assets, and
-  only the expected compiled JavaScript; no source, tests, maps, Node modules,
-  or developer-only files are present.
-- The store manifest requests only `activeTab`, `scripting`, and `storage`, plus
-  BOSS and loopback port 8000 hosts; no port 5173 permission or match remains.
-- Runtime/package audits reject remote script loading, `eval`, `new Function`,
-  `chrome.debugger`, `<all_urls>`, and the suspended M7 command/parser surface.
-- Privacy and submission docs accurately disclose website-content processing,
-  cropped salary screenshots, loopback transport, local companion dependence,
-  and all remaining human dashboard steps.
-- Extension, frontend, and backend regressions remain green; a clean remote
-  workflow uploads only the unsigned store-submission candidate and integrity
-  metadata.
+- One city prepares up to eight unique configured directions; two cities can
+  prepare sixteen tasks; four cities prepare four directions each; no batch
+  exceeds sixteen tasks.
+- The same 1–16 validation is enforced by backend options, frontend bridge and
+  MV3 worker, including duplicate/invalid-id rejection.
+- The main confirmation shows aggregate cities/directions and totals without an
+  ordered task list or task ids.
+- The primary card shows aggregate progress/counters; detailed task selection
+  and keyword performance are available only in advanced settings.
+- Existing fixture-only backend, frontend and extension tests pass after the
+  changes. No live task or AI call is part of acceptance.

@@ -393,7 +393,7 @@ async function sendPreviewForTab(
 
 const RUNNER_STORAGE_KEY = 'jobagent_runner_pointer'
 const BATCH_STORAGE_KEY = 'jobagent_runner_batch'
-const BATCH_MAX_TASKS = 5
+const BATCH_MAX_TASKS = 16
 
 type BatchState = 'running' | 'paused' | 'completed' | 'stopped'
 interface BatchPointer {
@@ -2579,7 +2579,7 @@ async function startBatch(
   candidateCap: unknown,
   sender: chrome.runtime.MessageSender,
 ): Promise<{ ok: boolean; error?: string }> {
-  if (!validBatchTaskIds(taskIds)) return { ok: false, error: '批次必须包含 1–5 个不重复的待处理任务。' }
+  if (!validBatchTaskIds(taskIds)) return { ok: false, error: '批次必须包含 1–16 个不重复的待处理任务。' }
   if (!validCandidateCap(candidateCap)) return { ok: false, error: '候选上限必须是 1–20 的整数。' }
   if (batchAdmission) return { ok: false, error: '批次启动确认正在处理，请勿重复提交。' }
   batchAdmission = true

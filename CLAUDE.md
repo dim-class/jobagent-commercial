@@ -766,7 +766,12 @@ The user explicitly authorized one finite SearchPlan batch from the local consol
 only the M4 clauses that prohibit advancing to another task after the already-approved task completes.
 All privacy, foreground, verification, extraction, intake and forbidden-action rules remain in force.
 
-- One explicit in-page confirmation names an ordered list of at most five already-created `pending`
+- P3A personal comprehensive search (user authorized 2026-09-01) supersedes only the original
+  five-task ceiling below: one explicit confirmation may bind at most sixteen already-created
+  `pending` tasks, covering at most eight configured resume/career directions. The primary UI
+  presents this as one aggregate portfolio and need not expose internal execution order or task ids.
+  All tasks are still validated up front and executed strictly one at a time.
+- One explicit in-page confirmation names an ordered list of at most sixteen already-created `pending`
   SearchPlan task ids and one per-task candidate cap. The worker re-reads and validates every task;
   the page never supplies a URL, tab id, script or paid approval.
 - The extension runs one task and one browser operation at a time in one owned, visible foreground

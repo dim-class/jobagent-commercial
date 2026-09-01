@@ -27,6 +27,7 @@ export interface ConsoleReply {
 }
 
 export const DEFAULT_BATCH_CANDIDATE_CAP = 1
+export const MAX_CONSOLE_BATCH_TASKS = 16
 
 export class ConsoleConnectionError extends Error {
   readonly code: string
@@ -39,7 +40,9 @@ export class ConsoleConnectionError extends Error {
 
 /** Deterministic UI-only selection; the worker still validates every id/task. */
 export function selectBoundedPendingTasks<T extends { id: number; state: string | null }>(tasks: T[], count: number): T[] {
-  if (!Number.isInteger(count) || count < 1 || count > 5) throw new Error('批次任务数必须是 1–5 的整数。')
+  if (!Number.isInteger(count) || count < 1 || count > MAX_CONSOLE_BATCH_TASKS) {
+    throw new Error(`批次任务数必须是 1–${MAX_CONSOLE_BATCH_TASKS} 的整数。`)
+  }
   return tasks.filter(task => task.state === 'pending').slice(0, count)
 }
 
@@ -63,7 +66,7 @@ export function assessConsoleConnection(reply: ConsoleReply): { ready: boolean; 
   }
   const batch = reply.batch
   if (batch !== null && batch !== undefined && (!batch || !['running', 'paused', 'completed', 'stopped'].includes(batch.state)
-    || !Array.isArray(batch.taskIds) || batch.taskIds.length < 1 || batch.taskIds.length > 5
+    || !Array.isArray(batch.taskIds) || batch.taskIds.length < 1 || batch.taskIds.length > MAX_CONSOLE_BATCH_TASKS
     || new Set(batch.taskIds).size !== batch.taskIds.length
     || !batch.taskIds.every(id => Number.isSafeInteger(id) && id > 0)
     || !Number.isInteger(batch.currentIndex) || batch.currentIndex < 0 || batch.currentIndex >= batch.taskIds.length

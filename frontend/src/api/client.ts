@@ -172,12 +172,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T
 }
 
-type QueryValue = string | number | boolean | null | undefined
+type QueryValue = string | number | boolean | null | undefined | readonly string[]
 
 function query(params: Record<string, QueryValue>): string {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
     if (value === null || value === undefined || value === '') continue
+    if (Array.isArray(value)) {
+      // Repeated params, not a comma-joined string: that is the shape
+      // FastAPI's `list[...]` reads, and it survives values containing commas.
+      for (const item of value) search.append(key, String(item))
+      continue
+    }
     search.set(key, String(value))
   }
   const qs = search.toString()
@@ -214,6 +220,8 @@ export interface JobFilters {
   min_score?: number
   verdict?: Verdict | ''
   status?: JobStatus | ''
+  /** A status group, e.g. every stage that still counts as 已投递. */
+  status_in?: readonly JobStatus[]
   keyword?: string
   analyzed?: boolean
   early_career_cleanup?: boolean

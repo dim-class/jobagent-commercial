@@ -82,6 +82,51 @@ def test_list_and_filter_jobs(client):
     assert facets["statuses"]["new"] == 3
 
 
+def test_status_in_groups_the_whole_post_application_pipeline(client):
+    """The 已投递 tab must not lose a job the moment it progresses.
+
+    Applying is a stage, not an endpoint. A job that got a reply or reached an
+    interview is still one the user applied to, so a single-status filter is
+    the wrong tool for answering "我投过哪些岗位".
+    """
+    applied = _create(client, company="投递公司").json()["job"]["id"]
+    replied = _create(client, company="回复公司").json()["job"]["id"]
+    interviewing = _create(client, company="面试公司").json()["job"]["id"]
+    skipped = _create(client, company="跳过公司").json()["job"]["id"]
+
+    # The workflow is a state machine, so each job walks the real path to its
+    # stage rather than jumping straight there.
+    for job_id, path in (
+        (applied, ["applied"]),
+        (replied, ["applied", "replied"]),
+        (interviewing, ["applied", "replied", "interview"]),
+        (skipped, ["skipped"]),
+    ):
+        for target in path:
+            response = client.patch(f"/api/jobs/{job_id}", json={"status": target})
+            assert response.status_code == 200, response.text
+
+    pipeline = ["applied", "replied", "interview", "offer", "rejected"]
+    grouped = client.get("/api/jobs", params=[("status_in", s) for s in pipeline]).json()
+    assert {item["id"] for item in grouped["items"]} == {applied, replied, interviewing}
+    assert grouped["total"] == 3
+
+    # A single status still narrows within that group, which is what the stage
+    # sub-filter does.
+    narrowed = client.get(
+        "/api/jobs",
+        params=[("status_in", s) for s in pipeline] + [("status", "replied")],
+    ).json()
+    assert [item["id"] for item in narrowed["items"]] == [replied]
+
+    # Facets ignore the status filter, so every tab keeps showing its real size
+    # once one of them is selected.
+    assert grouped["facets"]["statuses"]["skipped"] == 1
+
+    assert client.get("/api/jobs", params={"status_in": "skipped"}).json()["total"] == 1
+    assert client.get("/api/jobs").json()["total"] == 4
+
+
 def test_list_pagination(client):
     for i in range(5):
         _create(client, company=f"公司{i}")

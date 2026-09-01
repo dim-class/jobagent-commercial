@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 
 import { ApiError, api, type JobFilters } from '@/api/client'
 import { nextJobSelection } from '@/pages/jobSelection'
+import { transitionBlockedReason } from '@/pages/statusTransitions'
 import {
   Alert,
   Card,
@@ -21,6 +22,38 @@ import type {
   JobStatus,
   Verdict,
 } from '@/types'
+
+interface JobTab {
+  key: string
+  label: string
+  /** Undefined means "every status". Module-level so the reference is stable:
+   *  the list reloads on any change to `filters`, and a fresh array literal
+   *  each render would reload forever. */
+  statuses?: readonly JobStatus[]
+}
+
+/** The job library's top-level views.
+ *
+ * 已投递 groups the whole post-application pipeline on purpose. Applying is a
+ * stage, not an endpoint - a job that later got a reply or reached an
+ * interview is still one you applied to, and a tab that quietly dropped it
+ * would answer "我投过哪些岗位" wrongly the moment anything progressed.
+ */
+const JOB_TABS: readonly JobTab[] = [
+  { key: 'all', label: '全部' },
+  { key: 'open', label: '待处理', statuses: ['new', 'reviewed', 'saved'] },
+  { key: 'applied', label: '已投递', statuses: ['applied', 'replied', 'interview', 'offer', 'rejected'] },
+  { key: 'skipped', label: '已跳过', statuses: ['skipped'] },
+]
+
+/** The stages inside 已投递, shown only once more than one of them is in use. */
+const PIPELINE_STAGES: readonly { status: JobStatus; label: string }[] = [
+  { status: 'applied', label: '待回复' },
+  { status: 'replied', label: '已回复' },
+  { status: 'interview', label: '面试中' },
+  { status: 'offer', label: '已offer' },
+  { status: 'rejected', label: '已拒绝' },
+]
 
 const EMPTY_FORM: JobCreatePayload = {
   title: '',
@@ -110,6 +143,44 @@ export default function JobsPage() {
   }, [data])
 
   const cityOptions = useMemo(() => Object.keys(data?.facets.cities ?? {}), [data])
+
+  const activeTab = useMemo(() => {
+    const current = filters.status_in
+    if (!current?.length) return 'all'
+    const key = [...current].sort().join(',')
+    return JOB_TABS.find((tab) => tab.statuses && [...tab.statuses].sort().join(',') === key)?.key
+      ?? 'all'
+  }, [filters.status_in])
+
+  // Counted from the facets, which the backend deliberately computes without
+  // the status filter applied - so every tab keeps showing its real size once
+  // one of them is selected.
+  const tabCounts = useMemo(() => {
+    const statuses = data?.facets.statuses ?? {}
+    const counts: Record<string, number> = {
+      all: Object.values(statuses).reduce((sum, n) => sum + n, 0),
+    }
+    for (const tab of JOB_TABS) {
+      if (!tab.statuses) continue
+      counts[tab.key] = tab.statuses.reduce((sum, key) => sum + (statuses[key] ?? 0), 0)
+    }
+    return counts
+  }, [data])
+
+  /** The stages actually in use inside 已投递. One stage needs no sub-filter. */
+  const pipelineStages = useMemo(() => {
+    const statuses = data?.facets.statuses ?? {}
+    const used = PIPELINE_STAGES.filter((stage) => (statuses[stage.status] ?? 0) > 0)
+    return used.length > 1 ? used : []
+  }, [data])
+
+  function selectTab(tab: JobTab) {
+    setBatchPlan(null)
+    setSelectedJobIds(new Set())
+    // `status` is the stage sub-filter inside a tab; switching tabs drops it,
+    // otherwise 已投递 + 已跳过 would silently produce an empty list.
+    setFilters((prev) => ({ ...prev, status: undefined, status_in: tab.statuses }))
+  }
 
   function updateFilter<K extends keyof JobFilters>(key: K, value: JobFilters[K]) {
     setFilters((prev) => ({ ...prev, [key]: value }))
@@ -329,7 +400,7 @@ export default function JobsPage() {
           <h1>岗位库</h1>
           <p>
             共 {data?.total ?? 0} 个岗位
-            {filters.min_score || filters.city || filters.verdict || filters.status || filters.keyword
+            {filters.min_score || filters.city || filters.verdict || filters.status || filters.status_in || filters.keyword
               || filters.early_career_cleanup
               ? '（已筛选）'
               : ''}
@@ -430,26 +501,6 @@ export default function JobsPage() {
           </div>
 
           <div className="field">
-            <label htmlFor="f-status">状态</label>
-            <select
-              id="f-status"
-              value={filters.status ?? ''}
-              onChange={(e) => updateFilter('status', (e.target.value || undefined) as JobStatus)}
-            >
-              <option value="">全部</option>
-              <option value="new">待处理</option>
-              <option value="reviewed">已查看</option>
-              <option value="saved">已收藏</option>
-              <option value="skipped">已跳过</option>
-              <option value="applied">已投递</option>
-              <option value="replied">已回复</option>
-              <option value="interview">面试中</option>
-              <option value="offer">已offer</option>
-              <option value="rejected">已拒绝</option>
-            </select>
-          </div>
-
-          <div className="field">
             <label htmlFor="f-analyzed">分析状态</label>
             <select
               id="f-analyzed"
@@ -505,6 +556,46 @@ export default function JobsPage() {
       </Card>
 
       <Card title="岗位列表" sub={loading ? '加载中…' : `${jobs.length} 条`}>
+        <div className="tabs" role="tablist" aria-label="岗位分类">
+          {JOB_TABS.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              className="tab"
+              aria-selected={activeTab === tab.key}
+              onClick={() => selectTab(tab)}
+            >
+              {tab.label}
+              <span className="tab-count">{tabCounts[tab.key] ?? 0}</span>
+            </button>
+          ))}
+        </div>
+
+        {activeTab === 'applied' && pipelineStages.length ? (
+          <div className="chip-list mb-1">
+            <button
+              type="button"
+              className="btn-sm"
+              aria-pressed={!filters.status}
+              onClick={() => updateFilter('status', undefined)}
+            >
+              全部阶段
+            </button>
+            {pipelineStages.map((stage) => (
+              <button
+                key={stage.status}
+                type="button"
+                className="btn-sm"
+                aria-pressed={filters.status === stage.status}
+                onClick={() => updateFilter('status', stage.status)}
+              >
+                {stage.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
         {loading && jobs.length === 0 ? (
           <Loading />
         ) : jobs.length === 0 ? (
@@ -645,28 +736,27 @@ export default function JobsPage() {
                           >
                             高质量重分析
                           </button>
-                          {/* PATCH only calls the workflow when the target
-                              differs, so re-sending the current status returns
-                              200 and changes nothing - a click that can only
-                              look like it did nothing. Disable it instead. */}
-                          <button
-                            type="button"
-                            className="btn-sm"
-                            disabled={busy || job.status === 'saved'}
-                            title={job.status === 'saved' ? '该岗位已收藏' : undefined}
-                            onClick={() => void handleStatus(job, 'saved')}
-                          >
-                            收藏
-                          </button>
-                          <button
-                            type="button"
-                            className="btn-sm"
-                            disabled={busy || job.status === 'skipped'}
-                            title={job.status === 'skipped' ? '该岗位已跳过' : undefined}
-                            onClick={() => void handleStatus(job, 'skipped')}
-                          >
-                            跳过
-                          </button>
+                          {/* Two ways a status click can only disappoint:
+                              re-sending the status a job already has returns
+                              200 and changes nothing, and a transition the
+                              workflow forbids (跳过 on an applied job) returns
+                              422. Both look like "点了没反应", so the button is
+                              disabled with the reason on hover instead. */}
+                          {(['saved', 'skipped'] as const).map((target) => {
+                            const blocked = transitionBlockedReason(job.status, target)
+                            return (
+                              <button
+                                key={target}
+                                type="button"
+                                className="btn-sm"
+                                disabled={busy || blocked !== null}
+                                title={blocked ?? undefined}
+                                onClick={() => void handleStatus(job, target)}
+                              >
+                                {target === 'saved' ? '收藏' : '跳过'}
+                              </button>
+                            )
+                          })}
                           <button
                             type="button"
                             className="btn-sm"

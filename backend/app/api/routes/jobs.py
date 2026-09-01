@@ -144,6 +144,11 @@ def list_jobs(
     min_score: int | None = Query(default=None, ge=0, le=100, description="最低匹配分"),
     verdict: Verdict | None = Query(default=None),
     job_status: JobStatus | None = Query(default=None, alias="status"),
+    status_in: list[JobStatus] | None = Query(
+        default=None,
+        description="按一组状态筛选，可重复。「已投递」是一个阶段而不是终点，"
+        "投递之后的 replied/interview/offer/rejected 仍然是投过的岗位。",
+    ),
     keyword: str | None = Query(default=None, description="公司/职位/JD 关键词"),
     analyzed: bool | None = Query(default=None, description="是否已分析"),
     early_career_cleanup: bool = Query(
@@ -167,6 +172,8 @@ def list_jobs(
         stmt = stmt.where(or_(Job.city == city, Job.city == normalized))
     if job_status:
         stmt = stmt.where(Job.status == job_status)
+    if status_in:
+        stmt = stmt.where(Job.status.in_(status_in))
     if keyword:
         like = f"%{keyword.strip()}%"
         matches_keyword = or_(

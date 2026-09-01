@@ -566,3 +566,40 @@ details > summary .faint { display: inline; }
   .content { padding: 18px 16px 48px; }
   .table-wrap { margin: 0 -18px; }
 }
+
+/* ------------------------------------------------------------------ tabs */
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+}
+.tab {
+  appearance: none;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  margin-bottom: -1px;
+  padding: 6px 10px 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.tab:hover { color: var(--text); }
+.tab[aria-selected='true'] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+.tab-count { margin-left: 6px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text-faint); }
+.tab[aria-selected='true'] .tab-count { color: var(--accent); }
+.btn-sm[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}

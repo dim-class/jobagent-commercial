@@ -23,6 +23,15 @@ import type {
   Verdict,
 } from '@/types'
 
+/** One request covers the whole library.
+
+ * The backend already loads and sorts every matching row before slicing, so
+ * asking for all of them costs only serialization. Paging existed here as a
+ * default nobody chose, and it made 全选 quietly mean "page one" - which is
+ * exactly the bug that once reported 选中 0 个 while 18 jobs matched.
+ */
+const LIST_LIMIT = 2000
+
 interface JobTab {
   key: string
   label: string
@@ -100,7 +109,7 @@ export default function JobsPage() {
   const pendingSelectAll = useRef(false)
   const pendingSelectEarlyCareer = useRef(false)
 
-  const [filters, setFilters] = useState<JobFilters>({ sort: 'score', limit: 100 })
+  const [filters, setFilters] = useState<JobFilters>({ sort: 'score', limit: LIST_LIMIT })
   const [keywordInput, setKeywordInput] = useState('')
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false)
 
@@ -365,7 +374,7 @@ export default function JobsPage() {
     pendingSelectEarlyCareer.current = true
     setKeywordInput('')
     setShowAdvancedFilters(false)
-    setFilters({ sort: 'created_at', limit: 200, early_career_cleanup: true })
+    setFilters({ sort: 'created_at', limit: LIST_LIMIT, early_career_cleanup: true })
   }
 
   async function runEarlyCareerCleanup() {
@@ -544,7 +553,7 @@ export default function JobsPage() {
             className="btn-sm"
             onClick={() => {
               setKeywordInput('')
-              setFilters({ sort: 'score', limit: 100 })
+              setFilters({ sort: 'score', limit: LIST_LIMIT })
             }}
           >
             重置筛选
@@ -659,7 +668,8 @@ export default function JobsPage() {
             ) : <span className="small faint">可全选，也可逐项选择；选择本身不会执行任何操作。</span>}
             {listTruncated ? (
               <span className="small faint">
-                共 {data?.total} 个符合条件，当前只显示前 {jobs.length} 个；全选只覆盖显示出来的部分。
+                共 {data?.total} 个符合条件，超过单次上限 {LIST_LIMIT}，当前只显示前 {jobs.length} 个；
+                全选只覆盖显示出来的部分。可以先用筛选条件缩小范围。
               </span>
             ) : null}
           </div>

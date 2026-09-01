@@ -156,7 +156,13 @@ def list_jobs(
         description="只列出尚未决定、且被确定性规则识别为应届/校招/实习的历史岗位",
     ),
     sort: str = Query(default="score", pattern="^(score|created_at|company)$"),
-    limit: int = Query(default=50, ge=1, le=200),
+    # The cap is generous because the work is already O(all jobs): every
+    # matching row is loaded and sorted in Python before this slice, so a
+    # higher limit only adds serialization (~1.3 KB/row over loopback). A
+    # local-first job hunt reaching 2000 rows is the point at which paging
+    # earns its complexity - until then, showing the whole library is the
+    # honest default, and 全选 covering only page one was a real trap.
+    limit: int = Query(default=50, ge=1, le=2000),
     offset: int = Query(default=0, ge=0),
 ) -> JobListResponse:
     """Filterable job list. Score filtering uses each job's latest analysis."""

@@ -136,6 +136,17 @@ def test_list_pagination(client):
     assert page["offset"] == 2
 
 
+def test_the_list_can_return_the_whole_library_in_one_request(client):
+    """全选 must be able to mean "all of them".
+
+    The page used to request 100 rows, so 全选当前 100 个 quietly covered page
+    one of 306 - the same shape as the bug that once reported 选中 0 个 while 18
+    jobs matched. The cap is a real bound, not a default nobody chose.
+    """
+    assert client.get("/api/jobs", params={"limit": 2000}).status_code == 200
+    assert client.get("/api/jobs", params={"limit": 2001}).status_code == 422
+
+
 def test_early_career_cleanup_filter_reuses_deterministic_rule_and_only_returns_open_jobs(client):
     campus = _create(client, title="云平台工程师（校招）", company="校招公司").json()["job"]
     intern = _create(

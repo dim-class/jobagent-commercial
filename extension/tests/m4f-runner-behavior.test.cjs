@@ -2488,3 +2488,69 @@ test('imported_jobs increments only for a genuinely new import, never for a dupl
     .map((c) => c.message.state)
   assert.ok(states.some((s) => s.importedJobs === 1))
 })
+
+/** Which detail URLs the runner actually opened, in order. */
+function capturedUrls(env) {
+  return env.tabsSendMessageCalls
+    .filter(c => c.message.type === 'jobagent:capture-detail')
+    .map(c => c.message.canonicalUrl)
+}
+
+test('a job already in the library is skipped without spending a candidate slot', { skip: SKIP }, async () => {
+  // The candidate budget is the scarce resource, and a repeat search re-renders
+  // the same top results: 「云计算工程师」 attempted its whole allowance of 20
+  // and imported 0. Known postings must be stepped over *before* a slot is
+  // reserved, so the budget reaches jobs the library has not seen.
+  const stored = ['budget0', 'budget1', 'budget2']
+    .map(id => `https://www.zhipin.com/job_detail/${id}.html`)
+  const { router, calls } = makeFetchRouter(url =>
+    /\/api\/extension\/jobs\/known$/.test(url) ? jsonResponse({ known: stored }) : undefined)
+  const env = loadBackground({ fetchImpl: router, respond: budgetResponder })
+
+  assert.equal((await env.send({ type: 'jobagent:runner-start', taskId: 5, candidateCap: 3 })).ok, true)
+  await settle()
+
+  const opened = capturedUrls(env)
+  assert.equal(opened.length, 3, 'the full budget is still used')
+  for (const url of stored) assert.ok(!opened.includes(url), `already-stored ${url} was opened`)
+  assert.equal(calls.filter(c => /\/jobs\/import$/.test(c.url)).length, 3,
+    'every slot spent produced an import rather than a duplicate')
+})
+
+test('an unreachable known-jobs check never silently skips everything', { skip: SKIP }, async () => {
+  // Fail open: if the backend cannot answer, the run behaves exactly as it did
+  // before this optimisation rather than treating every job as known.
+  const { router } = makeFetchRouter(url =>
+    /\/api\/extension\/jobs\/known$/.test(url) ? Promise.reject(new Error('offline')) : undefined)
+  const env = loadBackground({ fetchImpl: router, respond: budgetResponder })
+
+  assert.equal((await env.send({ type: 'jobagent:runner-start', taskId: 5, candidateCap: 3 })).ok, true)
+  await settle()
+  assert.equal(capturedUrls(env).length, 3, 'the run proceeds normally')
+})
+
+test('only canonical query-stripped URLs reach the known-jobs check', { skip: SKIP }, async () => {
+  // BOSS puts `lid`/`securityId` in the query. Neither the database nor the
+  // logs ever see one, and neither may this request.
+  const { router, calls } = makeFetchRouter(url =>
+    /\/api\/extension\/jobs\/known$/.test(url) ? jsonResponse({ known: [] }) : undefined)
+  const env = loadBackground({
+    fetchImpl: router,
+    respond: msg => msg.type === 'jobagent:detect'
+      ? Promise.resolve({ ok: true, result: searchPage([candidate('tok', {
+          source_url: 'https://www.zhipin.com/job_detail/tok.html?lid=abc&securityId=def' })]) })
+      : budgetResponder(msg),
+  })
+
+  assert.equal((await env.send({ type: 'jobagent:runner-start', taskId: 5, candidateCap: 1 })).ok, true)
+  await settle()
+
+  const asked = calls.filter(c => /\/api\/extension\/jobs\/known$/.test(c.url))
+  assert.ok(asked.length, 'the check happened')
+  for (const call of asked) {
+    for (const url of JSON.parse(call.init.body).urls) {
+      assert.ok(!url.includes('?'), `a query string leaked: ${url}`)
+      assert.ok(!/lid|securityId/i.test(url), `a session token leaked: ${url}`)
+    }
+  }
+})

@@ -88,6 +88,26 @@ async function fetchJson<T>(path: string, init?: { method?: string; body?: unkno
   return payload as T
 }
 
+/** Which of these postings the library already holds.
+ *
+ * The candidate budget is small and fixed, and a repeat search re-renders the
+ * same top results, so without this the whole allowance goes on jobs already
+ * stored: 「云计算工程师」 attempted 20 and imported 0. Fails open - an
+ * unreachable backend returns an empty set, so the run behaves exactly as it
+ * did before rather than skipping everything.
+ */
+async function knownCandidateUrls(urls: string[]): Promise<Set<string>> {
+  if (!urls.length) return new Set()
+  try {
+    const result = await fetchJson<{ known?: string[] }>('/api/extension/jobs/known', {
+      method: 'POST', body: { urls },
+    })
+    return new Set(result.known ?? [])
+  } catch {
+    return new Set()
+  }
+}
+
 function fetchActive(): Promise<SessionOut | null> {
   return fetchJson<SessionOut | null>('/api/extension/sessions/active')
 }
@@ -1590,12 +1610,28 @@ async function processNewCandidates(
     if (!await rememberRenderedCandidates(taskId, runToken, detected.result)) return { status: 'stopped' }
 
     const handled = new Set(fresh.handledUrls)
+    // Asked once per selection pass, before any slot is spent. Only canonical,
+    // query-stripped detail URLs leave the worker, and only to loopback.
+    const alreadyStored = await knownCandidateUrls(
+      detected.result.candidates
+        .map((c) => canonicalizeJobDetailUrl(c.source_url))
+        .filter((url): url is string => Boolean(url) && !handled.has(url as string)),
+    )
     let nextIndex = -1
     let targetUrl: string | null = null
     let skippedEarlyCareer = false
+    let skippedKnown = 0
     for (let i = 0; i < detected.result.candidates.length; i++) {
       const c = detected.result.candidates[i]
       const canonical = canonicalizeJobDetailUrl(c.source_url)
+      // Already in the library: opening it would consume a candidate slot and
+      // import nothing. Marked handled so the scroll loop moves past it, which
+      // is what lets a repeat search reach jobs it has not seen.
+      if (canonical && !handled.has(canonical) && alreadyStored.has(canonical)) {
+        handled.add(canonical)
+        skippedKnown += 1
+        continue
+      }
       const compactTitle = (c.title || '').replace(/\s+/g, '')
       const earlyCareer = /应届|校招|校园招聘|毕业生|管培生|实习|(?:20)?2[4-9]届/.test(compactTitle)
       // Only the experienced-track policy may safely reject from a title.
@@ -1612,11 +1648,11 @@ async function processNewCandidates(
         break
       }
     }
-    if (skippedEarlyCareer) {
+    if (skippedEarlyCareer || skippedKnown) {
       const persisted = await persistPatch(taskId, runToken, {
         handledUrls: Array.from(handled),
         lastError: null,
-        lastAction: 'skipped_early_career_track',
+        lastAction: skippedEarlyCareer ? 'skipped_early_career_track' : 'skipped_already_stored',
       })
       if (!persisted) return { status: 'stopped' }
     }

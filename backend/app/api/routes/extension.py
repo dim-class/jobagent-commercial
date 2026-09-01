@@ -18,19 +18,25 @@ import ipaddress
 import json
 
 from fastapi import APIRouter, Body, Depends, Request
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import AppError
 from app.core.logging import get_logger, log_event
 from app.db.session import get_db
 from app.schemas.extension import (
+    KnownJobsRequest,
+    KnownJobsResponse,
     ImportRequest,
     ImportResponse,
     PreviewRequest,
     PreviewResponse,
     PreviewRow,
 )
+from app.models import Job
+from app.models.enums import JobSourceName
 from app.services import extension_intake
+from app.services.urls import boss_external_id, canonical_url
 from app.services.salary_ocr import recognize_salary, MAX_IMAGE_BYTES
 from starlette.concurrency import run_in_threadpool
 
@@ -95,6 +101,51 @@ def require_loopback(request: Request) -> None:
     if not address.is_loopback:
         log_event(logger, "extension.rejected_remote_client", client=host)
         raise ForbiddenError("扩展接口只接受本机请求。", detail={"client": host})
+
+
+@router.post("/jobs/known", response_model=KnownJobsResponse)
+def known_jobs(
+    request: Request,
+    payload: KnownJobsRequest = Body(...),
+    db: Session = Depends(get_db),
+) -> KnownJobsResponse:
+    """Which of these postings the library already has. Writes nothing.
+
+    A search run may only open a fixed number of job details, and that budget
+    was being spent re-opening postings already stored: a repeat search of
+    「云计算工程师」 attempted its whole 20-candidate allowance and imported
+    zero. Answering from the URL alone lets the runner skip those *before*
+    spending a slot - the `(source, external_id)` unique index already makes
+    the URL sufficient, so no page needs to be opened to find out.
+
+    Deliberately not filtered on data quality: a stored job whose salary is
+    still missing counts as known here. Re-collecting it is what the salary
+    backfill run is for, and letting it consume a search slot would put the
+    search back to work it has already done.
+    """
+    require_loopback(request)
+
+    external_ids: dict[str, str] = {}
+    for raw in payload.urls:
+        canonical = canonical_url(raw)
+        if not canonical:
+            continue
+        external_id = boss_external_id(canonical)
+        if external_id:
+            external_ids[external_id] = canonical
+
+    known: list[str] = []
+    if external_ids:
+        rows = db.scalars(
+            select(Job.external_id).where(
+                Job.source == JobSourceName.boss,
+                Job.external_id.in_(list(external_ids)),
+            )
+        ).all()
+        known = [external_ids[value] for value in rows if value in external_ids]
+
+    log_event(logger, "extension.known_checked", asked=len(payload.urls), known=len(known))
+    return KnownJobsResponse(known=known)
 
 
 @router.post("/jobs/preview", response_model=PreviewResponse)

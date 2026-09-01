@@ -7,6 +7,8 @@ all. Recruitment sites are browsed by the human, never by the backend.
 
 from __future__ import annotations
 
+import re
+
 from urllib.parse import urlsplit, urlunsplit
 
 #: hostname fragment -> ``Job.source`` value. Matches ``JobSourceName``.
@@ -76,6 +78,27 @@ def is_openable_posting_url(url: str | None, *, external_id: str | None) -> bool
         and bool(external_id)
         and parts.path == f"/job_detail/{external_id}.html"
     )
+
+
+def boss_external_id(url: str | None) -> str | None:
+    """The job id in a BOSS detail URL, or None if this is not one.
+
+    The inverse of the path rule `is_openable_posting_url` enforces, kept
+    beside it so the two cannot drift: exactly
+    ``https://www.zhipin.com/job_detail/<external_id>.html``. Anything else -
+    a search page, a live-preview page, another host - is not an identity.
+    """
+    canonical = canonical_url(url)
+    if not canonical:
+        return None
+    parts = urlsplit(canonical)
+    if parts.scheme != "https" or parts.netloc != "www.zhipin.com":
+        return None
+    # Character class taken from the ids actually stored, not guessed: 367 real
+    # BOSS ids are 28 chars over [A-Za-z0-9_~-]. Omitting `~` silently reported
+    # a stored job as new, which is the one thing this must never do.
+    match = re.fullmatch(r"/job_detail/([A-Za-z0-9_~-]{1,128})\.html", parts.path)
+    return match.group(1) if match else None
 
 
 def host_of(url: str | None) -> str:

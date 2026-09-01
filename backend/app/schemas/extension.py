@@ -46,6 +46,18 @@ class PreviewRequest(BaseModel):
     task_id: int | None = Field(default=None, gt=0)
 
 
+class KnownJobsRequest(BaseModel):
+    """Canonical detail URLs the runner is about to consider opening."""
+
+    urls: list[str] = Field(default_factory=list, max_length=200)
+
+
+class KnownJobsResponse(BaseModel):
+    """Which of them the library already holds. Nothing is written."""
+
+    known: list[str] = Field(default_factory=list)
+
+
 class PreviewRow(BaseModel):
     """What the backend can say about one candidate without saving it."""
 

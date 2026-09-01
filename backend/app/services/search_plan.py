@@ -20,7 +20,7 @@ from app.core.career_strategy import load_strategy
 from app.core.errors import ValidationError
 from app.models import JobSearchTask, SearchTaskRunStatus, TaskMode
 from app.services.boss_cities import city_id_for
-from app.services import direction_analysis
+from app.services import boss_search_filters, direction_analysis
 from app.services.job_matcher import get_active_resume
 from app.services.search_direction_ranking import (
     DirectionRanking,
@@ -88,13 +88,26 @@ def _resume_search_keyword(strategy: dict) -> str:
 
 
 def prepare_resume_searches(
-    db: Session, *, cities: list[str], target_count: int
+    db: Session,
+    *,
+    cities: list[str],
+    target_count: int,
+    filter_sets: list[dict[str, str]] | None = None,
 ) -> tuple[list[JobSearchTask], str, DirectionRanking]:
     """Create fresh pending tasks for the simplified multi-city workflow.
 
     Repeated searches intentionally create fresh task runs; canonical job
     intake remains the only job deduplication path.  This function performs
     no BOSS action and no AI call.
+
+    ``filter_sets`` are BOSS result-page filters the human already chose in
+    their own browser (see ``boss_search_filters``). Each set multiplies the
+    plan: 「云计算工程师 + 北京」 with two salary bands becomes two units, each
+    with its own candidate budget over a *different* top-of-list. That is the
+    only way to search deeper without touching the immutable per-task ceilings
+    - and because the batch ceiling does not move either, adding segments
+    necessarily costs directions. The trade is made here, visibly, rather than
+    by quietly overflowing the batch.
     """
     if isinstance(target_count, bool) or not isinstance(target_count, int) or not 1 <= target_count <= 20:
         raise ValidationError("岗位数量必须是 1–20 的整数。")
@@ -108,7 +121,15 @@ def prepare_resume_searches(
     # city x keyword, bounded by one comprehensive portfolio. One or two cities
     # can cover eight directions; four cities cover four directions each.
     strategy = load_strategy()
-    limit = min(MAX_SEARCH_DIRECTIONS, max(1, MAX_BATCH_TASKS // len(normalized_cities)))
+    segments: list[dict[str, str]] = [dict(f) for f in (filter_sets or [{}])] or [{}]
+    if len(segments) > MAX_BATCH_TASKS:
+        raise ValidationError(f"筛选分段最多 {MAX_BATCH_TASKS} 组。")
+    # Directions x cities x segments must still fit one batch, so segments come
+    # out of the direction budget rather than out of the ceiling.
+    limit = min(
+        MAX_SEARCH_DIRECTIONS,
+        max(1, MAX_BATCH_TASKS // (len(normalized_cities) * len(segments))),
+    )
     # Ranked by what this resume actually says and by what each direction has
     # historically surfaced - not by the order they happen to sit in the
     # strategy file. The AI view is used only if it is already cached: this
@@ -128,10 +149,20 @@ def prepare_resume_searches(
     ).all()
     run_number = len(previous) + 1
     tasks: list[JobSearchTask] = []
-    pairs = [(city, keyword) for city in normalized_cities for keyword in keywords]
-    for offset, (city, keyword) in enumerate(pairs):
+    pairs = [
+        (city, keyword, segment)
+        for city in normalized_cities
+        for keyword in keywords
+        for segment in segments
+    ]
+    for offset, (city, keyword, segment) in enumerate(pairs):
+        label = boss_search_filters.describe(segment) if segment else ""
         task = JobSearchTask(
-            name=f"{city} · {keyword} · 简历匹配搜索 #{run_number + offset}",
+            name=(
+                f"{city} · {keyword}"
+                + (f" · {label}" if segment else "")
+                + f" · 简历匹配搜索 #{run_number + offset}"
+            ),
             keywords=keyword,
             city=city,
             city_id=city_ids[city],
@@ -142,6 +173,7 @@ def prepare_resume_searches(
             max_candidates=target_count,
             notes=QUICK_SEARCH_NOTE,
             early_career_policy=early_career_policy,
+            search_filters_json=segment,
         )
         db.add(task)
         tasks.append(task)

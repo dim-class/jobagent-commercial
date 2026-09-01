@@ -25,6 +25,10 @@ NEW_COLUMNS = frozenset(
     {
         # 0021 snapshots the candidate-stage policy onto every task.
         "early_career_policy",
+        # 0023 carries the BOSS result-page filters a search unit was
+        # created with, so a repeat run can be narrowed to a different
+        # top-of-list instead of meeting the same one.
+        "search_filters_json",
         "city_id",
         "is_search_plan",
         "run_status",
@@ -74,7 +78,7 @@ def current_revision_of(path: Path) -> str:
 def test_the_upgrade_adds_exactly_the_search_plan_columns(v12_db):
     before = columns(v12_db, "job_search_tasks")
     assert upgrade(v12_db) == "upgraded"
-    assert current_revision_of(v12_db) == "0022_resume_direction_analyses"
+    assert current_revision_of(v12_db) == "0023_search_task_filters"
 
     after = columns(v12_db, "job_search_tasks")
     assert after - before == NEW_COLUMNS
@@ -158,5 +162,5 @@ def test_a_v03_database_reaches_the_search_plan_schema_in_one_go(v03_db):
     finally:
         engine.dispose()
 
-    assert current_revision_of(v03_db) == "0022_resume_direction_analyses"
+    assert current_revision_of(v03_db) == "0023_search_task_filters"
     assert NEW_COLUMNS <= columns(v03_db, "job_search_tasks")

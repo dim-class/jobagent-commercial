@@ -515,3 +515,48 @@ def test_resuming_a_run_resets_the_no_new_streak(db):
     # One more no-new round should not complete it yet (streak was reset).
     still_running = search_task_runner.record_round(db, task.id, observed=1, new=0, duplicate=1)
     assert still_running.run_status == SearchTaskRunStatus.running
+
+
+def test_filter_segments_multiply_the_plan_within_the_same_batch_ceiling(db, active_resume):
+    """Depth costs breadth, visibly.
+
+    Each segment gives a direction its own candidate budget over a different
+    top-of-list - the only way to search deeper without moving the per-task
+    ceilings. The batch ceiling does not move either, so segments necessarily
+    come out of the direction count rather than overflowing the batch.
+    """
+    from app.services.search_plan import MAX_BATCH_TASKS, prepare_resume_searches
+
+    plain, _, _ = prepare_resume_searches(db, cities=["北京", "杭州"], target_count=8)
+    assert len(plain) == MAX_BATCH_TASKS
+    assert all(task.search_filters_json == {} for task in plain)
+
+    segmented, _, _ = prepare_resume_searches(
+        db,
+        cities=["北京", "杭州"],
+        target_count=8,
+        filter_sets=[{"salary": "406"}, {"salary": "405"}],
+    )
+    assert len(segmented) <= MAX_BATCH_TASKS, "segments never overflow the batch"
+    directions = {task.keywords for task in segmented}
+    assert len(directions) == 4, "two segments halve the directions, 4 x 2 x 2 = 16"
+    assert len(segmented) == 16
+
+    # Every direction is searched once per city per segment, and each task
+    # carries its own filters so a later paste cannot rewrite it.
+    for segment in ({"salary": "406"}, {"salary": "405"}):
+        matching = [t for t in segmented if t.search_filters_json == segment]
+        assert len(matching) == 8, f"{segment} covers 4 directions x 2 cities"
+
+
+def test_a_segmented_task_searches_the_url_its_filters_describe(db, active_resume):
+    from app.services.boss_search_url import build_search_url
+    from app.services.search_plan import prepare_resume_searches
+
+    tasks, _, _ = prepare_resume_searches(
+        db, cities=["北京"], target_count=8, filter_sets=[{"salary": "406"}]
+    )
+    task = tasks[0]
+    url = build_search_url(task.city_id, task.keywords, task.search_filters_json)
+    assert "salary=406" in url
+    assert f"city={task.city_id}" in url

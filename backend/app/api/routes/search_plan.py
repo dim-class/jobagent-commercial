@@ -50,6 +50,7 @@ from app.schemas.search_plan import (
 )
 from app.services.boss_cities import BOSS_CITY_IDS
 from app.services import (
+    boss_search_filters,
     boss_search_url,
     bounded_matching,
     direction_analysis,
@@ -63,7 +64,9 @@ router = APIRouter(prefix="/api/tasks", tags=["search-plan"])
 
 def _task_out(task: JobSearchTask) -> SearchPlanTaskOut:
     search_url = (
-        boss_search_url.build_search_url(task.city_id, task.keywords)
+        boss_search_url.build_search_url(
+            task.city_id, task.keywords, task.search_filters_json or {}
+        )
         if task.city_id and task.keywords
         else None
     )
@@ -131,8 +134,14 @@ def quick_prepare(
 ) -> QuickSearchPrepareResponse:
     """Prepare one fresh, resume-bound bounded search. No BOSS or AI action."""
     require_loopback(request)
+    # Filters are parsed before anything is created: an unreadable URL must
+    # fail the whole request rather than leave a half-segmented batch behind.
+    filter_sets = [boss_search_filters.parse_filters(url) for url in payload.filter_urls]
     tasks, resume_name, ranking = search_plan.prepare_resume_searches(
-        db, cities=payload.cities, target_count=payload.target_count
+        db,
+        cities=payload.cities,
+        target_count=payload.target_count,
+        filter_sets=filter_sets or None,
     )
     return QuickSearchPrepareResponse(
         tasks=[_task_out(task) for task in tasks],

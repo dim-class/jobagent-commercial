@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from urllib.parse import urlencode
 
+from app.services.boss_search_filters import ALLOWED_FILTERS
+
 #: The exact origin CLAUDE.md's M4 policy and `extension/manifest.json`'s
 #: `content_scripts.matches` already require - never a subdomain, never a
 #: different scheme.
@@ -22,7 +24,9 @@ BOSS_ORIGIN = "https://www.zhipin.com"
 BOSS_SEARCH_PATH = "/web/geek/jobs"
 
 
-def build_search_url(city_id: str, keyword: str) -> str:
+def build_search_url(
+    city_id: str, keyword: str, filters: dict[str, str] | None = None
+) -> str:
     """One validated, same-origin BOSS results-page URL.
 
     ``city_id`` and ``keyword`` are taken as already-validated (city_id from
@@ -30,6 +34,19 @@ def build_search_url(city_id: str, keyword: str) -> str:
     this function only assembles them; it never validates a city name itself,
     so a caller skipping that step is a programming error, not a URL this
     function could quietly "fix".
+
+    ``filters`` narrows the search so a repeat run sees different postings at
+    the top - see ``boss_search_filters``. It must already have come through
+    ``parse_filters``, which is what bounds the keys and the value shapes; this
+    function re-checks the keys anyway, because it is the last place before a
+    URL the extension will navigate to. ``city`` and ``query`` can never be
+    overridden: they are written after the filters, so even a filter dict that
+    somehow carried them would not change the search the console displays.
     """
-    query = urlencode({"city": city_id, "query": keyword})
-    return f"{BOSS_ORIGIN}{BOSS_SEARCH_PATH}?{query}"
+    params: list[tuple[str, str]] = []
+    for key, value in sorted((filters or {}).items()):
+        if key in ALLOWED_FILTERS:
+            params.append((key, value))
+    params.append(("city", city_id))
+    params.append(("query", keyword))
+    return f"{BOSS_ORIGIN}{BOSS_SEARCH_PATH}?{urlencode(params)}"

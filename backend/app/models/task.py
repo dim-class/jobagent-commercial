@@ -71,6 +71,15 @@ class JobSearchTask(Base, TimestampMixin):
         String(16), nullable=False, default="exclude", server_default="exclude"
     )
 
+    #: BOSS result-page filters carried over from a URL the human built in
+    #: their own browser (`services/boss_search_filters.py`). They narrow the
+    #: search so a repeat run does not meet the same top results again. Stored
+    #: per task and never re-derived: a task must keep searching what it was
+    #: created to search, even if the console's paste box changes afterwards.
+    search_filters_json: Mapped[dict[str, str]] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
+
     # --- M4e/M4f: SearchPlan + bounded automatic runner (explicitly
     # authorized - see CLAUDE.md's M4e/M4f amendment). All nullable/defaulted
     # so every pre-existing manual task is unaffected - see

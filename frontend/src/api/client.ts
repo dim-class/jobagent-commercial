@@ -240,9 +240,10 @@ export const api = {
     request<{ created: number; skipped: number; total: number }>('/api/tasks/search-plan/generate', {
       method: 'POST', body: JSON.stringify({ cities: [city], keywords: [keyword] }),
     }),
-  prepareResumeSearch: (cities: string[], targetCount: number) =>
+  prepareResumeSearch: (cities: string[], targetCount: number, filterUrls: string[] = []) =>
     request<QuickSearchPrepareResponse>('/api/tasks/search-plan/quick-prepare', {
-      method: 'POST', body: JSON.stringify({ cities, target_count: targetCount }),
+      method: 'POST',
+      body: JSON.stringify({ cities, target_count: targetCount, filter_urls: filterUrls }),
     }),
   // Free: reading the plan never calls a model.
   getDirectionPlan: (signal?: AbortSignal) =>

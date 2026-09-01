@@ -13,6 +13,10 @@ function taskStatusLabel(task: SearchPlanTask): string {
   return task.state || '未开始'
 }
 
+/** A pasted block is split on the newline character itself; `trim()` on
+ *  each line removes the CR that a Windows clipboard leaves behind. */
+const NEWLINE = String.fromCharCode(10)
+
 export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number) => void }) {
   const [city, setCity] = useState('')
   const [cities, setCities] = useState<string[]>([])
@@ -37,6 +41,11 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
   const [aiPlan, setAiPlan] = useState<DirectionAnalysisPlan | null>(null)
   const [aiBusy, setAiBusy] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
+  //: BOSS search URLs the user built in their own browser. Each one narrows a
+  //: search so its top results differ - the only way to reach past the first
+  //: page without moving a ceiling. One per line.
+  const [filterUrls, setFilterUrls] = useState('')
+  const filterLines = filterUrls.split(NEWLINE).map(line => line.trim()).filter(Boolean)
   const [selected, setSelected] = useState<number | null>(null)
   const [connection, setConnection] = useState<ConsoleReply | null>(null)
   const [backendReady, setBackendReady] = useState(false)
@@ -197,7 +206,7 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     }
     admission.current = true; setBusy(true); setError(''); setMessage('')
     try {
-      const prepared = await api.prepareResumeSearch(cities, targetCount)
+      const prepared = await api.prepareResumeSearch(cities, targetCount, filterLines)
       const nextTasks = prepared.tasks
       if (!nextTasks.length) throw new Error('没有生成可执行的搜索任务。')
       const nextIds = new Set(nextTasks.map(row => row.id))
@@ -431,6 +440,28 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
         ) : null}
       </div>
     ) : null}
+
+    <div className="field mt-1">
+      <label htmlFor="filter-urls">搜索分段（可选，每行一个 BOSS 搜索链接）</label>
+      <textarea
+        id="filter-urls"
+        rows={3}
+        value={filterUrls}
+        placeholder={'https://www.zhipin.com/web/geek/jobs?city=101010100&salary=406&query=...'}
+        onChange={e => setFilterUrls(e.target.value)}
+      />
+      <p className="small faint">
+        BOSS 的结果按相关度排序且没有「最新发布」，所以同一个关键词每次都命中同一批岗位。
+        在你自己的浏览器里点好筛选（薪资、区域…），把地址栏粘进来，
+        每行会成为一个独立的搜索分段，各自拥有完整的候选名额。
+        只读取筛选参数；城市与岗位方向仍由上面的选择和简历排序决定。
+      </p>
+      {filterLines.length ? (
+        <p className="small faint">
+          {filterLines.length} 个分段 · 岗位方向会相应减少，总搜索单元数不变（上限 16）。
+        </p>
+      ) : null}
+    </div>
 
     {chosen.length ? (
       <div className="card-block mt-1">

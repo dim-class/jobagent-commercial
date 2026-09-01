@@ -19,6 +19,11 @@ class SearchPlanGenerateRequest(BaseModel):
 class QuickSearchPrepareRequest(BaseModel):
     cities: list[str] = Field(min_length=1, max_length=4)
     target_count: int = Field(ge=1, le=20, strict=True)
+    #: BOSS search-page URLs the human built in their own browser. Only the
+    #: whitelisted filter parameters are read; `city` and `query` are ignored,
+    #: because those come from the cities chosen here and from the résumé
+    #: ranking. Each URL becomes one segment, multiplying the plan.
+    filter_urls: list[str] = Field(default_factory=list, max_length=8)
 
 
 class MatchApprovalRequest(BaseModel):

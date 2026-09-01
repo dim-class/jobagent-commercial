@@ -141,7 +141,7 @@ def test_a_v09_database_really_looks_like_one(v09_db):
 
 def test_the_interview_foreign_key_becomes_cascade(v09_db):
     assert upgrade(v09_db) == "upgraded"
-    assert current_revision_of(v09_db) == "0022_resume_direction_analyses"
+    assert current_revision_of(v09_db) == "0023_search_task_filters"
 
     keys = foreign_keys(v09_db, "interview_processes")
     assert keys["applied_event_id"] == "CASCADE"
@@ -345,7 +345,7 @@ def test_a_v03_database_reaches_the_decision_schema_in_one_go(v03_db):
     finally:
         engine.dispose()
 
-    assert current_revision_of(v03_db) == "0022_resume_direction_analyses"
+    assert current_revision_of(v03_db) == "0023_search_task_filters"
     assert {"decision_profiles", "offer_assessments", "decision_snapshots"} <= tables(
         v03_db
     )

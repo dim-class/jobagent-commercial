@@ -1086,11 +1086,25 @@ other prohibition in this file stays in force, unchanged.
   approval only and is not reusable authority for another job.
 - The user must be shown all of the above **before** confirming. A confirmation
   the user could not read in full is not a confirmation.
-- **A final confirmation screen is shown again immediately before the attempt**,
-  displaying that same bound snapshot and the unknown/uncontrolled greeting
-  warning. Confirming once in a queue days earlier is not enough: the last thing
-  before the browser acts is a human looking at the exact job and resume and
-  accepting the unknown dynamic first greeting.
+- **A confirmation screen is shown immediately before the attempt**, displaying
+  the exact job, its canonical URL, the selected resume and the
+  unknown/uncontrolled greeting warning. Confirming once in a queue days earlier
+  is not enough: the last thing before the browser acts is a human looking at
+  the exact job and resume and accepting the unknown dynamic first greeting.
+
+  **Single-confirmation amendment (user authorized 2026-09-02).** This was
+  originally two screens - one to bind the snapshot, a second to re-read it and
+  execute. The second guarded against a *time gap*, which does not exist when
+  the two are seconds apart, and the re-reading it asked of a human is done far
+  more strictly by `validate` on the backend, which refuses a snapshot that no
+  longer matches the job, the resume or the loaded page's identity. One screen
+  may therefore both bind and execute, provided it displays everything above
+  before the human confirms.
+
+  Nothing else about the gate moves: the confirmation is still per job, still
+  requires the explicit acceptance checkbox, still authorizes exactly one
+  attempt, and is still consumed by that attempt whatever its outcome. There is
+  no confirmation that covers two jobs, and none that can be given in advance.
 - A confirmation authorizes **one attempt** and is consumed by that attempt,
   whatever its outcome.
 

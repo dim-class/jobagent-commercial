@@ -13,17 +13,32 @@ test('M6 accepts an unknown dynamic greeting per job and never asks for or prefi
   assert.match(page, /未知（由 BOSS 动态生成，JobAgent 无法预览或控制）/)
   assert.match(page, /我接受 BOSS 为这个岗位动态生成未知的首次招呼语/)
   assert.match(page, /AI 也不能代替你勾选确认/)
-  assert.match(page, /生成最终确认（不执行）/)
+  // One confirmation now both binds and executes (CLAUDE.md M6,
+  // single-confirmation amendment). What it must still do is show the exact
+  // job, its URL and the chosen resume before the human accepts.
+  assert.match(page, /确认并执行一次投递/)
+  assert.doesNotMatch(page, /生成最终确认/)
+  assert.match(page, /岗位链接/)
+  assert.match(page, /本次简历/)
+  // The confirmation stays impossible without an explicit resume AND the
+  // acceptance checkbox - merging the screens must not merge away either.
+  assert.match(page, /disabled=\{m6Busy \|\| !m6ResumeId \|\| !m6DynamicAccepted \|\| m6Attempted\}/)
   assert.match(client, /answers_source:\s*'boss_dynamic_unverified'/)
   assert.doesNotMatch(client, /answers_text:/)
 })
 
 test('the final user click sends only one approval id to the extension', () => {
-  assert.match(page, /consoleExtension\(\s*'execute-application'[\s\S]{0,180}m6Approval\.id/)
+  assert.match(page, /consoleExtension\(\s*'execute-application'[\s\S]{0,180}approval\.id/)
   assert.doesNotMatch(page, /consoleExtension\(\s*'execute-application'[\s\S]{0,220}(?:selected|jobIds|greeting_message)/)
   assert.match(page, /勿直接重试/)
   assert.match(page, /setM6Attempted\(true\)/)
-  assert.match(page, /m6Attempted \? '本确认已发出，不可重试'/)
+  // Tolerates the formatter breaking the ternary across lines - what is
+  // asserted is that a consumed confirmation says so and cannot be reused.
+  assert.match(page, /m6Attempted[\s\S]{0,60}'本确认已发出，不可重试'/)
+  // Binding and executing share one click, so a failure to bind - which
+  // dispatched nothing - must release the one-attempt latch rather than
+  // leaving the job permanently unconfirmable.
+  assert.match(page, /setM6Attempted\(false\)[\s\S]{0,120}Nothing was dispatched/)
 })
 
 test('an unknown M6 click result immediately offers the existing human mark-applied path', () => {

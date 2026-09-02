@@ -228,6 +228,9 @@ export interface JobFilters {
   keyword?: string
   analyzed?: boolean
   early_career_cleanup?: boolean
+  /** Keep only jobs asking for at most this many years. Unreadable
+   *  requirements are kept: "cannot be read" is not "asks for a lot". */
+  max_required_years?: number
   sort?: 'score' | 'created_at' | 'company'
   limit?: number
   offset?: number

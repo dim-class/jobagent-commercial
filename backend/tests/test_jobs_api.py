@@ -127,6 +127,63 @@ def test_status_in_groups_the_whole_post_application_pipeline(client):
     assert client.get("/api/jobs").json()["total"] == 4
 
 
+def test_max_required_years_filters_out_jobs_asking_for_more(client, db):
+    """2 years of experience against a library that is 30% 5-10年 jobs.
+
+    Those 122 postings produced 4 recommendations out of 118 analyses - the
+    single biggest waste of the analysis budget - so they need to be excludable
+    before anything is spent on them.
+    """
+    from app.models import Job
+    from app.models.enums import JobSourceName, JobStatus
+
+    def add(title: str, experience: str, external: str) -> int:
+        job = Job(
+            source=JobSourceName.boss,
+            external_id=external,
+            company=f"公司{external}",
+            title=title,
+            raw_description="负责云平台运维。" * 5,
+            normalized_description="负责云平台运维。" * 5,
+            content_hash=external.ljust(64, "0")[:64],
+            status=JobStatus.new,
+            experience_text=experience,
+        )
+        db.add(job)
+        db.commit()
+        return job.id
+
+    junior = add("云运维工程师", "1-3年", "j1")
+    mid = add("云平台工程师", "3-5年", "j2")
+    senior = add("架构师", "5-10年", "j3")
+    unlimited = add("运维工程师", "经验不限", "j4")
+    unknown = add("中间件工程师", "", "j5")
+
+    def ids(**params):
+        return {row["id"] for row in client.get("/api/jobs", params=params).json()["items"]}
+
+    assert ids() == {junior, mid, senior, unlimited, unknown}
+
+    # The bound is on the job's *minimum* requirement, and it is inclusive:
+    # 5-10年 asks for at least 5, so a limit of 5 still admits it.
+    assert senior in ids(max_required_years=5)
+
+    # 4 is the setting that matters here: it keeps 3-5年, which the data says
+    # is worth applying to (20% recommended), and drops 5-10年, which produced
+    # 4 recommendations out of 118 analyses.
+    within_four = ids(max_required_years=4)
+    assert senior not in within_four
+    assert {junior, mid, unlimited} <= within_four
+
+    # "Cannot be read" is not "asks for a lot": excluding it would treat
+    # missing data as a value, which this codebase refuses to do everywhere.
+    assert unknown in within_four
+    assert unknown in ids(max_required_years=0)
+
+    assert ids(max_required_years=2) == {junior, unlimited, unknown}
+    assert client.get("/api/jobs", params={"max_required_years": 21}).status_code == 422
+
+
 def test_list_pagination(client):
     for i in range(5):
         _create(client, company=f"公司{i}")

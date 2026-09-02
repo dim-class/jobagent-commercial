@@ -54,6 +54,7 @@ from app.services import (
 from app.services.application_cycles import effective_cycle
 from app.services.job_eligibility import classify_non_experienced_track
 from app.services.job_normalizer import normalize_city
+from app.services.scoring import extract_experience_requirement
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
@@ -155,6 +156,13 @@ def list_jobs(
         default=False,
         description="只列出尚未决定、且被确定性规则识别为应届/校招/实习的历史岗位",
     ),
+    max_required_years: int | None = Query(
+        default=None,
+        ge=0,
+        le=20,
+        description="只保留最低经验要求不超过该年数的岗位。"
+        "无法识别经验要求的岗位一律保留——「读不出来」不是「要求很高」。",
+    ),
     sort: str = Query(default="score", pattern="^(score|created_at|company)$"),
     # The cap is generous because the work is already O(all jobs): every
     # matching row is loaded and sorted in Python before this slice, so a
@@ -205,6 +213,23 @@ def list_jobs(
                 job.title, job.normalized_description
             ).eligible
         ]
+    if max_required_years is not None:
+        # Deterministic, free, and reusing the same extractor the scoring
+        # pipeline already trusts - there is no second definition of "how many
+        # years does this ask for".
+        #
+        # A job whose requirement cannot be read is kept. Excluding it would
+        # treat "unknown" as "too senior", which is the mistake this codebase
+        # avoids everywhere else: missing is not a value.
+        kept: list[tuple[Job, JobAnalysis | None]] = []
+        for job, analysis in rows:
+            requirement = extract_experience_requirement(
+                job.experience_text or "", job.normalized_description or ""
+            )
+            minimum = requirement.min_years
+            if minimum is None or requirement.unlimited or minimum <= max_required_years:
+                kept.append((job, analysis))
+        rows = kept
     if analyzed is not None:
         rows = [(j, a) for j, a in rows if (a is not None) == analyzed]
     if min_score is not None:

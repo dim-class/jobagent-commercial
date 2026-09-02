@@ -409,7 +409,7 @@ export default function JobsPage() {
           <h1>岗位库</h1>
           <p>
             共 {data?.total ?? 0} 个岗位
-            {filters.min_score || filters.city || filters.verdict || filters.status || filters.status_in || filters.keyword
+            {filters.min_score || filters.city || filters.verdict || filters.status || filters.status_in || filters.max_required_years || filters.keyword
               || filters.early_career_cleanup
               ? '（已筛选）'
               : ''}
@@ -506,6 +506,25 @@ export default function JobsPage() {
               <option value="apply">推荐投递</option>
               <option value="maybe">可以考虑</option>
               <option value="skip">不建议</option>
+            </select>
+          </div>
+
+          <div className="field">
+            <label htmlFor="f-years">经验要求</label>
+            <select
+              id="f-years"
+              value={filters.max_required_years ?? ''}
+              onChange={(e) =>
+                updateFilter(
+                  'max_required_years',
+                  e.target.value ? Number(e.target.value) : undefined,
+                )
+              }
+            >
+              <option value="">不限</option>
+              <option value="2">最多 2 年</option>
+              <option value="4">最多 4 年（保留 3-5 年，排除 5-10 年）</option>
+              <option value="6">最多 6 年</option>
             </select>
           </div>
 

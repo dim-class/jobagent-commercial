@@ -156,6 +156,16 @@ export default function ConsolePage() {
     }
   }
 
+  //: Free: a count over rows that already exist. No model call, no browser
+  //: work, nothing on a recruitment site.
+  const loadMissingSalaries = useCallback(async () => {
+    try {
+      setMissingSalaries((await api.getSalaryBackfillPlan()).salary_missing)
+    } catch {
+      setMissingSalaries(null)
+    }
+  }, [])
+
   const loadAttention = useCallback(async () => {
     setAttentionLoading(true)
     setAttentionError(null)
@@ -168,7 +178,11 @@ export default function ConsolePage() {
     } finally {
       setAttentionLoading(false)
     }
-  }, [])
+    // A finished search is exactly when this number changes, and it is the
+    // moment the user is looking at the page. Reading it at mount only meant
+    // the prompt showed a figure from before the search.
+    await loadMissingSalaries()
+  }, [loadMissingSalaries])
 
   const loadTasks = useCallback(async () => {
     setTasksLoading(true)
@@ -186,9 +200,6 @@ export default function ConsolePage() {
     void loadTasks()
     void loadAttention()
     api.listResumes().then(setResumes).catch(() => setResumes([]))
-    api.getSalaryBackfillPlan()
-      .then(plan => setMissingSalaries(plan.salary_missing))
-      .catch(() => setMissingSalaries(null))
   }, [loadTasks, loadAttention])
 
   useEffect(() => {
@@ -450,7 +461,8 @@ export default function ConsolePage() {
       {missingSalaries ? (
         <div className="row mb-1">
           <span className="small">
-            {missingSalaries} 个岗位缺少薪资（BOSS 用特殊字体渲染，抓取时读不到）。
+            {missingSalaries} 个岗位缺少薪资 —— 搜索时看到的是 BOSS 的特殊字体，
+            但岗位详情页上是可读的，补全会去那里取。
           </span>
           <button
             type="button"

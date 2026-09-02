@@ -24,6 +24,11 @@ from app.core.config import get_settings
 from app.db.session import get_db
 from app.models import JobStatus, Verdict
 from app.schemas.application import (
+    AppliedBackfillConfirmRequest,
+    AppliedBackfillConfirmResponse,
+    AppliedBackfillMatchOut,
+    AppliedBackfillPlanRequest,
+    AppliedBackfillPlanResponse,
     AttributeResumeRequest,
     ApplicationEventOut,
     ApplicationMetrics,
@@ -39,7 +44,12 @@ from app.schemas.application import (
     SKIP_REASONS,
     WorkflowResponse,
 )
-from app.services import application_metrics, application_queue, application_workflow
+from app.services import (
+    applied_backfill,
+    application_metrics,
+    application_queue,
+    application_workflow,
+)
 from app.services.application_queue import QueueFilters
 
 queue_router = APIRouter(prefix="/api/application-queue", tags=["application-queue"])
@@ -281,3 +291,55 @@ def record_rejection(
     return _to_response(
         application_workflow.record_rejection(db, job_id, payload or RejectRequest())
     )
+
+
+def _match_out(match: applied_backfill.BackfillMatch) -> AppliedBackfillMatchOut:
+    return AppliedBackfillMatchOut(
+        job_id=match.job_id,
+        company=match.company,
+        title=match.title,
+        status=match.status,
+        title_matched=match.title_matched,
+        can_apply=match.can_apply,
+        reason=match.reason,
+    )
+
+
+@queue_router.post("/applied-backfill/plan", response_model=AppliedBackfillPlanResponse)
+def applied_backfill_plan(
+    payload: AppliedBackfillPlanRequest = Body(...),
+    db: Session = Depends(get_db),
+) -> AppliedBackfillPlanResponse:
+    """Which already-stored jobs appear in the pasted list. Writes nothing.
+
+    JobAgent never opens or reads a recruitment site here: the text is present
+    because a human copied it.
+    """
+    result = applied_backfill.plan(db, payload.text)
+    return AppliedBackfillPlanResponse(
+        confident=[_match_out(m) for m in result.confident],
+        needs_review=[_match_out(m) for m in result.needs_review],
+        already_applied=[_match_out(m) for m in result.already_applied],
+        notes=result.notes,
+    )
+
+
+@queue_router.post("/applied-backfill/confirm", response_model=AppliedBackfillConfirmResponse)
+def applied_backfill_confirm(
+    payload: AppliedBackfillConfirmRequest = Body(...),
+    db: Session = Depends(get_db),
+) -> AppliedBackfillConfirmResponse:
+    """Record 已投递 for exactly the jobs the human selected and confirmed.
+
+    Recording an application the human already made is not applying: nothing
+    here submits anything, and every job still goes through
+    ``application_workflow.mark_applied`` with its own event.
+    """
+    result = applied_backfill.confirm(
+        db,
+        job_ids=payload.job_ids,
+        confirmed=payload.confirmed,
+        expected_count=payload.expected_count,
+        note=payload.note,
+    )
+    return AppliedBackfillConfirmResponse(**result)

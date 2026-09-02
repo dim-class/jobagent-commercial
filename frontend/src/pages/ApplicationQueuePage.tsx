@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
+import AppliedBackfillPanel from '@/pages/AppliedBackfillPanel'
 import { ApiError, api, type QueueFilters } from '@/api/client'
 import { consoleExtension } from '@/pages/consoleExtension'
 import {
@@ -55,6 +56,8 @@ export default function ApplicationQueuePage() {
   const [selected, setSelected] = useState<Set<number>>(new Set())
 
   const [filters, setFilters] = useState<QueueFilters>({ sort: 'recommended', limit: 100 })
+  //: Off by default: this records real actions, so it is opened deliberately.
+  const [showBackfill, setShowBackfill] = useState(false)
   const [keywordInput, setKeywordInput] = useState('')
 
   // Confirmation dialogs: applying and skipping are real decisions.
@@ -363,6 +366,24 @@ export default function ApplicationQueuePage() {
           </span>
         </section>
       </div>
+
+      <div className="row mb-1">
+        <button
+          type="button"
+          className="btn-sm"
+          aria-expanded={showBackfill}
+          onClick={() => setShowBackfill(current => !current)}
+        >
+          {showBackfill ? '收起补录' : '补录已投递（粘贴 BOSS 沟通列表）'}
+        </button>
+        <span className="small faint">
+          在 BOSS 上自己投递过、但这里没记录的岗位，可以在此补上。
+        </span>
+      </div>
+
+      {showBackfill ? (
+        <AppliedBackfillPanel onDone={() => { setShowBackfill(false); void load(filters) }} />
+      ) : null}
 
       <Card title="筛选">
         <div className="filters">

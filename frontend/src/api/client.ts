@@ -18,6 +18,8 @@ import type {
   ApplicationEventOut,
   ApplicationApprovalOut,
   ApplicationMetrics,
+  AppliedBackfillPlan,
+  AppliedBackfillResult,
   ConversationActionOut,
   ConversationDetailOut,
   BrowserStartResponse,
@@ -406,6 +408,17 @@ export const api = {
   applicationQueue: (filters: QueueFilters = {}) =>
     request<QueueResponse>(`/api/application-queue${query(filters)}`),
   applicationMetrics: () => request<ApplicationMetrics>('/api/application-queue/metrics'),
+  // Reads which stored jobs appear in a list the user pasted. Records nothing.
+  planAppliedBackfill: (text: string) =>
+    request<AppliedBackfillPlan>('/api/application-queue/applied-backfill/plan', {
+      method: 'POST', body: JSON.stringify({ text }),
+    }),
+  // The one call that records. `expectedCount` is what the dialog showed.
+  confirmAppliedBackfill: (jobIds: number[], expectedCount: number) =>
+    request<AppliedBackfillResult>('/api/application-queue/applied-backfill/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ job_ids: jobIds, confirmed: true, expected_count: expectedCount }),
+    }),
   applicationEvents: (jobId: number) =>
     request<ApplicationEventOut[]>(`/api/jobs/${jobId}/application-events`),
   createApplicationApproval: (jobId: number, resumeId: number) =>

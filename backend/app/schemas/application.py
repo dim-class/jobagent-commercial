@@ -352,3 +352,44 @@ class ApplicationMetrics(BaseModel):
     by_city: dict[str, dict[str, int]] = Field(default_factory=dict)
     by_role_family: dict[str, dict[str, int]] = Field(default_factory=dict)
     by_source: dict[str, dict[str, int]] = Field(default_factory=dict)
+
+
+class AppliedBackfillPlanRequest(BaseModel):
+    """Text the human copied from BOSS's own 沟通过的职位 list."""
+
+    text: str = Field(min_length=1, max_length=200_000)
+
+
+class AppliedBackfillMatchOut(BaseModel):
+    job_id: int
+    company: str
+    title: str
+    status: str
+    title_matched: bool
+    can_apply: bool
+    reason: str = ""
+
+
+class AppliedBackfillPlanResponse(BaseModel):
+    """Which stored jobs appear in that text. Reading it records nothing."""
+
+    confident: list[AppliedBackfillMatchOut] = Field(default_factory=list)
+    needs_review: list[AppliedBackfillMatchOut] = Field(default_factory=list)
+    already_applied: list[AppliedBackfillMatchOut] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class AppliedBackfillConfirmRequest(BaseModel):
+    """One explicit confirmation, carrying the count the human was shown."""
+
+    job_ids: list[int] = Field(min_length=1, max_length=500)
+    confirmed: bool = Field(default=False)
+    #: What the dialog displayed. A mismatch cancels rather than recording a
+    #: different set than the one that was read.
+    expected_count: int = Field(ge=1)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class AppliedBackfillConfirmResponse(BaseModel):
+    recorded: list[int] = Field(default_factory=list)
+    skipped: list[dict] = Field(default_factory=list)

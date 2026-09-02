@@ -229,6 +229,46 @@ read `applied -> status_reset -> applied`.
 no bulk version: "applied" describes a real action the user took on a
 recruitment platform. JobAgent still submits nothing and messages no one.
 
+#### Batch back-recording of 已投递 (user authorized 2026-09-02)
+
+The user's authorization, verbatim: *allow batch back-recording of the 已投递
+status for jobs **already in the library**, behind one explicit confirmation
+displaying the exact count; batch execution of applications remains forbidden,
+an AI verdict may still never write a human status, and a link or entry that
+matches nothing may never create a job.*
+
+This supersedes only the "no bulk version" clause above, and only for
+*recording*. The distinction is the whole point: **executing** an application is
+an action JobAgent takes on a recruitment site, and stays per-job and forbidden
+in bulk (M6). **Recording** describes applications the human already made
+themselves, and refusing to record them in bulk does not prevent anything - it
+just leaves the funnel, the resume attribution and the 已投递 view wrong. A day
+of manual applying was producing exactly that.
+
+`services/applied_backfill.py` is the only implementation. Its rules:
+
+- **the site is never touched.** The text arrives because a human selected it
+  in their own browser and copied it, exactly like Quick Capture (v0.3). No tab
+  is opened, no conversation is clicked, no request is made. This is
+  deliberately *more* restrictive than the suspended M7 scan and re-enables no
+  part of it;
+- **matching runs backwards.** It does not parse BOSS's layout - that would be
+  guessing at an undocumented format, and a layout change would become silently
+  wrong records. It asks which *already stored* jobs appear in the pasted text,
+  so an entry with no stored job simply does not appear;
+- **a company-only hit is never pre-selected.** Several roles at one company is
+  normal, and the wrong pick records an application that did not happen;
+- **the count is part of the confirmation.** `expected_count` must equal the
+  number of jobs actually being recorded, so a selection that moved between
+  reading the dialog and pressing the button cancels rather than recording a
+  different set;
+- **every job still goes through `application_workflow.mark_applied`** with its
+  own `confirmed=true` and its own event. There is no second status-writing
+  path, a forbidden transition (a skipped job) is reported rather than forced,
+  and one bad row never loses the rest;
+- nothing here submits, greets, favourites or messages, and no AI call is
+  involved at any point.
+
 The queue itself is **derived** (Job + latest JobAnalysis + latest event), not
 stored - so a re-analysis or a status change is reflected immediately and there
 is no second table to drift. Eligibility keys off the verdict, not a score
@@ -1413,6 +1453,9 @@ Unique indexes that matter: `jobs.content_hash`, `(jobs.source, external_id)`,
   and point the user at Quick Capture - do not work around it.
 - Never turn clipboard reading into background monitoring: explicit click only.
 - Never derive a human status from an AI verdict, and never bulk-apply.
+  Batch *recording* of applications the human already made is a different
+  act and is allowed under the 2026-09-02 amendment above; batch
+  *execution* stays forbidden, and no paste may ever create a job.
 - Never let analytics write the career strategy on its own, and never
   present a small sample as a finding. Correlation is not causation, and a
   cohort of three is not evidence.

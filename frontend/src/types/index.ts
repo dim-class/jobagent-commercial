@@ -2308,3 +2308,25 @@ export interface SalaryBackfillRun {
   updated_at: string
   items: (SalaryBackfillPlanItem & { position: number; state: string; reason: string | null })[]
 }
+
+export interface AppliedBackfillMatch {
+  job_id: number
+  company: string
+  title: string
+  status: JobStatus
+  title_matched: boolean
+  can_apply: boolean
+  reason: string
+}
+
+export interface AppliedBackfillPlan {
+  confident: AppliedBackfillMatch[]
+  needs_review: AppliedBackfillMatch[]
+  already_applied: AppliedBackfillMatch[]
+  notes: string[]
+}
+
+export interface AppliedBackfillResult {
+  recorded: number[]
+  skipped: { job_id: number; error: string }[]
+}

@@ -49,4 +49,8 @@ def build_search_url(
             params.append((key, value))
     params.append(("city", city_id))
     params.append(("query", keyword))
-    return f"{BOSS_ORIGIN}{BOSS_SEARCH_PATH}?{urlencode(params)}"
+    # A comma stays a comma: BOSS writes multi-value filters as
+    # `experience=104,101` and the generated URL should have the shape the
+    # site produces, not a percent-encoded variant of it. Nothing else is
+    # exempted - the keyword still gets fully encoded.
+    return f"{BOSS_ORIGIN}{BOSS_SEARCH_PATH}?{urlencode(params, safe=',')}"

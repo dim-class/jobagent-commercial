@@ -77,3 +77,27 @@ def test_the_label_names_parameters_and_never_invents_their_meaning():
     saying so would be a guess the user could not check."""
     assert describe({"salary": "406"}) == "salary=406"
     assert describe({}) == "无附加筛选"
+
+
+MULTI = "https://www.zhipin.com/web/geek/jobs?city=101010100&experience=104,101"
+
+
+def test_a_multi_value_filter_survives_the_round_trip():
+    """BOSS writes several selected bands as one comma-separated value."""
+    assert parse_filters(MULTI) == {"experience": "104,101"}
+
+
+def test_a_comma_stays_a_comma_in_the_generated_url():
+    """The URL handed to the extension should have the shape the site itself
+    produces, not a percent-encoded variant of it."""
+    url = build_search_url("101010100", "云计算工程师", parse_filters(MULTI))
+    assert "experience=104,101" in url
+    assert "%2C" not in url
+    # The keyword is still encoded - only the comma is exempted.
+    assert "query=%E4%BA%91" in url
+
+
+def test_a_comma_cannot_smuggle_anything_past_the_value_check():
+    for bad in ("104,abc", "104,,101", "104, 101", ",104", "104,"):
+        with pytest.raises(ValidationError):
+            parse_filters(f"https://www.zhipin.com/web/geek/jobs?experience={bad}")

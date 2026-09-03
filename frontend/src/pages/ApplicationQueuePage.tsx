@@ -82,6 +82,10 @@ export default function ApplicationQueuePage() {
   //: banner behind the modal, so the only thing visible was a button that
   //: had turned itself off.
   const [m6Error, setM6Error] = useState<string | null>(null)
+  //: True when the page is running a content script from an extension
+  //: build that no longer exists - the normal state right after reloading
+  //: the extension, and curable only by reloading this page.
+  const [m6StaleBridge, setM6StaleBridge] = useState(false)
 
   const load = useCallback(async (active: QueueFilters) => {
     setLoading(true)
@@ -216,6 +220,7 @@ export default function ApplicationQueuePage() {
   async function confirmAndExecuteM6() {
     if (!m6Target || !m6ResumeId || !m6DynamicAccepted || m6Attempted) return
     setM6Error(null)
+    setM6StaleBridge(false)
     setM6Attempted(true) // One confirmation can dispatch at most one command.
     setM6Busy(true)
     let approval: ApplicationApprovalOut
@@ -248,7 +253,12 @@ export default function ApplicationQueuePage() {
     )
     try {
       const reply = await pending
-      if (!reply.ok) throw new Error(reply.error || '扩展未确认执行结果')
+      if (!reply.ok) {
+        if (reply.code === 'extension_context_unavailable' || reply.code === 'worker_unavailable') {
+          setM6StaleBridge(true)
+        }
+        throw new Error(reply.error || '扩展未确认执行结果')
+      }
       const attemptedJob = m6Target
       const attemptedResumeId = approval.resume_id
       setFeedback({
@@ -829,6 +839,14 @@ export default function ApplicationQueuePage() {
                 <>
                   <br />
                   这次没有点击任何按钮，本确认也没有被消耗。关闭本窗口后可以重新确认一次。
+                </>
+              ) : null}
+              {m6StaleBridge ? (
+                <>
+                  <br />
+                  <button type="button" className="btn-sm mt-1" onClick={() => window.location.reload()}>
+                    刷新本页
+                  </button>
                 </>
               ) : null}
             </Alert>

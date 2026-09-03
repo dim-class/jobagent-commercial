@@ -2656,9 +2656,20 @@ function isM6CanonicalUrl(raw, externalId) {
 /** The tab as it is *now*, or undefined if it is gone. */
 /** How long to let BOSS render its chat composer before typing the greeting.
  *
- * One wait, not a poll: if the composer is not there by now, the greeting is
- * skipped and reported. The click has already happened and is not retried. */
-const M6_COMPOSER_WAIT_MS = 1500;
+ * A bounded stabilization wait with a termination counter, not a poll: BOSS's
+ * chat panel renders at visibly different speeds - three live runs on three
+ * jobs produced `sent`, `no_send_control` and `no_composer` with an identical
+ * fixed wait, and the panel was plainly on screen by the time each was
+ * reported. The attempt count and interval are constants here so the ceiling
+ * is readable: at most `M6_COMPOSER_ATTEMPTS` tries, and that is the end of it.
+ *
+ * Only `no_composer` is retried, and only because it is the one status that
+ * guarantees nothing was typed. Every other outcome - sent, box not empty, no
+ * send control, text rejected - stops immediately: re-running any of those
+ * risks a second message, which is the one thing this must never do. */
+const M6_COMPOSER_WAIT_MS = 1200;
+const M6_COMPOSER_RETRY_MS = 700;
+const M6_COMPOSER_ATTEMPTS = 5;
 async function m6Tab(tabId) {
     try {
         return await chrome.tabs.get(tabId);
@@ -2814,19 +2825,30 @@ async function executeM6Application(approvalId, source) {
             // One bounded wait for the composer to render, then one attempt. No
             // polling loop, no second try.
             await new Promise((resolve) => setTimeout(resolve, M6_COMPOSER_WAIT_MS));
-            const alive = await verifyRunnerTab(tabId);
-            if (!alive.ok) {
-                detail = 'clicked_greeting_skipped:foreground_lost';
-            }
-            else {
+            let status = 'greeting_unavailable';
+            for (let attempt = 0; attempt < M6_COMPOSER_ATTEMPTS; attempt++) {
+                // Re-checked every time round: losing the foreground mid-wait must
+                // stop this, not be noticed only at the end.
+                const alive = await verifyRunnerTab(tabId);
+                if (!alive.ok) {
+                    status = 'foreground_lost';
+                    break;
+                }
                 const greeted = await askTab(tabId, {
                     type: 'jobagent:m6-greeting', greeting: approval.answers_text,
                 });
-                const status = greeted.ok && greeted.result ? greeted.result.status : 'greeting_unavailable';
-                detail = status === 'sent'
-                    ? 'clicked_and_greeted_site_result_unverified'
-                    : `clicked_greeting_skipped:${status}`;
+                status = greeted.ok && greeted.result ? greeted.result.status : 'greeting_unavailable';
+                // `no_composer` is the only status that proves nothing was typed, so
+                // it is the only one worth waiting out. Anything else is final.
+                if (status !== 'no_composer')
+                    break;
+                if (attempt < M6_COMPOSER_ATTEMPTS - 1) {
+                    await new Promise((resolve) => setTimeout(resolve, M6_COMPOSER_RETRY_MS));
+                }
             }
+            detail = status === 'sent'
+                ? 'clicked_and_greeted_site_result_unverified'
+                : `clicked_greeting_skipped:${status}`;
         }
         // No live success-state fixture exists yet. A click/greeting is therefore
         // always recorded as unknown, never guessed into Job.status=applied.

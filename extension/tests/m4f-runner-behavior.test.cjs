@@ -2645,3 +2645,84 @@ test('M6 refuses a tab that settles on a different page, and never clicks', asyn
     String(c.message.type).startsWith('jobagent:m6-')).length, 0, 'nothing was asked of the page')
   assert.equal(calls.filter(c => c.url.endsWith('/begin')).length, 0, 'the attempt was never claimed')
 })
+
+/** One M6 run whose greeting attempts return `statuses` in order. */
+function m6GreetingEnv(statuses) {
+  const detailUrl = 'https://www.zhipin.com/job_detail/m6greet.html'
+  const approval = {
+    id: 31, job_id: 9, company: '公司', title: '云平台工程师', canonical_url: detailUrl,
+    external_id: 'm6greet', resume_id: 3,
+    answers_text: '您好，我有近2年云基础设施经验。',
+    answers_hash: 'a'.repeat(64), answers_source: 'boss_typed_greeting', state: 'pending',
+  }
+  const outcomes = []
+  const { router, calls } = makeFetchRouter((url, init) => {
+    const method = (init && init.method) || 'GET'
+    if (url.endsWith('/api/application-approvals/31') && method === 'GET') return jsonResponse(approval)
+    if (url.endsWith('/api/application-approvals/31/validate')) return jsonResponse({ ok: true, approval })
+    if (url.endsWith('/api/application-approvals/31/begin')) return jsonResponse({ ...approval, state: 'executing' })
+    if (url.endsWith('/api/application-approvals/31/outcome')) {
+      outcomes.push(JSON.parse(init.body))
+      return jsonResponse({ ...approval, state: 'consumed', outcome: 'unknown' })
+    }
+    return undefined
+  })
+  const consoleTab = { id: 8, windowId: 2, url: 'http://127.0.0.1:5173/#/queue', active: true }
+  let greetingCalls = 0
+  const env = loadBackground({
+    fetchImpl: router,
+    consoleTab,
+    tab: { url: detailUrl, active: false },
+    respond: msg => {
+      if (msg.type === 'jobagent:m6-preflight') return Promise.resolve({ ok: true, result: {
+        status: 'ok', observed_url: detailUrl, observed_external_id: 'm6greet' } })
+      if (msg.type === 'jobagent:m6-execute') return Promise.resolve({ ok: true, result: {
+        status: 'clicked', observed_url: detailUrl, observed_external_id: 'm6greet' } })
+      if (msg.type === 'jobagent:m6-greeting') {
+        const status = statuses[Math.min(greetingCalls, statuses.length - 1)]
+        greetingCalls += 1
+        return Promise.resolve({ ok: true, result: { status } })
+      }
+      return Promise.resolve({ ok: false })
+    },
+  })
+  return { env, calls, outcomes, greetings: () => greetingCalls }
+}
+
+test('a composer that renders late is waited out, and the greeting still goes', { skip: SKIP }, async () => {
+  // Three live runs on three jobs produced three different outcomes with one
+  // fixed wait, and the panel was plainly on screen by the time each was
+  // reported - the panel simply renders at different speeds.
+  const h = m6GreetingEnv(['no_composer', 'no_composer', 'sent'])
+  const reply = await h.env.send(
+    { type: 'jobagent:console-command', action: 'execute-application', approvalId: 31 },
+    { tab: { id: 8 }, frameId: 0, url: 'http://127.0.0.1:5173/#/queue' },
+  )
+  assert.equal(reply.ok, true)
+  assert.equal(h.greetings(), 3, 'it waited rather than giving up on the first miss')
+  assert.equal(h.outcomes.at(-1).detail, 'clicked_and_greeted_site_result_unverified')
+})
+
+test('the wait is bounded and reports the miss rather than trying forever', { skip: SKIP }, async () => {
+  const h = m6GreetingEnv(['no_composer'])
+  await h.env.send(
+    { type: 'jobagent:console-command', action: 'execute-application', approvalId: 31 },
+    { tab: { id: 8 }, frameId: 0, url: 'http://127.0.0.1:5173/#/queue' },
+  )
+  assert.equal(h.greetings(), 5, 'exactly the declared attempt ceiling')
+  assert.equal(h.outcomes.at(-1).detail, 'clicked_greeting_skipped:no_composer')
+})
+
+for (const status of ['sent', 'input_not_empty', 'no_send_control', 'input_rejected']) {
+  test(`'${status}' is final and is never retried`, { skip: SKIP }, async () => {
+    // Only `no_composer` proves nothing was typed. Re-running any other status
+    // risks a second message, which is the one thing this must never do -
+    // `input_not_empty` most of all, since that is BOSS having greeted already.
+    const h = m6GreetingEnv([status])
+    await h.env.send(
+      { type: 'jobagent:console-command', action: 'execute-application', approvalId: 31 },
+      { tab: { id: 8 }, frameId: 0, url: 'http://127.0.0.1:5173/#/queue' },
+    )
+    assert.equal(h.greetings(), 1, `${status} must be asked exactly once`)
+  })
+}

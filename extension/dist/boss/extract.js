@@ -1284,6 +1284,50 @@ var BossExtract = (function () {
         }
         return { status: 'no_send_control' };
     }
+    /** Why the composer could not be resolved, as page *shape* only.
+     *
+     * Three live runs failed three different ways with the same code, so the
+     * remaining question is what these pages actually contain - and answering it
+     * by guessing has already cost several attempts. This reports counts, tag
+     * names and class names: enough to tell an iframe from a contenteditable
+     * from a differently-labelled send control, and nothing else. No text
+     * content, no URLs, no attribute values beyond the class list - a chat panel
+     * is full of a real person's messages and none of that may leave the page.
+     */
+    function greetingDiagnostic(doc) {
+        const view = doc.defaultView;
+        const visible = (node) => {
+            const rect = node.getBoundingClientRect();
+            return rect.width >= 8 && rect.height >= 8;
+        };
+        const textareas = Array.from(doc.querySelectorAll('textarea'));
+        const editable = Array.from(doc.querySelectorAll('[contenteditable="true"]'));
+        // Origins only: an iframe's full URL can carry a session token.
+        const frames = Array.from(doc.querySelectorAll('iframe')).map((frame) => {
+            const src = frame.getAttribute('src') || '';
+            try {
+                return src ? new URL(src, doc.location.href).host : 'srcless';
+            }
+            catch {
+                return 'bad';
+            }
+        });
+        const wanted = BossSelectors.GREETING_SEND_TEXT;
+        const sends = Array.from(doc.querySelectorAll('button,div,span,a'))
+            .filter((node) => wanted.some((label) => text(node) === label))
+            .map((node) => {
+            const cls = (node.getAttribute('class') || '').split(/\s+/).filter(Boolean)[0] || '-';
+            return `${node.tagName.toLowerCase()}.${cls}${visible(node) ? '' : '!hidden'}`;
+        });
+        const parts = [
+            `ta=${textareas.filter(visible).length}/${textareas.length}`,
+            `ce=${editable.filter(visible).length}/${editable.length}`,
+            `ifr=${frames.length ? Array.from(new Set(frames)).join('+') : '0'}`,
+            `snd=${sends.length ? Array.from(new Set(sends)).slice(0, 3).join('+') : 'none'}`,
+            `vw=${view ? view.innerWidth : '?'}`,
+        ];
+        return parts.join('|').slice(0, 180);
+    }
     /** Type the confirmed greeting into an empty composer and send it once.
      *
      * The one M6 page mutation beyond the application click itself, and it is
@@ -1398,6 +1442,7 @@ var BossExtract = (function () {
         executeConfirmedApplication,
         salaryFrame,
         greetingComposer,
+        greetingDiagnostic,
         sendConfirmedGreeting,
         MAX_DESCRIPTION_CHARS,
         MAX_CARDS,

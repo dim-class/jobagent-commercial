@@ -36,7 +36,12 @@ def strong_hangzhou(db):
 
 
 def city_proposal(db):
-    result = compute_analytics(db, AnalyticsFilters(), now=NOW)
+    # The real clock, matching the fixtures above and the HTTP route these
+    # tests exercise. Reading it at a frozen NOW while the data is anchored to
+    # today meant the cohort fell outside the window as real time moved past
+    # NOW, and the proposal simply stopped existing - a StopIteration that says
+    # nothing about the code under test.
+    result = compute_analytics(db, AnalyticsFilters(), now=datetime.now(timezone.utc))
     return next(
         p
         for p in recs.build_proposals(result)

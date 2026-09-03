@@ -1040,3 +1040,38 @@ async def test_the_composer_is_the_only_page_mutation_besides_the_click(extensio
     """No follow-up message primitive exists: one send, and nothing after it."""
     for forbidden in ("setInterval", "MutationObserver"):
         assert forbidden not in extension_code
+
+
+@pytest.fixture
+async def greeting_shape(browser_page, extension_bundle):
+    async def _shape(fixture: str) -> str:
+        await _load_fixture(browser_page, extension_bundle, fixture, url=DETAIL_URL)
+        return await browser_page.evaluate("() => BossExtract.greetingDiagnostic(document)")
+
+    return _shape
+
+
+async def test_the_diagnostic_distinguishes_an_iframe_from_a_missing_panel(greeting_shape):
+    """Three live runs failed three ways with the same code. The next fix has
+    to come from what the page contains, not another guess."""
+    shape = await greeting_shape("boss_job_detail_chat_iframe.html")
+    assert "ta=0/0" in shape, "no textarea in this document"
+    assert "www.zhipin.com" in shape, "and the reason is an iframe, which it names"
+
+    resolved = await greeting_shape("boss_job_detail_chat_open.html")
+    # visible/total: the fixture also carries a hidden composer, and reporting
+    # both numbers is the point - "one of two" reads very differently from
+    # "one of one" when a live page refuses as ambiguous.
+    assert "ta=1/2" in resolved
+    assert "ifr=0" in resolved
+    assert "div.btn-send" in resolved, "it names the send control it did find"
+
+
+async def test_the_diagnostic_reports_shape_and_never_content(greeting_shape):
+    """A chat panel is full of a real person's messages, and a job page carries
+    URLs with session tokens. Neither may leave the page."""
+    shape = await greeting_shape("boss_job_detail_chat_open.html")
+    assert "负责云平台" not in shape, "no page text"
+    assert "请简短描述" not in shape, "no placeholder text"
+    assert "http" not in shape, "no URLs - iframe hosts only"
+    assert len(shape) <= 180, "bounded, so it fits the recorded attempt detail"

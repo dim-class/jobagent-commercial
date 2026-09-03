@@ -38,6 +38,7 @@ var BossContentScript = (function () {
     const M6_PREFLIGHT = 'jobagent:m6-preflight';
     const M6_EXECUTE = 'jobagent:m6-execute';
     const M6_GREETING = 'jobagent:m6-greeting';
+    const M6_GREETING_DIAG = 'jobagent:m6-greeting-diagnostic';
     function handle(message) {
         const request = (message || {});
         if (request.type === PING) {
@@ -55,6 +56,11 @@ var BossContentScript = (function () {
             // Developer-mode only, explicit-click structural diagnostic. See
             // `boss/extract.ts` - it never sends anything anywhere by itself.
             return { ok: true, result: BossExtract.diagnoseDetail(document, document.location.href) };
+        }
+        if (request.type === M6_GREETING_DIAG) {
+            // Read-only page shape, so a failed greeting can be diagnosed from the
+            // recorded attempt instead of another live one.
+            return { ok: true, result: { shape: BossExtract.greetingDiagnostic(document) } };
         }
         if (request.type === M6_GREETING && typeof request.greeting === 'string') {
             // Types the human-confirmed greeting into an empty composer and sends it
@@ -120,5 +126,5 @@ var BossContentScript = (function () {
         });
     }
     return { handle, PING, DETECT, DIAGNOSE, OPEN_CANDIDATE, CAPTURE_DETAIL, SCROLL_STEP,
-        NEXT_PAGE, M6_PREFLIGHT, M6_EXECUTE, M6_GREETING };
+        NEXT_PAGE, M6_PREFLIGHT, M6_EXECUTE, M6_GREETING, M6_GREETING_DIAG };
 })();

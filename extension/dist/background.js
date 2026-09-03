@@ -2846,9 +2846,22 @@ async function executeM6Application(approvalId, source) {
                     await new Promise((resolve) => setTimeout(resolve, M6_COMPOSER_RETRY_MS));
                 }
             }
-            detail = status === 'sent'
-                ? 'clicked_and_greeted_site_result_unverified'
-                : `clicked_greeting_skipped:${status}`;
+            if (status === 'sent') {
+                detail = 'clicked_and_greeted_site_result_unverified';
+            }
+            else {
+                // Record what the page actually contained, so the next fix is based on
+                // the DOM rather than another guess. Read-only, and best-effort: a
+                // diagnostic that fails must not change the outcome.
+                let shape = '';
+                if (status === 'no_composer' || status === 'no_send_control') {
+                    const diag = await askTab(tabId, {
+                        type: 'jobagent:m6-greeting-diagnostic',
+                    });
+                    shape = diag.ok && diag.result?.shape ? `|${diag.result.shape}` : '';
+                }
+                detail = `clicked_greeting_skipped:${status}${shape}`;
+            }
         }
         // No live success-state fixture exists yet. A click/greeting is therefore
         // always recorded as unknown, never guessed into Job.status=applied.

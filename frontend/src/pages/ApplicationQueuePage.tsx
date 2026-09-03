@@ -297,7 +297,6 @@ export default function ApplicationQueuePage() {
         throw new Error(explainM6Failure(reply.code, reply.error || '扩展未确认执行结果'))
       }
       const attemptedJob = m6Target
-      const attemptedResumeId = approval.resume_id
       setFeedback({
         tone: 'warn',
         text: '已执行一次「立即沟通」，并记录为结果待确认。请先在 BOSS 核对沟通是否建立，勿直接重试；再在弹窗中确认，确认后会通过现有唯一记录路径进入「已投递」列表。',
@@ -305,7 +304,16 @@ export default function ApplicationQueuePage() {
       setM6Target(null)
       setM6Approval(null)
       setApplyNote('M6 单次确认投递；已在 BOSS 人工核对结果')
-      setAppliedResume({ resumeId: attemptedResumeId, usage: 'used' })
+      // 仅沟通, because that is what M6 did: it clicks 立即沟通 and sends the
+      // greeting. No resume is submitted by that action, so defaulting to the
+      // analysis resume made every M6 application start out claiming a resume
+      // that was never sent - and the user had to correct it by hand each time.
+      //
+      // This is not an inference about something unknown (v0.7 forbids those):
+      // it is what the flow demonstrably does. Still a default, not a decision
+      // - the picker is right there, and choosing 不确定 or a variant is one
+      // click away for anyone who did attach one separately.
+      setAppliedResume({ resumeId: null, usage: 'no_resume' })
       setConfirmApplyFromM6(true)
       setConfirmApply(attemptedJob)
       await load(filters)
@@ -829,6 +837,12 @@ export default function ApplicationQueuePage() {
             value={appliedResume}
             onChange={setAppliedResume}
           />
+          {confirmApplyFromM6 ? (
+            <p className="small faint">
+              已默认「仅沟通」：M6 点的是「立即沟通」并发送招呼语，这个动作本身不提交简历。
+              如果你另外单独发过简历，改选对应的那份即可。
+            </p>
+          ) : null}
           <div className="field">
             <label htmlFor="apply-note">备注（可选）</label>
             <input

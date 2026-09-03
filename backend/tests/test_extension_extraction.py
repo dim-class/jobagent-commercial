@@ -1075,3 +1075,45 @@ async def test_the_diagnostic_reports_shape_and_never_content(greeting_shape):
     assert "请简短描述" not in shape, "no placeholder text"
     assert "http" not in shape, "no URLs - iframe hosts only"
     assert len(shape) <= 180, "bounded, so it fits the recorded attempt detail"
+
+
+# --------------------------------------------------------------------------
+# a closed posting (auto-skip on discovery, user asked 2026-09-04)
+# --------------------------------------------------------------------------
+
+
+async def test_a_closed_posting_is_reported_as_closed_not_as_a_missing_button(preflight):
+    """These need different handling: only one is a reason to retire the job.
+
+    Identity is still checked first, and deliberately so: a *different* job
+    that happens to be closed must never retire the one being confirmed.
+    """
+    expected = {**EXPECTED, "title": "中间件运维工程师", "company": "示例公司"}
+    result = await preflight("boss_job_detail_closed.html", expected=expected)
+    assert result["status"] == "posting_closed"
+
+
+async def test_a_closed_page_for_a_different_job_never_retires_this_one(preflight):
+    result = await preflight("boss_job_detail_closed.html")  # default identity
+    assert result["status"] == "identity_mismatch"
+
+
+async def test_a_missing_apply_button_is_never_read_as_closed(browser_page, extension_bundle):
+    """The control is also absent while a page loads, and it reads 继续沟通 on a
+    job already contacted. Inferring closure from either would retire a job the
+    user still wants, so closure needs BOSS's own words and nothing less."""
+    for fixture in (
+        "boss_job_detail_already_chatted.html",
+        "boss_job_detail_chat_iframe.html",
+        "boss_job_detail.html",
+    ):
+        await _load_fixture(browser_page, extension_bundle, fixture, url=DETAIL_URL)
+        closed = await browser_page.evaluate("() => BossExtract.postingClosed(document)")
+        assert closed is False, f"{fixture} was wrongly read as closed"
+
+
+async def test_the_phrase_inside_a_job_description_does_not_close_the_job(browser_page, extension_bundle):
+    """The fixture's description contains 职位已关闭 in a sentence. Only a node
+    whose entire text is the marker counts, so prose cannot retire a job."""
+    await _load_fixture(browser_page, extension_bundle, "boss_job_detail_live_shape.html", url=DETAIL_URL)
+    assert await browser_page.evaluate("() => BossExtract.postingClosed(document)") is False

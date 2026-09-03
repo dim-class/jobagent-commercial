@@ -1183,6 +1183,22 @@ var BossExtract = (function () {
         };
     }
     /** Resolve the one initial-contact control without reading its URL-bearing attributes. */
+    /** Whether BOSS is saying this posting is closed.
+     *
+     * Reads only elements whose *entire* text is one of the closed markers, so a
+     * job description mentioning the phrase cannot trigger it. Absence of the
+     * apply control is deliberately not evidence: it is also missing while the
+     * page loads, and a false positive here retires a job the user still wants.
+     */
+    function postingClosed(doc) {
+        const markers = BossSelectors.CLOSED_POSTING_TEXT;
+        const nodes = Array.from(doc.querySelectorAll('span,div,p,em,b,strong,h1,h2'));
+        return nodes.some((node) => {
+            if (node.children.length)
+                return false; // leaf nodes only
+            return markers.some((marker) => text(node) === marker);
+        });
+    }
     function applicationControl(doc) {
         const all = [];
         for (const selector of BossSelectors.APPLICATION_CONTROL) {
@@ -1225,6 +1241,11 @@ var BossExtract = (function () {
         if (observedTitle !== expected.title || observedCompany !== expected.company) {
             return { status: 'identity_mismatch' };
         }
+        // Checked before the control, so a closed posting is reported as closed
+        // rather than as a missing button - the two need different handling and
+        // only one of them is a reason to retire the job.
+        if (postingClosed(doc))
+            return { status: 'posting_closed' };
         const control = applicationControl(doc);
         if (!control.ok)
             return { status: control.status };
@@ -1442,6 +1463,7 @@ var BossExtract = (function () {
         executeConfirmedApplication,
         salaryFrame,
         greetingComposer,
+        postingClosed,
         greetingDiagnostic,
         sendConfirmedGreeting,
         MAX_DESCRIPTION_CHARS,

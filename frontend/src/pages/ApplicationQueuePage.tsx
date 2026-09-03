@@ -36,6 +36,9 @@ import type {
  * raw status to the reader made a correct refusal look identical to a bug.
  */
 const M6_PREFLIGHT_REASON: Record<string, string> = {
+  posting_closed:
+    'BOSS 显示该职位已关闭，没有执行投递。这个岗位已自动跳过（原因记为「职位已关闭」），'
+    + '分析记录都还在；如果是误判，在岗位库里「恢复待处理」即可。',
   control_wrong_state:
     '这个岗位已经沟通过了（按钮显示「继续沟通」）。M6 只负责第一次投递，'
     + '不会点击已有对话的按钮。换一个还没沟通过的岗位即可。',

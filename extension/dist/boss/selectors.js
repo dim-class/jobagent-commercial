@@ -128,6 +128,14 @@ var BossSelectors = {
      * class, which survives a restyle and cannot silently point at a different
      * button after one.
      */
+    /** BOSS's own words for a posting that is no longer open.
+     *
+     * A *positive* marker, never inferred from a missing 立即沟通 button: that
+     * button is also absent when the page has not finished loading or the layout
+     * moved, and acting on those would bury a live job. The text is matched
+     * exactly, on a node of its own.
+     */
+    CLOSED_POSTING_TEXT: ['职位已关闭', '该职位已关闭', '职位已下线', '已下线'],
     GREETING_INPUT: ['textarea'],
     // A live run found the textarea and confirmed it empty, then failed with
     // `no_send_control`: BOSS's 发送 is not a <button>. Widened to the elements a

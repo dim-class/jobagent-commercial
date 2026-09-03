@@ -37,6 +37,7 @@ var BossContentScript = (function () {
   const NEXT_PAGE = 'jobagent:next-page'
   const M6_PREFLIGHT = 'jobagent:m6-preflight'
   const M6_EXECUTE = 'jobagent:m6-execute'
+  const M6_GREETING = 'jobagent:m6-greeting'
 
   interface CachedCardLike {
     title: string | null
@@ -62,6 +63,9 @@ var BossContentScript = (function () {
       company: string
       title: string
     }
+    /** The human-confirmed greeting to type. Only the worker sends this, and
+     *  only for an approval whose bound text it read back from the backend. */
+    greeting?: string
   }
 
   function handle(message: unknown): unknown {
@@ -85,6 +89,13 @@ var BossContentScript = (function () {
       // Developer-mode only, explicit-click structural diagnostic. See
       // `boss/extract.ts` - it never sends anything anywhere by itself.
       return { ok: true, result: BossExtract.diagnoseDetail(document, document.location.href) }
+    }
+
+    if (request.type === M6_GREETING && typeof request.greeting === 'string') {
+      // Types the human-confirmed greeting into an empty composer and sends it
+      // once. Refuses on anything ambiguous, and never touches a box that
+      // already holds text - BOSS sometimes greets on its own.
+      return { ok: true, result: BossExtract.sendConfirmedGreeting(document, request.greeting) }
     }
 
     if (request.type === M6_PREFLIGHT && request.applicationIdentity) {
@@ -167,5 +178,5 @@ var BossContentScript = (function () {
   }
 
   return { handle, PING, DETECT, DIAGNOSE, OPEN_CANDIDATE, CAPTURE_DETAIL, SCROLL_STEP,
-    NEXT_PAGE, M6_PREFLIGHT, M6_EXECUTE }
+    NEXT_PAGE, M6_PREFLIGHT, M6_EXECUTE, M6_GREETING }
 })()

@@ -195,8 +195,11 @@ class ApplicationApprovalCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     resume_id: int = Field(gt=0)
-    answers_text: str = Field(default="", max_length=0)
-    answers_source: Literal["boss_dynamic_unverified"]
+    #: Empty for `boss_dynamic_unverified` (BOSS decides, unverifiable); the
+    #: exact text JobAgent will type for `boss_typed_greeting`. The service
+    #: enforces which goes with which - the schema only bounds the size.
+    answers_text: str = Field(default="", max_length=1000)
+    answers_source: Literal["boss_dynamic_unverified", "boss_typed_greeting"]
     confirmed: bool = False
 
 

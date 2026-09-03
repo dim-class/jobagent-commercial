@@ -2654,6 +2654,11 @@ function isM6CanonicalUrl(raw, externalId) {
 }
 /** One event-driven navigation wait. The timeout can only stop; it never triggers a click. */
 /** The tab as it is *now*, or undefined if it is gone. */
+/** How long to let BOSS render its chat composer before typing the greeting.
+ *
+ * One wait, not a poll: if the composer is not there by now, the greeting is
+ * skipped and reported. The click has already happened and is not retried. */
+const M6_COMPOSER_WAIT_MS = 1500;
 async function m6Tab(tabId) {
     try {
         return await chrome.tabs.get(tabId);
@@ -2705,11 +2710,17 @@ async function executeM6Application(approvalId, source) {
             || await getGlobalPointer())
             return { ok: false, error: '已有浏览器任务运行；请先结束后再逐岗位确认。' };
         const approval = await fetchJson(`/api/application-approvals/${approvalId}`);
-        if (approval.id !== approvalId || approval.state !== 'pending'
-            || approval.answers_source !== 'boss_dynamic_unverified'
-            || approval.answers_text !== ''
+        // Two modes, each with its own strict shape. `boss_dynamic_unverified`
+        // means BOSS decides and we cannot see it, so a body there would be a guess
+        // presented as a plan; `boss_typed_greeting` means the human read and
+        // confirmed the exact text, so an empty body would send nothing.
+        const dynamic = approval.answers_source === 'boss_dynamic_unverified';
+        const typed = approval.answers_source === 'boss_typed_greeting';
+        const shapeOk = (dynamic && approval.answers_text === '')
+            || (typed && approval.answers_text.trim().length > 0);
+        if (approval.id !== approvalId || approval.state !== 'pending' || !shapeOk
             || !isM6CanonicalUrl(approval.canonical_url, approval.external_id)) {
-            return { ok: false, error: '投递确认无效、已使用或不是未知动态招呼语模式；不会执行。' };
+            return { ok: false, error: '投递确认无效、已使用或招呼语模式不合法；不会执行。' };
         }
         const existing = await reusableBossTab(source.windowId);
         const target = existing?.id
@@ -2785,10 +2796,37 @@ async function executeM6Application(approvalId, source) {
             await settleM6Outcome(approval, observed, 'failed', executed.result.status);
             return { ok: false, application: { approvalId, outcome: 'failed', detail: executed.result.status }, error: '最终页面检查未通过，未点击且不会自动重试。' };
         }
+        // The greeting, when the human confirmed one to type (authorized
+        // 2026-09-03). It is deliberately *after* the click and reported
+        // separately: BOSS turned out to send its own greeting sometimes and not
+        // others, so this is its own action rather than the click's other half.
+        //
+        // Failure here never undoes or retries the click. The conversation exists
+        // either way, and the outcome stays `unknown` for a human to check - the
+        // detail simply records how far it got.
+        let detail = 'clicked_site_result_unverified';
+        if (approval.answers_source === 'boss_typed_greeting' && approval.answers_text) {
+            // One bounded wait for the composer to render, then one attempt. No
+            // polling loop, no second try.
+            await new Promise((resolve) => setTimeout(resolve, M6_COMPOSER_WAIT_MS));
+            const alive = await verifyRunnerTab(tabId);
+            if (!alive.ok) {
+                detail = 'clicked_greeting_skipped:foreground_lost';
+            }
+            else {
+                const greeted = await askTab(tabId, {
+                    type: 'jobagent:m6-greeting', greeting: approval.answers_text,
+                });
+                const status = greeted.ok && greeted.result ? greeted.result.status : 'greeting_unavailable';
+                detail = status === 'sent'
+                    ? 'clicked_and_greeted_site_result_unverified'
+                    : `clicked_greeting_skipped:${status}`;
+            }
+        }
         // No live success-state fixture exists yet. A click/greeting is therefore
         // always recorded as unknown, never guessed into Job.status=applied.
-        await settleM6Outcome(approval, observed, 'unknown', 'clicked_site_result_unverified');
-        return { ok: true, application: { approvalId, outcome: 'unknown', detail: 'clicked_site_result_unverified' } };
+        await settleM6Outcome(approval, observed, 'unknown', detail);
+        return { ok: true, application: { approvalId, outcome: 'unknown', detail } };
     }
     catch {
         return { ok: false, error: '单岗位投递执行中断或后端结果未确认；请人工核对，不会自动重试。' };

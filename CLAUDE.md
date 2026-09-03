@@ -1084,6 +1084,62 @@ other prohibition in this file stays in force, unchanged.
   select, remember or silently prefill an expected greeting. Any non-empty
   greeting value makes the approval invalid. One acceptance applies to one
   approval only and is not reusable authority for another job.
+
+#### Confirmed typed greeting (user authorized 2026-09-03)
+
+The user's authorization, verbatim: *M6 may, after clicking 立即沟通, fill in
+and send once the (editable) greeting shown in the confirmation dialog, if the
+chat input box is empty. The text must be displayed in full and be editable
+before confirming; it must not send when the box is non-empty; every subsequent
+message, automatic retry, batch and background execution remain forbidden.*
+
+**What changed the facts.** The unknown-dynamic mode above exists because a
+2026-08-31 live run disproved the assumption that BOSS sends the text a human
+typed into JobAgent. A 2026-09-03 live run then disproved the other half of the
+premise: the click succeeded, the conversation opened, and BOSS sent **no**
+greeting at all - while an earlier manual application to a different company
+did send one. So the greeting is not inseparable from 立即沟通; it is sometimes
+sent and sometimes not, and this is not predictable from here.
+
+That makes typing a greeting a **separate authorized action**, not the other
+half of the application click, and it is why it needed its own authorization.
+
+Both modes now exist and neither may drift into the other:
+
+| `answers_source` | body | meaning |
+| --- | --- | --- |
+| `boss_dynamic_unverified` | must be empty | BOSS decides; JobAgent cannot preview, verify or control it |
+| `boss_typed_greeting` | must be non-empty | the exact characters JobAgent will type |
+
+The typed mode is not the manually-attested mode that was removed. That one
+asked the human to *predict* what BOSS would send, and the prediction was
+unverifiable. This text is what JobAgent itself types - shown in full, editable
+before confirming, and bound by hash, so editing it makes the approval stale
+rather than sending something the human did not read.
+
+Rules specific to it:
+
+- **the box must already be empty.** BOSS greets on its own sometimes; typing
+  into a box that is not empty would append a second message to whatever is
+  there. A non-empty box skips the greeting and records why;
+- **the composer must resolve unambiguously.** Exactly one visible, enabled,
+  empty textarea sharing a container with exactly one send control. Two
+  candidates, none, or no send control all skip without typing. Selectors are
+  structural and text-based (`extension/src/boss/selectors.ts`) because the
+  panel's classes were never observed, and a guessed class here would type into
+  the wrong box - a message to a real person, not a blank field;
+- **it happens after the click and is reported separately.** A greeting failure
+  never undoes, re-runs or retries the application click; the conversation
+  exists either way and the outcome stays `unknown` for a human to check. The
+  attempt detail records how far it got
+  (`clicked_and_greeted_site_result_unverified`, or
+  `clicked_greeting_skipped:<reason>`);
+- **exactly one send.** No follow-up, no second attempt, no polling for the
+  composer beyond one bounded wait.
+
+Everything else about M6 is unchanged: one job per confirmation, the acceptance
+checkbox, one attempt per confirmation, no batch, no background, no automatic
+retry, and `Job.status` still never guessed into `applied`.
 - The user must be shown all of the above **before** confirming. A confirmation
   the user could not read in full is not a confirmation.
 - **A confirmation screen is shown immediately before the attempt**, displaying
@@ -1205,8 +1261,14 @@ automatic retry, favourite/follow/collect and any other account-state change,
 CAPTCHA/risk-control bypass, stealth, fingerprint spoofing, background browsing
 and credential/token/storage access. M6 supersedes none of those.
 
-The boundary in one line: **M6 may send the greeting that *is* the application;
-it may never send a message that *follows* one.**
+The boundary in one line: **M6 may send the application and, when the human
+confirmed its exact text, the one greeting that opens the conversation; it may
+never send a second message.**
+
+(Until 2026-09-03 this read "the greeting that *is* the application". A live run
+showed the click and the greeting are separable - BOSS sent none - so the
+greeting became its own authorized action rather than half of another one. The
+limit did not move: one message, and nothing after it.)
 
 #### 8. The architecture principle is unchanged
 

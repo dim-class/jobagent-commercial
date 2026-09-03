@@ -669,16 +669,28 @@ async def test_the_extractor_never_submits_or_navigates(extension_code):
 
 @pytest.mark.asyncio
 async def test_only_the_named_m4_and_m6_click_primitives_exist(extension_code):
-    """Pin the two and only two explicitly authorized click call sites.
+    """Pin the three and only three explicitly authorized click call sites.
 
-    M4 uses `clickAnchor` for supervised card traversal. M6 has one separate
-    call after the background worker has atomically claimed one per-job human
-    approval and the content script has repeated exact identity preflight.
-    The suspended M7 chat scanner has no runtime click or parser surface.
+    M4 uses `clickAnchor` for supervised card traversal. M6 has one call for
+    the application itself, after the background worker has atomically claimed
+    one per-job human approval and the content script has repeated exact
+    identity preflight. M6 has a second call - the send control of the chat
+    composer - added under the 2026-09-03 authorization: BOSS turned out to
+    send its own greeting sometimes and not others, so typing the confirmed
+    greeting is its own action rather than the application click's other half.
+    It fires only into a composer that resolved unambiguously and was already
+    empty. The suspended M7 chat scanner has no runtime click or parser
+    surface.
+
+    The count is pinned, not just the presence: a fourth click site has to be
+    a decision someone made on purpose, which is exactly how this one arrived.
     """
-    assert extension_code.count(".click(") == 2, "only M4 navigation and M6 single application are authorized"
+    assert extension_code.count(".click(") == 3, (
+        "authorized: M4 navigation, M6 application, M6 confirmed greeting"
+    )
     assert "anchor.click()" in extension_code
     assert "control.node.click()" in extension_code
+    assert "composer.send.click()" in extension_code
 
 
 @pytest.mark.asyncio
@@ -926,3 +938,105 @@ async def test_the_search_split_pane_is_not_an_application_surface(preflight):
         "boss_search_split_pane_live_shape.html", url=SEARCH_URL
     )
     assert result["status"] != "ok"
+
+
+# --------------------------------------------------------------------------
+# the confirmed greeting (authorized 2026-09-03)
+# --------------------------------------------------------------------------
+
+GREETING = "您好，我有近2年云基础设施经验，希望进一步沟通。"
+
+
+@pytest.fixture
+async def composer(browser_page, extension_bundle):
+    """Load a fixture and run the real composer resolver on it."""
+
+    async def _composer(fixture: str = "boss_job_detail_chat_open.html", *, prepare: str = "") -> dict:
+        await _load_fixture(browser_page, extension_bundle, fixture, url=DETAIL_URL)
+        if prepare:
+            await browser_page.evaluate(prepare)
+        return await browser_page.evaluate("() => BossExtract.greetingComposer(document).status")
+
+    return _composer
+
+
+@pytest.fixture
+async def send_greeting(browser_page, extension_bundle):
+    """Load a fixture and attempt one real send on it."""
+
+    async def _send(fixture: str = "boss_job_detail_chat_open.html", *, prepare: str = "",
+                    greeting: str = GREETING) -> dict:
+        await _load_fixture(browser_page, extension_bundle, fixture, url=DETAIL_URL)
+        await browser_page.evaluate(
+            "() => { window.__sent = 0;"
+            "  document.querySelectorAll('.chat-panel .btn-send').forEach("
+            "    (b) => b.addEventListener('click', () => { window.__sent += 1 })) }"
+        )
+        if prepare:
+            await browser_page.evaluate(prepare)
+        status = await browser_page.evaluate(
+            "(text) => BossExtract.sendConfirmedGreeting(document, text).status", greeting
+        )
+        return {
+            "status": status,
+            "clicks": await browser_page.evaluate("() => window.__sent"),
+            "value": await browser_page.evaluate(
+                "() => document.querySelector('.chat-panel .chat-input').value"
+            ),
+        }
+
+    return _send
+
+
+async def test_an_empty_visible_composer_resolves(composer):
+    """The hidden second composer must not make this ambiguous."""
+    assert await composer() == "ok"
+
+
+async def test_a_composer_that_already_has_text_is_refused(composer):
+    """BOSS greets on its own sometimes and not others - both were observed on
+    the live site. Typing into a box that is not empty would append a second
+    message to whatever is already there."""
+    assert await composer(
+        prepare="() => { document.querySelector('.chat-panel .chat-input').value = 'BOSS 已发的招呼语' }"
+    ) == "input_not_empty"
+
+
+async def test_two_visible_composers_are_ambiguous_and_refused(composer):
+    assert await composer(
+        prepare="() => { document.querySelector('.hidden-composer').style.display = 'block' }"
+    ) == "ambiguous_composer"
+
+
+async def test_a_page_with_no_composer_is_refused(composer):
+    assert await composer("boss_job_detail.html") in {"no_composer", "no_send_control"}
+
+
+async def test_sending_types_the_exact_text_and_clicks_once(send_greeting):
+    result = await send_greeting()
+    assert result["status"] == "sent"
+    assert result["value"] == GREETING, "the bound text is typed verbatim"
+    assert result["clicks"] == 1, "exactly one send"
+
+
+async def test_nothing_is_typed_or_sent_when_the_box_is_not_empty(send_greeting):
+    existing = "BOSS 已经发过的招呼语"
+    result = await send_greeting(
+        prepare=f"() => {{ document.querySelector('.chat-panel .chat-input').value = {existing!r} }}"
+    )
+    assert result["status"] == "input_not_empty"
+    assert result["clicks"] == 0, "no message was sent"
+    assert result["value"] == existing, "and the box was left alone"
+
+
+async def test_an_empty_greeting_sends_nothing(send_greeting):
+    for blank in ("", "   "):
+        result = await send_greeting(greeting=blank)
+        assert result["status"] == "empty_greeting"
+        assert result["clicks"] == 0
+
+
+async def test_the_composer_is_the_only_page_mutation_besides_the_click(extension_code):
+    """No follow-up message primitive exists: one send, and nothing after it."""
+    for forbidden in ("setInterval", "MutationObserver"):
+        assert forbidden not in extension_code

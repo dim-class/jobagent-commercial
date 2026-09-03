@@ -9,10 +9,21 @@ const page = fs.readFileSync(path.join(__dirname, '../src/pages/ApplicationQueue
 const client = fs.readFileSync(path.join(__dirname, '../src/api/client.ts'), 'utf8')
 
 test('M6 accepts an unknown dynamic greeting per job and never asks for or prefills text', () => {
+  // The forbidden shape is unchanged: nothing here asks the human to *predict*
+  // what BOSS will send. That mode was disproved live, and its field is gone.
   assert.doesNotMatch(page, /m6Message|setM6Message|id="m6-message"|预计首次招呼语（必须由你手工填写）/)
-  assert.match(page, /未知（由 BOSS 动态生成，JobAgent 无法预览或控制）/)
+  // Unknown-greeting mode still exists and still says exactly what it cannot do.
+  assert.match(page, /由 BOSS 决定是否发送以及发送什么/)
   assert.match(page, /我接受 BOSS 为这个岗位动态生成未知的首次招呼语/)
   assert.match(page, /AI 也不能代替你勾选确认/)
+  // Typed-greeting mode (authorized 2026-09-03): the text JobAgent will type is
+  // shown, editable, and refuses to send into a box that is not empty.
+  assert.match(page, /id="m6-greeting"/)
+  assert.match(page, /onChange=\{\(e\) => setM6Greeting\(e\.target\.value\)\}/)
+  assert.match(page, /这就是会被逐字打出去的内容/)
+  assert.match(page, /仅在聊天框为空时/)
+  // And it cannot be confirmed with nothing to send.
+  assert.match(page, /m6SendGreeting && !m6Greeting\.trim\(\)/)
   // One confirmation now both binds and executes (CLAUDE.md M6,
   // single-confirmation amendment). What it must still do is show the exact
   // job, its URL and the chosen resume before the human accepts.
@@ -22,9 +33,11 @@ test('M6 accepts an unknown dynamic greeting per job and never asks for or prefi
   assert.match(page, /本次简历/)
   // The confirmation stays impossible without an explicit resume AND the
   // acceptance checkbox - merging the screens must not merge away either.
-  assert.match(page, /disabled=\{m6Busy \|\| !m6ResumeId \|\| !m6DynamicAccepted \|\| m6Attempted\}/)
-  assert.match(client, /answers_source:\s*'boss_dynamic_unverified'/)
-  assert.doesNotMatch(client, /answers_text:/)
+  // Now also refuses when the typed mode has nothing to send. Matched across
+  // the line break the extra clause introduced.
+  assert.match(page, /disabled=\{m6Busy \|\| !m6ResumeId \|\| !m6DynamicAccepted \|\| m6Attempted[\s\S]{0,80}\}/)
+  assert.match(client, /greeting \? 'boss_typed_greeting' : 'boss_dynamic_unverified'/)
+  assert.match(client, /answers_text: greeting/)
 })
 
 test('the final user click sends only one approval id to the extension', () => {

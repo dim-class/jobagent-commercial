@@ -72,6 +72,19 @@ OUTCOME_UNKNOWN = "unknown"
 OUTCOME_FAILED = "failed"
 ANSWERS_SOURCE_BOSS_DYNAMIC = "boss_dynamic_unverified"
 
+#: The human confirmed an exact greeting for JobAgent to type (authorized
+#: 2026-09-03). This is not the mode it replaced: that one asked the human to
+#: *predict* what BOSS would send, and a live run disproved the prediction. This
+#: text is what JobAgent itself types into an empty chat box - previewable,
+#: editable and verifiable, which is precisely what the old field was not.
+ANSWERS_SOURCE_TYPED = "boss_typed_greeting"
+
+ANSWERS_SOURCES = (ANSWERS_SOURCE_BOSS_DYNAMIC, ANSWERS_SOURCE_TYPED)
+
+#: A greeting longer than this is not a greeting. BOSS's own box is far
+#: smaller; the bound exists so a confirmation cannot carry an essay.
+MAX_GREETING_CHARS = 1000
+
 
 @dataclass(slots=True)
 class ApprovalCheck:
@@ -125,16 +138,33 @@ def request_approval(
         raise ValidationError(
             "需要逐个岗位明确确认后才能授权投递。", detail={"field": "confirmed"}
         )
-    if answers_source != ANSWERS_SOURCE_BOSS_DYNAMIC:
+    if answers_source not in ANSWERS_SOURCES:
         raise ValidationError(
-            "只允许逐岗位确认 BOSS 的未知动态首次招呼语。",
+            "招呼语模式无效。",
             detail={"field": "answers_source", "reason": INVALID_ANSWERS_SOURCE},
         )
-    if answers:
+    greeting = (answers or "").strip()
+    # Checked against the raw value, not the stripped one: CLAUDE.md says *any*
+    # non-empty greeting invalidates this mode, and whitespace is a value
+    # someone typed.
+    if answers_source == ANSWERS_SOURCE_BOSS_DYNAMIC and (answers or ""):
+        # This mode still means "BOSS decides, and we cannot see it". A text
+        # here would be a guess presented as a plan.
         raise ValidationError(
             "BOSS 首次招呼语无法预览或控制，确认中不得填写或猜测正文。",
             detail={"field": "answers_text"},
         )
+    if answers_source == ANSWERS_SOURCE_TYPED:
+        if not greeting:
+            raise ValidationError(
+                "选择由 JobAgent 填写招呼语时，正文不能为空。",
+                detail={"field": "answers_text"},
+            )
+        if len(greeting) > MAX_GREETING_CHARS:
+            raise ValidationError(
+                f"招呼语超过 {MAX_GREETING_CHARS} 字。",
+                detail={"field": "answers_text", "max": MAX_GREETING_CHARS},
+            )
 
     job = db.get(Job, job_id)
     if job is None:
@@ -192,8 +222,11 @@ def request_approval(
         external_id=job.external_id,
         resume_id=resume.id,
         resume_hash=_resume_fingerprint(resume),
-        answers_text="",
-        answers_hash=_answers_hash(answers),
+        # Stored verbatim so the confirmation binds the exact characters that
+        # will be typed: edit the text and the hash stops matching, which makes
+        # the approval stale rather than sending something else.
+        answers_text=greeting,
+        answers_hash=_answers_hash(greeting),
         answers_source=answers_source,
         state="pending",
     )
@@ -248,7 +281,7 @@ def validate(
 
     if _answers_hash(approval.answers_text) != approval.answers_hash:
         return ApprovalCheck(False, INVALID_ANSWERS_CHANGED)
-    if approval.answers_source != ANSWERS_SOURCE_BOSS_DYNAMIC:
+    if approval.answers_source not in ANSWERS_SOURCES:
         return ApprovalCheck(False, INVALID_ANSWERS_SOURCE)
 
     # The page in front of the user must be the job that was confirmed. Both
@@ -420,7 +453,7 @@ def record_outcome(
         and resume
         and _resume_fingerprint(resume) == approval.resume_hash
         and _answers_hash(approval.answers_text) == approval.answers_hash
-        and approval.answers_source == ANSWERS_SOURCE_BOSS_DYNAMIC
+        and approval.answers_source in ANSWERS_SOURCES
         and canonical_url(observed_url) == approval.canonical_url
         and observed_external_id == approval.external_id
     )

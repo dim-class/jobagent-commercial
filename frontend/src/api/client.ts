@@ -424,12 +424,20 @@ export const api = {
     }),
   applicationEvents: (jobId: number) =>
     request<ApplicationEventOut[]>(`/api/jobs/${jobId}/application-events`),
-  createApplicationApproval: (jobId: number, resumeId: number) =>
+  /** Bind one per-job confirmation.
+   *
+   * `greeting` empty means BOSS decides the first message and JobAgent cannot
+   * see it. A greeting means JobAgent will type *these exact characters* into
+   * an empty chat box - which is why the text is bound and hashed: edit it and
+   * the approval goes stale rather than sending something unread.
+   */
+  createApplicationApproval: (jobId: number, resumeId: number, greeting = '') =>
     request<ApplicationApprovalOut>(`/api/application-approvals/jobs/${jobId}`, {
       method: 'POST',
       body: JSON.stringify({
         resume_id: resumeId,
-        answers_source: 'boss_dynamic_unverified',
+        answers_text: greeting,
+        answers_source: greeting ? 'boss_typed_greeting' : 'boss_dynamic_unverified',
         confirmed: true,
       }),
     }),

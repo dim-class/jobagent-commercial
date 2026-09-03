@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>云计算工程师 - 示例公司 - BOSS直聘</title>
+  <style>
+    /* Sizes matter: the composer resolver rejects anything too small to be a
+       real control, so a fixture with zero-sized nodes would pass for the
+       wrong reason. */
+    .chat-panel { width: 520px; height: 420px; }
+    .chat-input { width: 480px; height: 90px; }
+    .btn-send { display: inline-block; width: 72px; height: 32px; }
+    .hidden-composer { display: none; }
+  </style>
+</head>
+<body>
+  <div class="job-banner">
+    <h1 class="name">云计算工程师</h1>
+    <span class="salary">15-30K</span>
+    <div class="company-info"><a class="name" href="/gongsi/x.html">示例公司</a></div>
+  </div>
+
+  <!-- Already contacted: BOSS swaps the control's label after 立即沟通. -->
+  <a class="btn btn-startchat" href="javascript:;">继续沟通</a>
+
+  <div class="job-detail-section">
+    <div class="job-sec-text">负责云平台的日常运维与故障排查。</div>
+  </div>
+
+  <!-- The composer BOSS opens after the application click. -->
+  <div class="chat-panel">
+    <div class="chat-history"></div>
+    <textarea class="chat-input" placeholder="请简短描述您的问题"></textarea>
+    <button type="button" class="btn-send">发送</button>
+  </div>
+
+  <!-- A second, hidden composer elsewhere on the page: the resolver must not
+       count it, or a real page with an off-screen form would read as
+       ambiguous and refuse every time. -->
+  <div class="hidden-composer">
+    <textarea class="chat-input"></textarea>
+    <button type="button" class="btn-send">发送</button>
+  </div>
+</body>
+</html>

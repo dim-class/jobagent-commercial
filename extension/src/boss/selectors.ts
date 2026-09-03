@@ -127,6 +127,24 @@ var BossSelectors = {
    */
   APPLICATION_CONTROL: ['.btn-startchat'] as string[],
 
+  /**
+   * The chat composer BOSS opens after 立即沟通 (authorized 2026-09-03).
+   *
+   * Structural and text-based on purpose. The panel's class names are not
+   * documented and were not observed, so inventing one here would be a guess
+   * that could type into the wrong box - and unlike a missed field, that is a
+   * message sent to a real person. A candidate must be a *visible, empty*
+   * textarea sharing a container with exactly one send control; anything
+   * ambiguous fails closed and nothing is typed.
+   *
+   * `GREETING_SEND_TEXT` matches the control's own label rather than its
+   * class, which survives a restyle and cannot silently point at a different
+   * button after one.
+   */
+  GREETING_INPUT: ['textarea'] as string[],
+  GREETING_SEND: ['button', '[role="button"]', 'a'] as string[],
+  GREETING_SEND_TEXT: ['发送'] as string[],
+
   COMPANY: [
     '.job-boss-info .boss-info-attr',
     '.job-banner .company-info .name',

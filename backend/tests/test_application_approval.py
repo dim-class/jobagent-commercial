@@ -102,6 +102,47 @@ def test_dynamic_greeting_must_have_empty_text_and_the_fixed_source(db, job, act
     assert db.query(ApplicationApproval).count() == 0
 
 
+def test_a_typed_greeting_is_bound_verbatim_and_cannot_be_empty(db, job, active_resume):
+    """The mode authorized 2026-09-03: JobAgent types this exact text.
+
+    This is not the mode it replaced. That one asked the human to *predict*
+    what BOSS would send, and a live run disproved the prediction. This text is
+    what JobAgent itself types into an empty box, so binding it verbatim is
+    meaningful: change one character and the approval goes stale rather than
+    sending something the human did not read.
+    """
+    greeting = "您好，我有近2年云基础设施经验，希望进一步沟通。"
+    approval = application_approval.request_approval(
+        db,
+        job.id,
+        resume_id=active_resume.id,
+        answers=greeting,
+        answers_source=application_approval.ANSWERS_SOURCE_TYPED,
+        confirmed=True,
+    )
+    assert approval.answers_text == greeting
+    assert approval.answers_hash == application_approval._answers_hash(greeting)
+
+    # Editing the bound text invalidates it - the same rule the resume follows.
+    approval.answers_text = greeting + "！"
+    db.commit()
+    assert application_approval.validate(db, approval).ok is False
+
+
+def test_a_typed_greeting_refuses_an_empty_or_oversized_body(db, job, active_resume):
+    for answers in ("", "   ", "字" * 1001):
+        with pytest.raises(ValidationError):
+            application_approval.request_approval(
+                db,
+                job.id,
+                resume_id=active_resume.id,
+                answers=answers,
+                answers_source=application_approval.ANSWERS_SOURCE_TYPED,
+                confirmed=True,
+            )
+    assert db.query(ApplicationApproval).count() == 0
+
+
 def test_dynamic_greeting_approval_persists_no_message_body(db, job, active_resume):
     approval = approve(db, job, active_resume)
     assert approval.answers_text == ""

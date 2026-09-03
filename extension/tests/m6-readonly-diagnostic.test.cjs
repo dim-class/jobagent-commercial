@@ -45,10 +45,22 @@ test('M6 claims one attempt before the click and never guesses applied', () => {
   const begin = background.indexOf('/begin`')
   const clickMessage = background.indexOf("type: 'jobagent:m6-execute'")
   assert.ok(begin > 0 && clickMessage > begin)
-  assert.match(background, /answers_source !== 'boss_dynamic_unverified'/)
-  assert.match(background, /answers_text !== ''/)
+  // Two greeting modes since 2026-09-03, each with its own strict shape:
+  // `boss_dynamic_unverified` must carry no body (a body there would be a
+  // guess about what BOSS sends, which a live run already disproved), and
+  // `boss_typed_greeting` must carry one (an empty body would type nothing).
+  assert.match(background, /dynamic && approval\.answers_text === ''/)
+  assert.match(background, /typed && approval\.answers_text\.trim\(\)\.length > 0/)
   assert.match(background, /outcome, detail/)
-  assert.match(background, /'unknown', 'clicked_site_result_unverified'/)
+  // The outcome is still never guessed into `applied`, whichever mode ran.
+  assert.match(background, /'clicked_site_result_unverified'/)
+  assert.match(background, /'clicked_and_greeted_site_result_unverified'/)
+  assert.match(background, /settleM6Outcome\(approval, observed, 'unknown', detail\)/)
+  // The greeting is typed after the click and reported separately - it can
+  // never re-run or undo the application click.
+  const click = background.indexOf("type: 'jobagent:m6-execute'")
+  const greeting = background.indexOf("type: 'jobagent:m6-greeting'")
+  assert.ok(greeting > click, 'the greeting follows the click, never precedes it')
   assert.doesNotMatch(background, /application-approvals\/\$\{approval\.id\}\/outcome[\s\S]{0,300}outcome:\s*'applied'/)
   assert.doesNotMatch(background, /executeM6Application[\s\S]{0,8000}(?:setInterval|MutationObserver)/)
 })

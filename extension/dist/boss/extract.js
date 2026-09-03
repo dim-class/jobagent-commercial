@@ -1230,6 +1230,91 @@ var BossExtract = (function () {
             return { status: control.status };
         return { status: 'ok', observed_url: observedUrl, observed_external_id: observedExternalId };
     }
+    /** Resolve the chat composer BOSS opens after 立即沟通.
+     *
+     * Fail-closed at every step, because the failure mode here is a message sent
+     * to a real person rather than a field left blank:
+     *
+     * - exactly one visible textarea, and exactly one send control beside it;
+     * - **the textarea must already be empty.** BOSS sometimes sends its own
+     *   greeting on 立即沟通 (observed once) and sometimes does not (observed
+     *   once). Typing into a box that already has something in it would append a
+     *   second message to whatever is there;
+     * - both must sit in the same container, so a composer from some other panel
+     *   on the page cannot be paired with this one's send button.
+     */
+    function greetingComposer(doc) {
+        const view = doc.defaultView;
+        if (!view)
+            return { status: 'no_composer' };
+        const visible = (node) => {
+            const rect = node.getBoundingClientRect();
+            if (rect.width < 8 || rect.height < 8)
+                return false;
+            const style = view.getComputedStyle(node);
+            return style.visibility !== 'hidden' && style.display !== 'none' && style.opacity !== '0';
+        };
+        const inputs = Array.from(doc.querySelectorAll(BossSelectors.GREETING_INPUT.join(',')))
+            .filter((node) => node instanceof view.HTMLTextAreaElement)
+            .filter(visible)
+            .filter((node) => !node.disabled && !node.readOnly);
+        if (!inputs.length)
+            return { status: 'no_composer' };
+        if (inputs.length > 1)
+            return { status: 'ambiguous_composer' };
+        const input = inputs[0];
+        if (input.value.trim())
+            return { status: 'input_not_empty' };
+        const wanted = BossSelectors.GREETING_SEND_TEXT;
+        for (let scope = input.parentElement; scope; scope = scope.parentElement) {
+            const controls = Array.from(scope.querySelectorAll(BossSelectors.GREETING_SEND.join(',')))
+                .filter(visible)
+                .filter((node) => wanted.some((label) => text(node) === label));
+            if (controls.length === 1) {
+                return { status: 'ok', input, send: controls[0] };
+            }
+            // More than one match at this level is ambiguous; widening the scope
+            // would only add more. Stop rather than pick.
+            if (controls.length > 1)
+                return { status: 'no_send_control' };
+        }
+        return { status: 'no_send_control' };
+    }
+    /** Type the confirmed greeting into an empty composer and send it once.
+     *
+     * The one M6 page mutation beyond the application click itself, and it is
+     * separate from it: BOSS turned out not to always send a greeting with
+     * 立即沟通, so this is its own authorized action (2026-09-03) rather than
+     * "the other half" of one.
+     */
+    function sendConfirmedGreeting(doc, greeting) {
+        const body = (greeting || '').trim();
+        if (!body)
+            return { status: 'empty_greeting' };
+        const composer = greetingComposer(doc);
+        if (composer.status !== 'ok' || !composer.input || !composer.send) {
+            return { status: composer.status };
+        }
+        const view = doc.defaultView;
+        if (!view)
+            return { status: 'no_composer' };
+        // Assigning `.value` alone leaves the page's own state untouched, so the
+        // send control stays disabled and nothing would go out. The native setter
+        // plus an input event is what a framework-backed field actually listens to.
+        const setter = Object.getOwnPropertyDescriptor(view.HTMLTextAreaElement.prototype, 'value')?.set;
+        if (setter)
+            setter.call(composer.input, body);
+        else
+            composer.input.value = body;
+        composer.input.dispatchEvent(new view.Event('input', { bubbles: true }));
+        composer.input.dispatchEvent(new view.Event('change', { bubbles: true }));
+        // Re-read rather than trust the write: if the page rejected or rewrote it,
+        // nothing is sent.
+        if (composer.input.value.trim() !== body)
+            return { status: 'input_rejected' };
+        composer.send.click();
+        return { status: 'sent' };
+    }
     /** The only M6 page mutation: repeat preflight and perform exactly one click. */
     function executeConfirmedApplication(doc, currentUrl, expected) {
         const preflight = preflightConfirmedApplication(doc, currentUrl, expected);
@@ -1308,6 +1393,8 @@ var BossExtract = (function () {
         preflightConfirmedApplication,
         executeConfirmedApplication,
         salaryFrame,
+        greetingComposer,
+        sendConfirmedGreeting,
         MAX_DESCRIPTION_CHARS,
         MAX_CARDS,
         MAX_DIAGNOSTIC_NODES,

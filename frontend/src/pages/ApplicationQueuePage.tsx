@@ -86,6 +86,10 @@ export default function ApplicationQueuePage() {
   //: build that no longer exists - the normal state right after reloading
   //: the extension, and curable only by reloading this page.
   const [m6StaleBridge, setM6StaleBridge] = useState(false)
+  //: The exact text JobAgent will type, editable before confirming. Empty
+  //: means "let BOSS decide", which is what it always did before.
+  const [m6Greeting, setM6Greeting] = useState('')
+  const [m6SendGreeting, setM6SendGreeting] = useState(true)
 
   const load = useCallback(async (active: QueueFilters) => {
     setLoading(true)
@@ -201,6 +205,12 @@ export default function ApplicationQueuePage() {
     setM6Approval(null)
     setM6Attempted(false)
     setM6StatusUnknown(false)
+    setM6Error(null)
+    setM6StaleBridge(false)
+    // Seeded from this job's own draft, and editable: what the dialog shows is
+    // what gets typed, so it has to be the thing the human reads and can change.
+    setM6Greeting(proposal.greeting_message || '')
+    setM6SendGreeting(Boolean(proposal.greeting_message))
   }
 
   /** Bind the approval and execute it, from the one confirmation.
@@ -225,7 +235,9 @@ export default function ApplicationQueuePage() {
     setM6Busy(true)
     let approval: ApplicationApprovalOut
     try {
-      approval = await api.createApplicationApproval(m6Target.job_id, m6ResumeId)
+      approval = await api.createApplicationApproval(
+        m6Target.job_id, m6ResumeId, m6SendGreeting ? m6Greeting.trim() : '',
+      )
       setM6Approval(approval)
     } catch (err) {
       setM6Attempted(false) // Nothing was dispatched, so this may be retried.
@@ -863,7 +875,8 @@ export default function ApplicationQueuePage() {
                 <button
                   type="button"
                   className="btn-primary"
-                  disabled={m6Busy || !m6ResumeId || !m6DynamicAccepted || m6Attempted}
+                  disabled={m6Busy || !m6ResumeId || !m6DynamicAccepted || m6Attempted
+                    || (m6SendGreeting && !m6Greeting.trim())}
                   onClick={() => void confirmAndExecuteM6()}
                 >
                   {m6Busy
@@ -882,8 +895,18 @@ export default function ApplicationQueuePage() {
             {m6Approval?.title ?? m6Target.title}
           </p>
           <Alert tone="warn">
-            BOSS 会在点击「立即沟通」时发送平台动态决定的首次招呼语。
-            <strong> JobAgent 无法在点击前预览、独立核实或控制其正文</strong>，实际发送内容可能变化。
+            {m6SendGreeting ? (
+              <>
+                BOSS 有时会在点击「立即沟通」时自己发送一条招呼语，有时不会——两种情况都实际遇到过。
+                <strong> JobAgent 只在聊天框为空时才填写下面这段</strong>，
+                框里已经有内容就不发，避免连发两条。
+              </>
+            ) : (
+              <>
+                BOSS 会在点击「立即沟通」时发送平台动态决定的首次招呼语。
+                <strong> JobAgent 无法在点击前预览、独立核实或控制其正文</strong>，实际发送内容可能变化。
+              </>
+            )}
           </Alert>
           <div className="field">
             <label>岗位链接</label>
@@ -904,8 +927,40 @@ export default function ApplicationQueuePage() {
             </select>
           </div>
           <div className="field">
-            <label>首次招呼语</label>
-            <div className="greeting">未知（由 BOSS 动态生成，JobAgent 无法预览或控制）</div>
+            <label htmlFor="m6-greeting">首次招呼语</label>
+            <div className="checkbox-row">
+              <input
+                id="m6-send-greeting"
+                type="checkbox"
+                checked={m6SendGreeting}
+                disabled={m6Busy || m6Attempted}
+                onChange={(e) => setM6SendGreeting(e.target.checked)}
+              />
+              <label htmlFor="m6-send-greeting">
+                由 JobAgent 填写并发送下面这段（仅在聊天框为空时）
+              </label>
+            </div>
+            {m6SendGreeting ? (
+              <>
+                <textarea
+                  id="m6-greeting"
+                  rows={4}
+                  value={m6Greeting}
+                  disabled={m6Busy || m6Attempted}
+                  onChange={(e) => setM6Greeting(e.target.value)}
+                />
+                <div className="field-hint">
+                  这就是会被逐字打出去的内容，确认前可以随意修改。
+                  如果 BOSS 自己已经在聊天框里放了招呼语，这段<strong>不会</strong>发送——
+                  避免连发两条。只发一次，之后的任何消息仍然由你自己发。
+                </div>
+              </>
+            ) : (
+              <div className="greeting">
+                不填写。点击「立即沟通」后由 BOSS 决定是否发送以及发送什么，
+                JobAgent 无法预览、核实或控制。
+              </div>
+            )}
           </div>
           <div className="checkbox-row">
             <input
@@ -916,7 +971,9 @@ export default function ApplicationQueuePage() {
               onChange={(e) => setM6DynamicAccepted(e.target.checked)}
             />
             <label htmlFor="m6-dynamic-accept">
-              我接受 BOSS 为这个岗位动态生成未知的首次招呼语，并理解 JobAgent 无法预览、核实或控制正文。
+              {m6SendGreeting
+                ? '我已读过上面的招呼语，确认由 JobAgent 向这一个岗位发送它一次。'
+                : '我接受 BOSS 为这个岗位动态生成未知的首次招呼语，并理解 JobAgent 无法预览、核实或控制正文。'}
             </label>
           </div>
           <div className="field-hint">

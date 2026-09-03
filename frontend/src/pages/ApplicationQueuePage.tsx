@@ -77,6 +77,11 @@ export default function ApplicationQueuePage() {
   const [m6Busy, setM6Busy] = useState(false)
   const [m6Attempted, setM6Attempted] = useState(false)
   const [m6StatusUnknown, setM6StatusUnknown] = useState(false)
+  //: Why the last attempt did not happen, shown *in* the dialog. The first
+  //: live run failed with a precise reason that went to the page-level
+  //: banner behind the modal, so the only thing visible was a button that
+  //: had turned itself off.
+  const [m6Error, setM6Error] = useState<string | null>(null)
 
   const load = useCallback(async (active: QueueFilters) => {
     setLoading(true)
@@ -210,6 +215,7 @@ export default function ApplicationQueuePage() {
    */
   async function confirmAndExecuteM6() {
     if (!m6Target || !m6ResumeId || !m6DynamicAccepted || m6Attempted) return
+    setM6Error(null)
     setM6Attempted(true) // One confirmation can dispatch at most one command.
     setM6Busy(true)
     let approval: ApplicationApprovalOut
@@ -219,7 +225,9 @@ export default function ApplicationQueuePage() {
     } catch (err) {
       setM6Attempted(false) // Nothing was dispatched, so this may be retried.
       setM6Busy(false)
-      setFeedback({ tone: 'error', text: err instanceof ApiError ? err.message : '生成确认失败' })
+      const message = err instanceof ApiError ? err.message : '生成确认失败'
+      setM6Error(message)
+      setFeedback({ tone: 'error', text: message })
       return
     }
     await executeM6Approval(approval)
@@ -263,10 +271,9 @@ export default function ApplicationQueuePage() {
         setM6Approval(await api.applicationApproval(approval.id))
         setM6StatusUnknown(false)
       } catch { /* backend may be unavailable; keep modal open and approval non-retryable */ }
-      setFeedback({
-        tone: 'error',
-        text: err instanceof Error ? err.message : '执行结果未知；请到 BOSS 人工核对，勿重复点击。',
-      })
+      const message = err instanceof Error ? err.message : '执行结果未知；请到 BOSS 人工核对，勿重复点击。'
+      setM6Error(message)
+      setFeedback({ tone: 'error', text: message })
     } finally {
       setM6Busy(false)
     }
@@ -806,6 +813,7 @@ export default function ApplicationQueuePage() {
               <button type="button" disabled={m6Busy || m6Approval?.state === 'executing' || m6StatusUnknown} onClick={() => {
                 setM6Target(null)
                 setM6Approval(null)
+                setM6Error(null)
               }}>
                 取消
               </button>
@@ -814,7 +822,18 @@ export default function ApplicationQueuePage() {
                   {m6Busy ? '正在刷新…' : '刷新尝试状态'}
                 </button>
               ) : null}
-              {m6Approval?.state === 'executing' ? (
+              {m6Error ? (
+            <Alert tone="error">
+              {m6Error}
+              {m6Approval?.state === 'pending' || (!m6Approval && m6Attempted) ? (
+                <>
+                  <br />
+                  这次没有点击任何按钮，本确认也没有被消耗。关闭本窗口后可以重新确认一次。
+                </>
+              ) : null}
+            </Alert>
+          ) : null}
+          {m6Approval?.state === 'executing' ? (
                 <button
                   type="button"
                   disabled={m6Busy}

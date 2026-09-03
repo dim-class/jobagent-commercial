@@ -211,7 +211,12 @@ function loadBackground({ tab, fetchImpl, respond, tabUrlOverride, storage, befo
           tabsCreateCalls.push(properties)
           consoleTab.active = false
           Object.assign(tabState, { url: properties.url, active: true })
-          return { ...tabState }
+          // Faithful to Chrome: `tabs.create` resolves *before* the navigation
+          // commits, so the Tab it returns carries no `url` - the destination
+          // is in `pendingUrl`. The old mock returned the final URL, which is
+          // why a real M6 run refused its own correctly loaded page while every
+          // test passed. A mock that is kinder than the API hides exactly this.
+          return { ...tabState, url: '', pendingUrl: properties.url }
         },
         get: (tabId) => {
           tabsGetCalls.push(tabId)
@@ -2557,4 +2562,86 @@ test('only canonical query-stripped URLs reach the known-jobs check', { skip: SK
       assert.ok(!/lid|securityId/i.test(url), `a session token leaked: ${url}`)
     }
   }
+})
+
+test('M6 opens its own tab when there is none to reuse, and still clicks', async () => {
+  // The first real M6 run refused a correctly loaded page with 「BOSS 标签页来源
+  // 不正确」. `chrome.tabs.create({url})` resolves before the navigation commits,
+  // so the Tab it returns has an empty `url`; the origin check read that value
+  // and aborted. The page opened, nothing was clicked, and the approval was
+  // consumed for nothing.
+  const detailUrl = 'https://www.zhipin.com/job_detail/m6new.html'
+  const approval = {
+    id: 21, job_id: 9, company: '公司', title: '云平台工程师', canonical_url: detailUrl,
+    external_id: 'm6new', resume_id: 3, answers_text: '',
+    answers_hash: 'a'.repeat(64), answers_source: 'boss_dynamic_unverified', state: 'pending',
+  }
+  const { router, calls } = makeFetchRouter((url, init) => {
+    const method = (init && init.method) || 'GET'
+    if (url.endsWith('/api/application-approvals/21') && method === 'GET') return jsonResponse(approval)
+    if (url.endsWith('/api/application-approvals/21/validate')) return jsonResponse({ ok: true, approval })
+    if (url.endsWith('/api/application-approvals/21/begin')) return jsonResponse({ ...approval, state: 'executing' })
+    if (url.endsWith('/api/application-approvals/21/outcome')) return jsonResponse({ ...approval,
+      state: 'consumed', outcome: 'unknown' })
+    return undefined
+  })
+  const consoleTab = { id: 8, windowId: 2, url: 'http://127.0.0.1:5173/#/queue', active: true }
+  const env = loadBackground({
+    fetchImpl: router,
+    consoleTab,
+    // Nothing reusable: not a BOSS page, so the worker must create a tab.
+    tab: { url: 'https://example.test/', active: false },
+    respond: msg => {
+      if (msg.type === 'jobagent:m6-preflight') return Promise.resolve({ ok: true, result: {
+        status: 'ok', observed_url: detailUrl, observed_external_id: 'm6new' } })
+      if (msg.type === 'jobagent:m6-execute') return Promise.resolve({ ok: true, result: {
+        status: 'clicked', observed_url: detailUrl, observed_external_id: 'm6new' } })
+      return Promise.resolve({ ok: false })
+    },
+  })
+
+  const reply = await env.send(
+    { type: 'jobagent:console-command', action: 'execute-application', approvalId: 21 },
+    { tab: { id: 8 }, frameId: 0, url: consoleTab.url },
+  )
+
+  assert.equal(reply.ok, true, `refused its own tab: ${reply.error}`)
+  assert.equal(env.tabsCreateCalls.length, 1)
+  assert.equal(env.tabsCreateCalls[0].url, detailUrl)
+  assert.deepEqual(env.tabsSendMessageCalls.map(c => c.message.type), [
+    'jobagent:m6-preflight', 'jobagent:m6-execute',
+  ])
+  assert.equal(calls.filter(c => c.url.endsWith('/begin')).length, 1)
+})
+
+test('M6 refuses a tab that settles on a different page, and never clicks', async () => {
+  // The relaxed origin check must still fail closed: reading the settled tab
+  // is about reading it at the right time, not about trusting it.
+  const detailUrl = 'https://www.zhipin.com/job_detail/m6other.html'
+  const approval = {
+    id: 22, job_id: 9, company: '公司', title: '云平台工程师', canonical_url: detailUrl,
+    external_id: 'm6other', resume_id: 3, answers_text: '',
+    answers_hash: 'a'.repeat(64), answers_source: 'boss_dynamic_unverified', state: 'pending',
+  }
+  const { router, calls } = makeFetchRouter(url =>
+    url.endsWith('/api/application-approvals/22') ? jsonResponse(approval) : undefined)
+  const consoleTab = { id: 8, windowId: 2, url: 'http://127.0.0.1:5173/#/queue', active: true }
+  const env = loadBackground({
+    fetchImpl: router,
+    consoleTab,
+    tab: { url: detailUrl, active: false },
+    // Whatever is asked for, the tab reports a different BOSS job.
+    tabUrlOverride: () => 'https://www.zhipin.com/job_detail/somethingelse.html',
+    respond: () => Promise.resolve({ ok: false }),
+  })
+
+  const reply = await env.send(
+    { type: 'jobagent:console-command', action: 'execute-application', approvalId: 22 },
+    { tab: { id: 8 }, frameId: 0, url: consoleTab.url },
+  )
+
+  assert.equal(reply.ok, false)
+  assert.equal(env.tabsSendMessageCalls.filter(c =>
+    String(c.message.type).startsWith('jobagent:m6-')).length, 0, 'nothing was asked of the page')
+  assert.equal(calls.filter(c => c.url.endsWith('/begin')).length, 0, 'the attempt was never claimed')
 })

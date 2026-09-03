@@ -2935,6 +2935,21 @@ function isM6CanonicalUrl(raw: string, externalId: string): boolean {
 }
 
 /** One event-driven navigation wait. The timeout can only stop; it never triggers a click. */
+/** The tab as it is *now*, or undefined if it is gone. */
+async function m6Tab(tabId: number): Promise<chrome.tabs.Tab | undefined> {
+  try {
+    return await chrome.tabs.get(tabId)
+  } catch {
+    return undefined
+  }
+}
+
+/** A tab's URL with the query and fragment removed, for identity comparison. */
+function m6PageUrl(tab: chrome.tabs.Tab | undefined): string | null {
+  if (!tab?.url) return null
+  return tab.url.split('?')[0].split('#')[0]
+}
+
 async function openM6Detail(tabId: number, canonicalUrl: string): Promise<boolean> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined
   return new Promise<boolean>((resolve) => {
@@ -2988,13 +3003,34 @@ async function executeM6Application(
       ? await chrome.tabs.update(existing.id, { active: true })
       : await chrome.tabs.create({ url: approval.canonical_url, active: true, windowId: source.windowId! })
     if (target.id === undefined) return { ok: false, error: '无法建立前台 BOSS 标签页；不会执行。' }
+    const tabId = target.id
     const focused = await foregroundStartTab()
-    if (!focused.ok || focused.tab.id !== target.id) return { ok: false, error: 'BOSS 标签页不是前台；不会执行。' }
-    if (!target.url || new URL(target.url).origin !== REQUIRED_ORIGIN) return { ok: false, error: 'BOSS 标签页来源不正确；不会执行。' }
-    if (target.url.split('?')[0].split('#')[0] !== approval.canonical_url) {
-      if (!await openM6Detail(target.id, approval.canonical_url)) {
+    if (!focused.ok || focused.tab.id !== tabId) return { ok: false, error: 'BOSS 标签页不是前台；不会执行。' }
+
+    // Read the tab fresh rather than trusting what create/update returned.
+    // `chrome.tabs.create({url})` resolves before the navigation commits, so
+    // the Tab it hands back has an empty `url` (the destination sits in
+    // `pendingUrl`). Checking that value aborted every attempt that had to open
+    // a new tab: the detail page loaded, the origin check saw "" and refused,
+    // and nothing was ever clicked - which is exactly what the first live run
+    // did, reporting 「BOSS 标签页来源不正确」 over a correctly loaded page.
+    let current = await m6Tab(tabId)
+    if (m6PageUrl(current) !== approval.canonical_url) {
+      // Navigating here is safe by construction: `canonical_url` already
+      // passed `isM6CanonicalUrl`, so it is exactly one BOSS detail page.
+      if (!await openM6Detail(tabId, approval.canonical_url)) {
         return { ok: false, error: '岗位详情页未在时限内加载；不会执行或重试。' }
       }
+      current = await m6Tab(tabId)
+    }
+    // Both guards now run against the settled page, immediately before the
+    // preflight. Neither is relaxed - a tab that is not exactly this BOSS
+    // detail page still stops the attempt without clicking.
+    if (!current?.url || new URL(current.url).origin !== REQUIRED_ORIGIN) {
+      return { ok: false, error: 'BOSS 标签页来源不正确；不会执行。' }
+    }
+    if (m6PageUrl(current) !== approval.canonical_url) {
+      return { ok: false, error: '标签页不是这次确认的岗位详情页；不会执行。' }
     }
     const identity = {
       canonical_url: approval.canonical_url,
@@ -3002,7 +3038,7 @@ async function executeM6Application(
       company: approval.company,
       title: approval.title,
     }
-    const preflight = await askTab<M6PageResult>(target.id, {
+    const preflight = await askTab<M6PageResult>(tabId, {
       type: 'jobagent:m6-preflight', applicationIdentity: identity,
     }, true)
     if (!preflight.ok || !preflight.result || preflight.result.status !== 'ok'
@@ -3020,12 +3056,12 @@ async function executeM6Application(
       method: 'POST', body: observed,
     })
 
-    const alive = await verifyRunnerTab(target.id)
+    const alive = await verifyRunnerTab(tabId)
     if (!alive.ok) {
       await settleM6Outcome(approval, observed, 'failed', `foreground_lost:${alive.reason}`)
       return { ok: false, application: { approvalId, outcome: 'failed', detail: alive.reason }, error: '领取尝试后前台状态变化；未点击且不会重试。' }
     }
-    const executed = await askTab<M6PageResult>(target.id, {
+    const executed = await askTab<M6PageResult>(tabId, {
       type: 'jobagent:m6-execute', applicationIdentity: identity,
     })
     if (!executed.ok || !executed.result) {

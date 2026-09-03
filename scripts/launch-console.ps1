@@ -15,6 +15,13 @@ param(
     [switch]$Stop,
     [switch]$NoOpen,
     [switch]$SingleProcess,
+    # Restart the backend when its source changes. Off by default, because for
+    # someone who is only *running* JobAgent a file watcher is pure overhead.
+    # On while editing it: without this the backend keeps serving the code it
+    # started with, and a change that is already on disk, built, and tested
+    # simply does not take effect - which reads as a broken feature rather than
+    # a stale process, and cost several rounds of exactly that.
+    [switch]$Reload,
     [string]$DataDir,
     [ValidateRange(1024, 65535)][int]$BackendPort = 8000,
     [ValidateRange(1024, 65535)][int]$FrontendPort = 5173
@@ -141,6 +148,10 @@ if (-not (Test-Http $healthUrl)) {
     } else {
         $backendOut = Join-Path $StateDir 'backend.stdout.log'
         $backendErr = Join-Path $StateDir 'backend.stderr.log'
+        # Defined before the branch: both start paths use one of these, and a
+        # variable set inside the `if` would be undefined on the `else` path.
+        $reloadFlag = if ($Reload) { ' --reload' } else { '' }
+        $reloadArgs = if ($Reload) { @('--reload') } else { @() }
         if ($SingleProcess) {
             $runtimeData = if ($DataDir) {
                 [System.IO.Path]::GetFullPath($DataDir)
@@ -154,14 +165,14 @@ if (-not (Test-Http $healthUrl)) {
             $command = "`$env:JOBAGENT_DATA_DIR=$runtimeDataLiteral; " +
                 "`$env:JOBAGENT_SERVE_FRONTEND='true'; " +
                 "`$env:JOBAGENT_FRONTEND_DIR=$frontendDistLiteral; " +
-                "& $pythonLiteral -m uvicorn app.main:app --host 127.0.0.1 --port $BackendPort"
+                "& $pythonLiteral -m uvicorn app.main:app --host 127.0.0.1 --port $BackendPort$reloadFlag"
             Start-Process -FilePath 'powershell.exe' `
                 -ArgumentList @('-NoProfile', '-Command', $command) `
                 -WorkingDirectory $BackendDir -WindowStyle Hidden `
                 -RedirectStandardOutput $backendOut -RedirectStandardError $backendErr | Out-Null
         } else {
             Start-Process -FilePath $Python `
-                -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', "$BackendPort") `
+                -ArgumentList (@('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', "$BackendPort") + $reloadArgs) `
                 -WorkingDirectory $BackendDir -WindowStyle Hidden `
                 -RedirectStandardOutput $backendOut -RedirectStandardError $backendErr | Out-Null
         }

@@ -134,6 +134,14 @@ v0.2 的**浏览器采集**仍然保留，但许多招聘网站会拒绝向自�
 启动的服务时，双击 `Stop-JobAgent.cmd`；它只停止自己记录的监听进程，不会关闭其他 Python
 或 Node 程序。首次安装依赖仍需运行一次 `.\scripts\dev.ps1 setup`。
 
+**改后端代码时加 `-Reload`。** 默认不开：只是运行 JobAgent 的人不需要一个文件监视器。
+但后端启动后会一直跑它启动时的那份代码——改动已经落盘、构建过、测试过，运行中的后端
+依然感知不到，看起来就像功能坏了而不是进程旧了。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\launch-console.ps1 -Reload
+```
+
 商用分支仍提供过渡性的 `Start-JobAgent-Commercial.cmd`：先在 `frontend` 目录执行一次
 `npm run build`，之后它只启动 FastAPI 一个进程，由后端直接提供已构建前端，日常运行不需要
 Node；数据默认写入 `%LOCALAPPDATA%\JobAgent`，不会写入源码或提交到 Git。这仍是 P2 的运行

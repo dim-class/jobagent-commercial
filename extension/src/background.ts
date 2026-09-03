@@ -2991,7 +2991,8 @@ async function settleM6Outcome(
 async function executeM6Application(
   approvalId: number,
   source: chrome.tabs.Tab,
-): Promise<{ ok: boolean; error?: string; application?: { approvalId: number; outcome: 'unknown' | 'failed'; detail: string } }> {
+): Promise<{ ok: boolean; error?: string; code?: string;
+  application?: { approvalId: number; outcome: 'unknown' | 'failed'; detail: string } }> {
   if (m6AttemptBusy) return { ok: false, error: '已有单岗位投递确认正在处理；不会并发或重复执行。' }
   m6AttemptBusy = true
   try {
@@ -3055,7 +3056,12 @@ async function executeM6Application(
     }, true)
     if (!preflight.ok || !preflight.result || preflight.result.status !== 'ok'
       || !preflight.result.observed_url || !preflight.result.observed_external_id) {
-      return { ok: false, error: `投递前检查未通过：${preflight.result?.status || preflight.error || 'unavailable'}。不会执行。` }
+      // The status travels as a `code` as well as inside the message: the
+      // console can explain a refusal in plain language, and several of these
+      // are correct refusals rather than faults.
+      const reason = preflight.result?.status || preflight.error || 'unavailable'
+      return { ok: false, code: `m6_preflight/${reason}`,
+        error: `投递前检查未通过：${reason}。不会执行。` }
     }
     const observed = {
       observed_url: preflight.result.observed_url,

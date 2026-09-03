@@ -142,7 +142,12 @@ var BossSelectors = {
    * button after one.
    */
   GREETING_INPUT: ['textarea'] as string[],
-  GREETING_SEND: ['button', '[role="button"]', 'a'] as string[],
+  // A live run found the textarea and confirmed it empty, then failed with
+  // `no_send_control`: BOSS's 发送 is not a <button>. Widened to the elements a
+  // site actually uses for one. This stays safe because the match is still
+  // "exactly one visible element whose own text is 发送" - more candidates can
+  // only produce ambiguity, which refuses, never a wrong click.
+  GREETING_SEND: ['button', '[role="button"]', 'a', 'div', 'span'] as string[],
   GREETING_SEND_TEXT: ['发送'] as string[],
 
   COMPANY: [

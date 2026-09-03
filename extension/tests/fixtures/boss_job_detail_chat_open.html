@@ -31,7 +31,9 @@
   <div class="chat-panel">
     <div class="chat-history"></div>
     <textarea class="chat-input" placeholder="请简短描述您的问题"></textarea>
-    <button type="button" class="btn-send">发送</button>
+    <!-- A live run failed here: BOSS's send control is not a <button>, and
+         it nests a span inside a div - both read as 发送. -->
+    <div class="btn-send"><span>发送</span></div>
   </div>
 
   <!-- A second, hidden composer elsewhere on the page: the resolver must not

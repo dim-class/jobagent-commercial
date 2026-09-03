@@ -1267,9 +1267,13 @@ var BossExtract = (function () {
             return { status: 'input_not_empty' };
         const wanted = BossSelectors.GREETING_SEND_TEXT;
         for (let scope = input.parentElement; scope; scope = scope.parentElement) {
-            const controls = Array.from(scope.querySelectorAll(BossSelectors.GREETING_SEND.join(',')))
+            const matches = Array.from(scope.querySelectorAll(BossSelectors.GREETING_SEND.join(',')))
                 .filter(visible)
                 .filter((node) => wanted.some((label) => text(node) === label));
+            // A wrapper and the element inside it both read as 发送. That is nesting,
+            // not ambiguity: keep only the innermost, which is the thing a person
+            // clicks. Two *unrelated* controls still fail closed below.
+            const controls = matches.filter((node) => !matches.some((other) => other !== node && node.contains(other)));
             if (controls.length === 1) {
                 return { status: 'ok', input, send: controls[0] };
             }

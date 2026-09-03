@@ -2768,7 +2768,12 @@ async function executeM6Application(approvalId, source) {
         }, true);
         if (!preflight.ok || !preflight.result || preflight.result.status !== 'ok'
             || !preflight.result.observed_url || !preflight.result.observed_external_id) {
-            return { ok: false, error: `投递前检查未通过：${preflight.result?.status || preflight.error || 'unavailable'}。不会执行。` };
+            // The status travels as a `code` as well as inside the message: the
+            // console can explain a refusal in plain language, and several of these
+            // are correct refusals rather than faults.
+            const reason = preflight.result?.status || preflight.error || 'unavailable';
+            return { ok: false, code: `m6_preflight/${reason}`,
+                error: `投递前检查未通过：${reason}。不会执行。` };
         }
         const observed = {
             observed_url: preflight.result.observed_url,

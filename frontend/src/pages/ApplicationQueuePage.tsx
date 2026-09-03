@@ -29,6 +29,31 @@ import type {
   Verdict,
 } from '@/types'
 
+/** Plain-language readings of an M6 preflight refusal.
+ *
+ * Several of these are the gate working, not a fault - most often a job that
+ * has already been contacted, whose control now reads 继续沟通. Handing the
+ * raw status to the reader made a correct refusal look identical to a bug.
+ */
+const M6_PREFLIGHT_REASON: Record<string, string> = {
+  control_wrong_state:
+    '这个岗位已经沟通过了（按钮显示「继续沟通」）。M6 只负责第一次投递，'
+    + '不会点击已有对话的按钮。换一个还没沟通过的岗位即可。',
+  control_missing: '页面上找不到「立即沟通」按钮，可能页面还没加载完或版式变了。',
+  control_ambiguous: '页面上有多个「立即沟通」按钮，无法确定该点哪个，已停止。',
+  control_disabled: '「立即沟通」按钮处于不可点击状态。',
+  login_required: 'BOSS 要求登录。请自己在浏览器里登录后再试。',
+  verification: 'BOSS 正在显示安全验证。请自己完成验证 —— JobAgent 不会代你处理。',
+  wrong_page: '当前标签页不是岗位详情页。',
+  identity_mismatch: '页面上的岗位与本次确认的不是同一个，已停止。',
+}
+
+function explainM6Failure(code: string | undefined, message: string): string {
+  const status = code?.startsWith('m6_preflight/') ? code.slice('m6_preflight/'.length) : ''
+  const reason = M6_PREFLIGHT_REASON[status]
+  return reason ? `${reason}\n（原始状态：${status}）` : message
+}
+
 type Feedback = { tone: 'success' | 'error' | 'info' | 'warn'; text: string } | null
 
 const SORT_LABEL: Record<string, string> = {
@@ -269,7 +294,7 @@ export default function ApplicationQueuePage() {
         if (reply.code === 'extension_context_unavailable' || reply.code === 'worker_unavailable') {
           setM6StaleBridge(true)
         }
-        throw new Error(reply.error || '扩展未确认执行结果')
+        throw new Error(explainM6Failure(reply.code, reply.error || '扩展未确认执行结果'))
       }
       const attemptedJob = m6Target
       const attemptedResumeId = approval.resume_id
@@ -846,7 +871,7 @@ export default function ApplicationQueuePage() {
               ) : null}
               {m6Error ? (
             <Alert tone="error">
-              {m6Error}
+              <span style={{ whiteSpace: 'pre-line' }}>{m6Error}</span>
               {m6Approval?.state === 'pending' || (!m6Approval && m6Attempted) ? (
                 <>
                   <br />

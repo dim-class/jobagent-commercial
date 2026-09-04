@@ -489,7 +489,8 @@ test('console status exposes no browser/session secrets or discovery history and
   // Chrome reloads it, and a run behaving like the old build is otherwise very
   // hard to distinguish from a broken new one.
   assert.deepEqual(Array.from(reply.capabilities), ['console-search-v1', 'console-batch-v1',
-    'salary-backfill-v1', 'human-confirmed-apply-v1', 'skip-stored-candidates-v1'])
+    'salary-backfill-v1', 'human-confirmed-apply-v1', 'skip-stored-candidates-v1',
+    'read-search-filters-v1'])
   assert.deepEqual(Object.keys(reply).sort(), ['batch', 'capabilities', 'extensionVersion', 'ok', 'protocol', 'runner', 'salaryBackfill'])
   assert.equal(reply.salaryBackfill, null)
   assert.equal(env.tabsCreateCalls.length, 0)
@@ -2782,4 +2783,47 @@ test('a failed skip is never reported as a skip', { skip: SKIP }, async () => {
   assert.doesNotMatch(reply.error, /已自动跳过/)
   assert.match(reply.error, /自动跳过失败/)
   assert.equal(h.calls.filter(c => c.url.endsWith('/begin')).length, 0)
+})
+
+
+test('reading BOSS filters returns codes only, never session tokens', { skip: SKIP }, async () => {
+  // The point is to stop the user copying the address bar by hand - but that
+  // address bar carries `lid` and `securityId`, which must not reach even a
+  // local page. The URL is rebuilt from an allowlist rather than trimmed.
+  const dirty = 'https://www.zhipin.com/web/geek/jobs'
+    + '?city=101010100&query=%E4%BA%91&experience=104,101&salary=406'
+    + '&lid=SECRET-LID&securityId=SECRET-TOKEN&utm=x'
+  const { router } = makeFetchRouter()
+  const consoleTab = { id: 8, windowId: 2, url: 'http://127.0.0.1:5173/#/console', active: true }
+  const env = loadBackground({ fetchImpl: router, consoleTab, tab: { url: dirty, active: false } })
+
+  const reply = await env.send(
+    { type: 'jobagent:console-command', action: 'read-search-filters' },
+    { tab: { id: 8 }, frameId: 0, url: consoleTab.url },
+  )
+
+  assert.equal(reply.ok, true, reply.error)
+  assert.ok(!reply.filterUrl.includes('SECRET-LID'))
+  assert.ok(!reply.filterUrl.includes('SECRET-TOKEN'))
+  assert.ok(!reply.filterUrl.includes('utm'))
+  assert.ok(reply.filterUrl.includes('experience=104,101'))
+  assert.ok(reply.filterUrl.includes('salary=406'))
+  // city and query stay with JobAgent's own choices, never the read page.
+  assert.ok(!reply.filterUrl.includes('city='))
+  assert.ok(!reply.filterUrl.includes('query='))
+})
+
+test('reading BOSS filters refuses when there is nothing to read', { skip: SKIP }, async () => {
+  const { router } = makeFetchRouter()
+  const consoleTab = { id: 8, windowId: 2, url: 'http://127.0.0.1:5173/#/console', active: true }
+  const env = loadBackground({
+    fetchImpl: router, consoleTab,
+    tab: { url: 'https://www.zhipin.com/web/geek/jobs?city=101010100', active: false },
+  })
+  const reply = await env.send(
+    { type: 'jobagent:console-command', action: 'read-search-filters' },
+    { tab: { id: 8 }, frameId: 0, url: consoleTab.url },
+  )
+  assert.equal(reply.ok, false)
+  assert.match(reply.error, /没有设置任何可复用的筛选条件/)
 })

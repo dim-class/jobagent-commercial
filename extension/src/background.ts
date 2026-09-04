@@ -3190,12 +3190,69 @@ async function executeM6Application(
   }
 }
 
+/** Filter parameters BOSS puts in a results-page URL that JobAgent may reuse.
+ *
+ * A mirror of `boss_search_filters.ALLOWED_FILTERS`; the backend re-checks the
+ * list and is the authority. Mirrored here so `lid` and `securityId` never
+ * leave the tab in the first place - not even to a local page - rather than
+ * being stripped after the fact.
+ */
+const READABLE_FILTERS = [
+  'salary', 'multiBusinessDistrict', 'experience', 'degree',
+  'industry', 'scale', 'stage', 'jobType', 'position',
+]
+
+/** The filters already applied on a BOSS results tab the human has open.
+ *
+ * Reads a tab's URL and nothing else: no DOM, no navigation, no click. The
+ * human picks the filters on BOSS the way they always would; this removes only
+ * the part where they copy the address bar into JobAgent by hand.
+ */
+async function readSearchFilters(source: chrome.tabs.Tab): Promise<unknown> {
+  if (source.windowId === undefined) return { ok: false, error: '无法确定当前窗口。' }
+  const tabs = await chrome.tabs.query({ windowId: source.windowId })
+  const results = tabs.filter((tab) => {
+    if (!tab.url) return false
+    try {
+      const url = new URL(tab.url)
+      return `${url.protocol}//${url.host}` === REQUIRED_ORIGIN
+        && url.pathname.startsWith('/web/geek/job')
+    } catch {
+      return false
+    }
+  })
+  if (!results.length) {
+    return { ok: false, error: '这个窗口里没有打开 BOSS 的职位搜索页。请先在 BOSS 上搜索并点好筛选条件。' }
+  }
+  if (results.length > 1) {
+    return { ok: false, error: `这个窗口里有 ${results.length} 个 BOSS 搜索页，无法确定用哪一个。请只留一个。` }
+  }
+
+  const found = new URL(results[0].url as string)
+  const kept: string[] = []
+  for (const key of READABLE_FILTERS) {
+    const value = found.searchParams.get(key)
+    // Same shape the backend accepts: codes, or comma-separated codes. Anything
+    // else is not a filter value and is left behind.
+    if (value && /^[0-9]{1,12}(,[0-9]{1,12}){0,19}$/.test(value)) {
+      kept.push(`${encodeURIComponent(key)}=${value}`)
+    }
+  }
+  if (!kept.length) {
+    return { ok: false, error: '这个 BOSS 搜索页上没有设置任何可复用的筛选条件。' }
+  }
+  // Rebuilt from the allowlist rather than trimmed: nothing unrecognised can
+  // ride along, including the session tokens BOSS keeps in the query.
+  return { ok: true, filterUrl: `${REQUIRED_ORIGIN}/web/geek/jobs?${kept.join('&')}` }
+}
+
 async function consoleCommand(message: unknown, sender: chrome.runtime.MessageSender): Promise<unknown> {
   const data = message as { action?: string; taskId?: number; taskIds?: unknown; candidateCap?: unknown;
     runId?: number; approvalId?: number; jobId?: number }
   const foregroundAction = ['start', 'resume', 'start-batch', 'resume-batch',
     'start-salary-backfill', 'resume-salary-backfill', 'execute-application'].includes(data.action || '')
   const source = await consoleSourceTab(sender, foregroundAction)
+  if (data.action === 'read-search-filters') return readSearchFilters(source)
   if (data.action === 'status') {
     const pointer = await getRunnerPointer()
     const batch = await getBatchPointer()
@@ -3206,7 +3263,8 @@ async function consoleCommand(message: unknown, sender: chrome.runtime.MessageSe
       // until Chrome reloads the extension, and a run that silently behaves
       // like the old build is very hard to tell apart from a broken new one.
       capabilities: ['console-search-v1', 'console-batch-v1', 'salary-backfill-v1',
-        'human-confirmed-apply-v1', 'skip-stored-candidates-v1'], runner: pointer ? {
+        'human-confirmed-apply-v1', 'skip-stored-candidates-v1',
+        'read-search-filters-v1'], runner: pointer ? {
       taskId: pointer.taskId, phase: pointer.phase, paused: pointer.pauseRequested,
       paid: pointer.autoMatch === true, candidateCap: pointer.candidateCap,
     } : null, batch: batch ? {

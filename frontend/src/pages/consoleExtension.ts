@@ -2,6 +2,9 @@ export type ConsoleAction = 'status' | 'start' | 'pause' | 'resume' | 'cancel'
   | 'start-batch' | 'pause-batch' | 'resume-batch' | 'cancel-batch'
   | 'start-salary-backfill' | 'pause-salary-backfill' | 'resume-salary-backfill'
   | 'cancel-salary-backfill' | 'execute-application'
+  //: Read-only: reports the filters already set on a BOSS tab the human
+  //: has open. No navigation, no DOM, no page change.
+  | 'read-search-filters'
 export interface ConsoleBatchStatus {
   state: 'running' | 'paused' | 'completed' | 'stopped'
   taskIds: number[]
@@ -13,6 +16,10 @@ export interface ConsoleBatchStatus {
 }
 export interface ConsoleReply {
   ok: boolean
+  /** A BOSS results URL carrying only reusable filter parameters, rebuilt by
+   *  the extension from an allowlist - never the raw tab URL, which holds
+   *  session tokens. Present only for `read-search-filters`. */
+  filterUrl?: string
   error?: string
   code?: string
   protocol?: number

@@ -14,7 +14,11 @@
       || data.id.length > 80 || !['status', 'start', 'pause', 'resume', 'cancel',
         'start-batch', 'pause-batch', 'resume-batch', 'cancel-batch',
         'start-salary-backfill', 'pause-salary-backfill', 'resume-salary-backfill',
-        'cancel-salary-backfill', 'execute-application'].includes(data.action || '')) return
+        'cancel-salary-backfill', 'execute-application',
+        // Read-only: reports the filters already set on a BOSS tab the human
+        // has open. No navigation, no DOM, no page change - but still gated on
+        // a real button press below, like every other action here.
+        'read-search-filters'].includes(data.action || '')) return
     const reply = (result: unknown) => window.postMessage({
       channel: 'jobagent-console-response', id: data.id, result,
     }, location.origin)

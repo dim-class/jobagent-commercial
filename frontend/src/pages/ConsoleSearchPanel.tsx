@@ -68,6 +68,8 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
   const [chosenNotes, setChosenNotes] = useState<string[]>([])
   //: The AI's read of the résumé. Loaded on open because reading is free; the
   //: analysis itself only runs on an explicit click.
+  const [filterBusy, setFilterBusy] = useState(false)
+  const [filterNote, setFilterNote] = useState('')
   const [aiPlan, setAiPlan] = useState<DirectionAnalysisPlan | null>(null)
   const [aiBusy, setAiBusy] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
@@ -197,6 +199,42 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       .catch(() => { if (alive) setAiPlan(null) })
     return () => { alive = false }
   }, [])
+
+  /** Take the filters from a BOSS tab the human already has open.
+   *
+   * They choose the filters on BOSS the way they always would; this removes
+   * only the part where they copy the address bar back into JobAgent, which is
+   * the step that kept getting skipped. Read-only: the extension reports one
+   * tab's URL parameters and touches nothing.
+   */
+  async function readFiltersFromBoss() {
+    if (filterBusy) return
+    setFilterBusy(true); setFilterNote('')
+    try {
+      const reply = await consoleExtension('read-search-filters')
+      if (!reply.ok || !reply.filterUrl) {
+        setFilterNote(reply.error || '没有读到筛选条件。')
+        return
+      }
+      const next = reply.filterUrl
+      // Appended, not replaced: several segments is the point - one per salary
+      // band, say - and silently discarding the ones already set would undo
+      // work the user did on BOSS.
+      const already = filterLines.includes(next)
+      if (already) {
+        setFilterNote('这条筛选已经在列表里了。')
+        return
+      }
+      const merged = [...filterLines, next].join(NEWLINE)
+      setFilterUrls(merged)
+      saveSegments(merged)
+      setFilterNote('已读取当前 BOSS 标签页的筛选条件。')
+    } catch (err) {
+      setFilterNote(err instanceof ApiError ? err.message : '读取失败。')
+    } finally {
+      setFilterBusy(false)
+    }
+  }
 
   /** The only place this feature spends money, and only on a click. */
   async function analyzeDirections(force: boolean) {
@@ -515,15 +553,27 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
         每行会成为一个独立的搜索分段，各自拥有完整的候选名额。
         只读取筛选参数；城市与岗位方向仍由上面的选择和简历排序决定。
       </p>
-      {portfolioTasks[0]?.search_url ? (
-        <p className="small faint">
-          还没设过筛选？
-          <a href={portfolioTasks[0].search_url} target="_blank" rel="noreferrer">
-            用上次的条件打开 BOSS 搜索页 ↗
+      <div className="row mt-1">
+        <button
+          type="button"
+          className="btn-sm"
+          disabled={filterBusy || !connection?.capabilities?.includes('read-search-filters-v1')}
+          onClick={() => void readFiltersFromBoss()}
+        >
+          {filterBusy ? '读取中…' : '读取当前 BOSS 标签页的筛选条件'}
+        </button>
+        {portfolioTasks[0]?.search_url ? (
+          <a href={portfolioTasks[0].search_url} target="_blank" rel="noreferrer" className="small">
+            打开 BOSS 搜索页 ↗
           </a>
-          ，在页面上点好「工作经验」「薪资待遇」等筛选，再把地址栏整条粘到上面。
-          JobAgent 只取筛选参数，城市和岗位方向仍由这里决定。
-        </p>
+        ) : null}
+        <span className="small faint">
+          在 BOSS 上点好「工作经验」「薪资待遇」等筛选，回来点左边的按钮即可 —— 不用复制粘贴。
+        </span>
+      </div>
+      {filterNote ? <p className="small faint">{filterNote}</p> : null}
+      {connection?.capabilities && !connection.capabilities.includes('read-search-filters-v1') ? (
+        <p className="small faint">浏览器里的扩展还是旧版本，读取按钮不可用；重新加载扩展后可用。</p>
       ) : null}
 
       {filterLines.length ? (

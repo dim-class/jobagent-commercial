@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { ApiError, api } from '@/api/client'
 import { nextMatchResult } from '@/pages/matchResultLifecycle'
 import AutoMatchReviewPanel from '@/pages/AutoMatchReviewPanel'
+import { startFullSalaryBackfill } from '@/pages/salaryBackfill'
 import ConsoleSearchPanel from '@/pages/ConsoleSearchPanel'
 import CrossTaskMatchPanel from '@/pages/CrossTaskMatchPanel'
 import SalaryBackfillPanel from '@/pages/SalaryBackfillPanel'
@@ -86,6 +87,8 @@ export default function ConsolePage() {
   //: requestAnimationFrame: rAF fires before React commits, so the scroll
   //: looked up an element that did not exist yet and silently did nothing.
   const pendingSalaryScroll = useRef(false)
+  const [salaryBusy, setSalaryBusy] = useState(false)
+  const [salaryNote, setSalaryNote] = useState('')
   const [showAdvancedConsole, setShowAdvancedConsole] = useState(false)
 
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null)
@@ -466,14 +469,35 @@ export default function ConsolePage() {
           </span>
           <button
             type="button"
+            className="btn-primary btn-sm"
+            disabled={salaryBusy}
+            onClick={() => {
+              setSalaryBusy(true)
+              setSalaryNote('')
+              void startFullSalaryBackfill()
+                .then(async (result) => {
+                  setSalaryNote(result.message)
+                  await loadMissingSalaries()
+                })
+                .catch((err) => setSalaryNote(
+                  err instanceof ApiError ? err.message : '启动薪资补全失败。',
+                ))
+                .finally(() => setSalaryBusy(false))
+            }}
+          >
+            {salaryBusy ? '正在启动…' : '现在补全'}
+          </button>
+          <button
+            type="button"
             className="btn-sm"
             onClick={() => {
               pendingSalaryScroll.current = true
               setShowAdvancedConsole(true)
             }}
           >
-            去补全薪资
+            查看详情
           </button>
+          {salaryNote ? <span className="small faint">{salaryNote}</span> : null}
         </div>
       ) : null}
 

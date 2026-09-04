@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 import { api, ApiError } from '@/api/client'
 import { consoleExtension } from '@/pages/consoleExtension'
+import { startFullSalaryBackfill } from '@/pages/salaryBackfill'
 import type { SalaryBackfillPlan, SalaryBackfillRun } from '@/types'
 
 export default function SalaryBackfillPanel() {
@@ -48,14 +49,20 @@ export default function SalaryBackfillPanel() {
     if (!window.confirm(confirmation)) return
     setBusy(true)
     try {
-      const created = await api.createSalaryBackfillRun(plan)
-      setRun(created)
-      if (all) await api.authorizeSalaryBackfillRemaining(created.id)
-      const reply = await consoleExtension('start-salary-backfill', undefined, undefined, undefined, created.id)
-      if (!reply.ok) setMessage(reply.error || '计划已创建，但未启动。')
-      else setMessage(all
-        ? `已启动，本次连续处理全部 ${created.total_jobs} 个；异常时会自动暂停。`
-        : '首批已启动，最多处理 3 个。')
+      if (all) {
+        // Shared with the console's one-click prompt: two copies of a sequence
+        // that authorises browser work would eventually disagree about what it
+        // authorises.
+        const result = await startFullSalaryBackfill()
+        setMessage(result.message)
+      } else {
+        const created = await api.createSalaryBackfillRun(plan)
+        setRun(created)
+        const reply = await consoleExtension(
+          'start-salary-backfill', undefined, undefined, undefined, created.id,
+        )
+        setMessage(reply.ok ? '首批已启动，最多处理 3 个。' : (reply.error || '计划已创建，但未启动。'))
+      }
       await refresh()
     } catch (error) { setMessage(error instanceof Error ? error.message : '创建失败。') }
     finally { setBusy(false) }

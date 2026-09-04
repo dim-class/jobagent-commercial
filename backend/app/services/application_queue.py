@@ -96,11 +96,53 @@ def proposal_state(job: Job, *, now: datetime | None = None) -> ProposalState:
     return ProposalState.pending
 
 
-def build_proposal(job: Job, *, now: datetime | None = None) -> ApplicationProposal | None:
+#: Statuses that mean "a conversation with this company already exists".
+#: Applying is a stage rather than an endpoint, so everything downstream of it
+#: counts - a job that went to interview was still contacted.
+_CONTACTED_STATUSES = frozenset(
+    {
+        JobStatus.applied,
+        JobStatus.replied,
+        JobStatus.interview,
+        JobStatus.offer,
+        JobStatus.rejected,
+    }
+)
+
+
+def contacted_companies(jobs: list[Job]) -> dict[str, Job]:
+    """The one already-contacted job per company, if any.
+
+    Normalised on whitespace only: 「阿里云」 and 「阿里云 」 are the same
+    employer, but nothing further is collapsed - trimming punctuation would
+    start merging companies that merely look alike.
+    """
+    contacted: dict[str, Job] = {}
+    for job in jobs:
+        if job.status not in _CONTACTED_STATUSES or not job.company:
+            continue
+        key = "".join((job.company or "").split())
+        # Keep the most recent, so the heads-up names the freshest contact.
+        previous = contacted.get(key)
+        if previous is None or job.updated_at >= previous.updated_at:
+            contacted[key] = job
+    return contacted
+
+
+def build_proposal(
+    job: Job,
+    *,
+    now: datetime | None = None,
+    contacted: dict[str, Job] | None = None,
+) -> ApplicationProposal | None:
     """None when the job has never been analyzed - it cannot be proposed yet."""
     analysis = latest_analysis_of(job)
     if analysis is None:
         return None
+
+    sibling = (contacted or {}).get("".join((job.company or "").split()))
+    if sibling is not None and sibling.id == job.id:
+        sibling = None  # a job never flags itself
 
     result = analysis.result_json or {}
     event = latest_event_of(job)
@@ -127,6 +169,8 @@ def build_proposal(job: Job, *, now: datetime | None = None) -> ApplicationPropo
         missing_skills=[str(s) for s in (result.get("missing_skills") or [])],
         reasoning_summary=str(result.get("reasoning_summary") or ""),
         greeting_message=str(result.get("greeting_message") or ""),
+        company_applied_title=sibling.title if sibling else None,
+        company_applied_job_id=sibling.id if sibling else None,
         early_career=is_early_career_track(job.title, job.normalized_description),
         job_status=job.status,
         proposal_state=proposal_state(job, now=now),
@@ -242,7 +286,11 @@ def load_jobs(db: Session) -> list[Job]:
 
 def all_proposals(db: Session, *, now: datetime | None = None) -> list[ApplicationProposal]:
     moment = now or local_now()
-    built = (build_proposal(job, now=moment) for job in load_jobs(db))
+    jobs = load_jobs(db)
+    # Computed once over the whole set rather than per proposal: the answer is
+    # about the library, not about the row being built.
+    contacted = contacted_companies(jobs)
+    built = (build_proposal(job, now=moment, contacted=contacted) for job in jobs)
     return [p for p in built if p is not None]
 
 

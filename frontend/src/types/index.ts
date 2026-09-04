@@ -568,6 +568,11 @@ export interface ApplicationProposal {
   salary_text: string | null
   source: string
   source_url: string | null
+  /** Another job at this company has already been contacted. BOSS conversations
+   *  belong to a person, not a posting, so its other roles will read 继续沟通.
+   *  Same company is not the same recruiter - a heads-up, never a filter. */
+  company_applied_title: string | null
+  company_applied_job_id: number | null
   early_career: boolean
   overall_score: number
   verdict: Verdict

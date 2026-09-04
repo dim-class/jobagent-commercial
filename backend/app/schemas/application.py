@@ -109,6 +109,19 @@ class ApplicationProposal(BaseModel):
     reasoning_summary: str = ""
     greeting_message: str = ""
 
+    #: Another job at this same company that has already been applied to.
+    #:
+    #: BOSS conversations belong to a *person*, not a posting: once you have
+    #: contacted a recruiter about one role, their other roles show 继续沟通 and
+    #: M6 refuses them - correctly, but only after a confirmation has been read
+    #: and given. 41% of this library sits at companies with several openings,
+    #: so saying it up front saves that.
+    #:
+    #: Same company is not the same recruiter, so this is a heads-up and never
+    #: a filter: nothing is hidden or blocked on it.
+    company_applied_title: str | None = None
+    company_applied_job_id: int | None = None
+
     #: Whether the posting explicitly targets an early-career cohort
     #: (应届 / 校招 / 实习). Computed deterministically from title + JD by the
     #: same `job_eligibility` classifier the intake uses - never a model.

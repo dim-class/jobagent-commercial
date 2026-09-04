@@ -685,6 +685,14 @@ export default function ApplicationQueuePage() {
               </div>
             </div>
 
+            {proposal.company_applied_title ? (
+              <p className="small faint mt-1">
+                已投递该公司的「{proposal.company_applied_title}」。BOSS 的对话是按人建立的，
+                如果是同一个 HR，这个岗位的按钮会显示「继续沟通」，M6 会拒绝执行。
+                同公司未必同 HR，仅作提醒。
+              </p>
+            ) : null}
+
             <div className="job-card-meta mt-1">
               {proposal.early_career ? (
                 <span className="chip chip-bad" title="标题或 JD 显示这是应届/校招/实习岗位">

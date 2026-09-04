@@ -568,3 +568,75 @@ def test_the_hidden_count_matches_what_actually_vanished(client, make_analyzed):
     vanished = full_view["total"] - hidden_view["total"]
     assert vanished == 2
     assert hidden_view["summary"]["early_career_hidden"] == vanished
+
+
+# --------------------------------------------------------------------------
+# same company, already contacted (user asked 2026-09-04)
+# --------------------------------------------------------------------------
+
+
+def test_a_sibling_job_at_an_applied_company_is_flagged(client, db):
+    """BOSS conversations belong to a person, not a posting.
+
+    Once a recruiter has been contacted about one role, their other roles show
+    继续沟通 and M6 refuses them - correctly, but only after a confirmation has
+    been read and given. 41% of this library sits at companies with several
+    openings, so the queue says it up front.
+    """
+    from app.models import Job
+    from app.models.enums import JobSourceName, JobStatus
+    from app.services.application_queue import contacted_companies
+
+    def add(company: str, title: str, status: JobStatus, ext: str) -> Job:
+        job = Job(
+            source=JobSourceName.boss, external_id=ext, company=company, title=title,
+            raw_description="负责云平台运维。" * 5,
+            normalized_description="负责云平台运维。" * 5,
+            content_hash=ext.ljust(64, "0")[:64], status=status,
+        )
+        db.add(job)
+        db.commit()
+        return job
+
+    applied = add("阿里云", "云计算技术服务工程师", JobStatus.applied, "a1")
+    sibling = add("阿里云 ", "云平台高级运维工程师", JobStatus.reviewed, "a2")
+    elsewhere = add("字节跳动", "SRE", JobStatus.reviewed, "b1")
+
+    contacted = contacted_companies([applied, sibling, elsewhere])
+    # Whitespace only - the trailing space must not make it a different employer.
+    assert set(contacted) == {"阿里云"}
+    assert contacted["阿里云"].id == applied.id
+
+
+def test_a_job_never_flags_itself_and_an_untouched_company_is_not_flagged(db):
+    from app.models import Job
+    from app.models.enums import JobSourceName, JobStatus
+    from app.services.application_queue import build_proposal, contacted_companies
+
+    job = Job(
+        source=JobSourceName.boss, external_id="solo", company="独角兽", title="云运维工程师",
+        raw_description="x" * 60, normalized_description="x" * 60,
+        content_hash="solo".ljust(64, "0"), status=JobStatus.applied,
+    )
+    db.add(job)
+    db.commit()
+    contacted = contacted_companies([job])
+    # It is applied, so it is in the map - but it must not flag *itself*.
+    proposal = build_proposal(job, contacted=contacted)
+    assert proposal is None or proposal.company_applied_job_id is None
+
+
+def test_a_skipped_sibling_does_not_count_as_contacted(db):
+    """Skipping is not contact - no conversation exists, so nothing to warn about."""
+    from app.models import Job
+    from app.models.enums import JobSourceName, JobStatus
+    from app.services.application_queue import contacted_companies
+
+    skipped = Job(
+        source=JobSourceName.boss, external_id="s1", company="某公司", title="运维工程师",
+        raw_description="x" * 60, normalized_description="x" * 60,
+        content_hash="s1".ljust(64, "0"), status=JobStatus.skipped,
+    )
+    db.add(skipped)
+    db.commit()
+    assert contacted_companies([skipped]) == {}

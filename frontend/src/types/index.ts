@@ -2219,6 +2219,9 @@ export interface SearchPlanTask {
   early_career_policy: 'exclude' | 'include' | 'only'
   state: string | null
   max_candidates: number | null
+  /** The BOSS results page this unit searches, built by the backend from the
+   *  city and keyword. Also the right place to add filters by hand. */
+  search_url: string | null
   current_url: string | null
   scroll_round: number
   visible_jobs: number

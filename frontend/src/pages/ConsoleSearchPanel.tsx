@@ -76,6 +76,22 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
   //: page without moving a ceiling. One per line.
   const [filterUrls, setFilterUrls] = useState(loadSegments)
   const filterLines = filterUrls.split(NEWLINE).map(line => line.trim()).filter(Boolean)
+  //: Echoed back so a paste that contributed nothing is visible rather than
+  //: silently ignored. Display only - the backend parses these again, with the
+  //: whitelist and validation that actually decide what gets used.
+  const segmentSummary = filterLines
+    .map(line => {
+      try {
+        const params = new URL(line).searchParams
+        const kept = [...params.entries()]
+          .filter(([key]) => key !== 'city' && key !== 'query')
+          .map(([key, value]) => `${key}=${value}`)
+        return kept.length ? kept.join('、') : '（没有筛选参数）'
+      } catch {
+        return '（不是有效链接）'
+      }
+    })
+    .join(' ｜ ')
   const [selected, setSelected] = useState<number | null>(null)
   const [connection, setConnection] = useState<ConsoleReply | null>(null)
   const [backendReady, setBackendReady] = useState(false)
@@ -499,10 +515,22 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
         每行会成为一个独立的搜索分段，各自拥有完整的候选名额。
         只读取筛选参数；城市与岗位方向仍由上面的选择和简历排序决定。
       </p>
+      {portfolioTasks[0]?.search_url ? (
+        <p className="small faint">
+          还没设过筛选？
+          <a href={portfolioTasks[0].search_url} target="_blank" rel="noreferrer">
+            用上次的条件打开 BOSS 搜索页 ↗
+          </a>
+          ，在页面上点好「工作经验」「薪资待遇」等筛选，再把地址栏整条粘到上面。
+          JobAgent 只取筛选参数，城市和岗位方向仍由这里决定。
+        </p>
+      ) : null}
+
       {filterLines.length ? (
         <p className="small faint">
           {filterLines.length} 个分段 · 岗位方向会相应减少，总搜索单元数不变（上限 16）。
           已记住，下次打开仍然生效；清空这个框即可停用。
+          {segmentSummary ? <><br />识别到的筛选：{segmentSummary}</> : null}
         </p>
       ) : null}
     </div>

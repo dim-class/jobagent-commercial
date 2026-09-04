@@ -15,6 +15,36 @@ function taskStatusLabel(task: SearchPlanTask): string {
 
 /** A pasted block is split on the newline character itself; `trim()` on
  *  each line removes the CR that a Windows clipboard leaves behind. */
+const SEGMENTS_KEY = 'jobagent.search.segments'
+
+/** Remember the search segments between visits.
+ *
+ * These are a standing preference - "always exclude 5-10年", "always split by
+ * salary band" - not a per-run choice, and re-pasting them from BOSS every
+ * time is exactly the friction that keeps them from being used at all.
+ *
+ * localStorage rather than the backend on purpose: this is one browser's
+ * convenience, and `career_strategy.yaml` is never written automatically. Every
+ * access is guarded - a private window or blocked site data throws rather than
+ * returning empty, and an unusable store must not stop the page rendering.
+ */
+function loadSegments(): string {
+  try {
+    return window.localStorage.getItem(SEGMENTS_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function saveSegments(value: string): void {
+  try {
+    if (value.trim()) window.localStorage.setItem(SEGMENTS_KEY, value)
+    else window.localStorage.removeItem(SEGMENTS_KEY)
+  } catch {
+    /* Not being able to remember them is not a reason to stop using them. */
+  }
+}
+
 const NEWLINE = String.fromCharCode(10)
 
 export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number) => void }) {
@@ -44,7 +74,7 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
   //: BOSS search URLs the user built in their own browser. Each one narrows a
   //: search so its top results differ - the only way to reach past the first
   //: page without moving a ceiling. One per line.
-  const [filterUrls, setFilterUrls] = useState('')
+  const [filterUrls, setFilterUrls] = useState(loadSegments)
   const filterLines = filterUrls.split(NEWLINE).map(line => line.trim()).filter(Boolean)
   const [selected, setSelected] = useState<number | null>(null)
   const [connection, setConnection] = useState<ConsoleReply | null>(null)
@@ -458,7 +488,10 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
         rows={3}
         value={filterUrls}
         placeholder={'https://www.zhipin.com/web/geek/jobs?city=101010100&salary=406&query=...'}
-        onChange={e => setFilterUrls(e.target.value)}
+        onChange={e => {
+          setFilterUrls(e.target.value)
+          saveSegments(e.target.value)
+        }}
       />
       <p className="small faint">
         BOSS 的结果按相关度排序且没有「最新发布」，所以同一个关键词每次都命中同一批岗位。
@@ -469,6 +502,7 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       {filterLines.length ? (
         <p className="small faint">
           {filterLines.length} 个分段 · 岗位方向会相应减少，总搜索单元数不变（上限 16）。
+          已记住，下次打开仍然生效；清空这个框即可停用。
         </p>
       ) : null}
     </div>

@@ -2726,3 +2726,60 @@ for (const status of ['sent', 'input_not_empty', 'no_send_control', 'input_rejec
     assert.equal(h.greetings(), 1, `${status} must be asked exactly once`)
   })
 }
+
+/** One M6 run whose preflight reports a closed posting. */
+function m6ClosedEnv(skipStatus) {
+  const detailUrl = 'https://www.zhipin.com/job_detail/m6closed.html'
+  const approval = {
+    id: 41, job_id: 249, company: '公司', title: '云平台工程师', canonical_url: detailUrl,
+    external_id: 'm6closed', resume_id: 3, answers_text: '',
+    answers_hash: 'a'.repeat(64), answers_source: 'boss_dynamic_unverified', state: 'pending',
+  }
+  const { router, calls } = makeFetchRouter((url) => {
+    if (url.endsWith('/api/application-approvals/41')) return jsonResponse(approval)
+    if (url.endsWith('/api/jobs/249/skip')) {
+      // `jsonResponse` is always ok:true - a failure needs `errorResponse`,
+      // or the test would assert success against a mock that cannot fail.
+      return skipStatus === 200
+        ? jsonResponse({ job_id: 249, status: 'skipped' })
+        : errorResponse(skipStatus, '不能从「已跳过」变更为「已跳过」。')
+    }
+    return undefined
+  })
+  const consoleTab = { id: 8, windowId: 2, url: 'http://127.0.0.1:5173/#/queue', active: true }
+  const env = loadBackground({
+    fetchImpl: router, consoleTab, tab: { url: detailUrl, active: false },
+    respond: msg => msg.type === 'jobagent:m6-preflight'
+      ? Promise.resolve({ ok: true, result: { status: 'posting_closed' } })
+      : Promise.resolve({ ok: false }),
+  })
+  return { env, calls }
+}
+
+test('a closed posting is skipped and reported as skipped', { skip: SKIP }, async () => {
+  const h = m6ClosedEnv(200)
+  const reply = await h.env.send(
+    { type: 'jobagent:console-command', action: 'execute-application', approvalId: 41 },
+    { tab: { id: 8 }, frameId: 0, url: 'http://127.0.0.1:5173/#/queue' },
+  )
+  assert.equal(reply.ok, false)
+  assert.equal(reply.code, 'm6_preflight/posting_closed')
+  assert.match(reply.error, /已自动跳过/)
+  assert.equal(h.calls.filter(c => c.url.endsWith('/api/jobs/249/skip')).length, 1)
+  // The application itself never started.
+  assert.equal(h.calls.filter(c => c.url.endsWith('/begin')).length, 0)
+})
+
+test('a failed skip is never reported as a skip', { skip: SKIP }, async () => {
+  // Swallowing this and saying 「已自动跳过」 stated something that had not
+  // happened, and left the job sitting in the queue contradicting the message.
+  const h = m6ClosedEnv(422)
+  const reply = await h.env.send(
+    { type: 'jobagent:console-command', action: 'execute-application', approvalId: 41 },
+    { tab: { id: 8 }, frameId: 0, url: 'http://127.0.0.1:5173/#/queue' },
+  )
+  assert.equal(reply.code, 'm6_preflight/posting_closed_not_skipped')
+  assert.doesNotMatch(reply.error, /已自动跳过/)
+  assert.match(reply.error, /自动跳过失败/)
+  assert.equal(h.calls.filter(c => c.url.endsWith('/begin')).length, 0)
+})

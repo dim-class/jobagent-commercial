@@ -39,6 +39,9 @@ const M6_PREFLIGHT_REASON: Record<string, string> = {
   posting_closed:
     'BOSS 显示该职位已关闭，没有执行投递。这个岗位已自动跳过（原因记为「职位已关闭」），'
     + '分析记录都还在；如果是误判，在岗位库里「恢复待处理」即可。',
+  posting_closed_not_skipped:
+    'BOSS 显示该职位已关闭，没有执行投递。自动跳过没有成功，所以它还在列表里 —— '
+    + '请手动点「跳过」，原因写「职位已关闭」。',
   control_wrong_state:
     '这个岗位已经沟通过了（按钮显示「继续沟通」）。M6 只负责第一次投递，'
     + '不会点击已有对话的按钮。换一个还没沟通过的岗位即可。',
@@ -286,6 +289,7 @@ export default function ApplicationQueuePage() {
     if (!approval || approval.state !== 'pending') return
     setM6Attempted(true) // One confirmation can dispatch at most one command.
     setM6Busy(true)
+    let staleReason = ''
     // Call immediately in this click handler so the extension bridge receives
     // a real browser user activation before any await occurs.
     const pending = consoleExtension(
@@ -297,6 +301,9 @@ export default function ApplicationQueuePage() {
         if (reply.code === 'extension_context_unavailable' || reply.code === 'worker_unavailable') {
           setM6StaleBridge(true)
         }
+        staleReason = reply.code?.startsWith('m6_preflight/')
+          ? reply.code.slice('m6_preflight/'.length)
+          : ''
         throw new Error(explainM6Failure(reply.code, reply.error || '扩展未确认执行结果'))
       }
       const attemptedJob = m6Target
@@ -332,6 +339,10 @@ export default function ApplicationQueuePage() {
       const message = err instanceof Error ? err.message : '执行结果未知；请到 BOSS 人工核对，勿重复点击。'
       setM6Error(message)
       setFeedback({ tone: 'error', text: message })
+      // A closed posting that was skipped is no longer in the queue, so the
+      // list has to be re-read: leaving it on screen contradicts the message
+      // that just said it was retired.
+      if (staleReason === 'posting_closed') await load(filters)
     } finally {
       setM6Busy(false)
     }

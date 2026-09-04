@@ -3077,15 +3077,28 @@ async function executeM6Application(
         // (恢复待处理), keeps the analyses, and carries its own reason - and it
         // only ever follows BOSS's own words, never a missing button.
         //
-        // Best-effort: a failed skip must not change what this returns. The
-        // application did not happen either way.
+        // The skip must not change whether the application happened - it did
+        // not, either way - but the *message* has to match what actually
+        // occurred. Swallowing the failure and reporting 「已自动跳过」 stated
+        // something that had not happened, which is worse than not skipping.
+        let skipped = false
+        let skipError = ''
         try {
           await fetchJson(`/api/jobs/${approval.job_id}/skip`, {
             method: 'POST', body: { reason: '职位已关闭', note: '投递前发现 BOSS 已关闭该职位，自动跳过' },
           })
-        } catch { /* the console still reports the closure below */ }
-        return { ok: false, code: 'm6_preflight/posting_closed',
-          error: 'BOSS 显示该职位已关闭，未执行投递；已自动跳过这个岗位。' }
+          skipped = true
+        } catch (error) {
+          const raw = (error as { message?: unknown } | null)?.message
+          skipError = typeof raw === 'string' ? raw.slice(0, 60) : 'unknown'
+        }
+        return {
+          ok: false,
+          code: skipped ? 'm6_preflight/posting_closed' : 'm6_preflight/posting_closed_not_skipped',
+          error: skipped
+            ? 'BOSS 显示该职位已关闭，未执行投递；已自动跳过这个岗位。'
+            : `BOSS 显示该职位已关闭，未执行投递。自动跳过失败（${skipError}），请手动跳过。`,
+        }
       }
       return { ok: false, code: `m6_preflight/${reason}`,
         error: `投递前检查未通过：${reason}。不会执行。` }

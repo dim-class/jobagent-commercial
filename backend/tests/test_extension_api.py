@@ -413,3 +413,29 @@ def test_the_extension_origin_is_allowed_by_pattern(settings):
     assert pattern.match("chrome-extension://" + "a" * 32)
     assert not pattern.match("https://evil.example.com")
     assert not pattern.match("chrome-extension://short")
+
+
+def test_the_reason_a_salary_could_not_be_read_reaches_the_intake_note(client):
+    """Candidate warnings are not passed through wholesale.
+
+    The extension records *why* the DOM read produced no salary - a selector
+    gap, unreadable text, conflicting values - and that category was invisible
+    here because only the OCR reason was ever picked out. It cost an extension
+    reload and a re-run to discover, so it is pinned.
+    """
+    body = preview(client, candidate(
+        salary_text=None,
+        warnings=["薪资未读到：no_node", "本地薪资 OCR 未采用：no_capture_permission"],
+    ))
+    warnings = body["rows"][0]["warnings"]
+    assert any("薪资未读到：no_node" in w for w in warnings), warnings
+    # Both are kept, and the DOM read is reported before the fallback: "OCR was
+    # refused" explains nothing about why there was anything to fall back from.
+    ocr = next(i for i, w in enumerate(warnings) if "OCR 未采用" in w)
+    miss = next(i for i, w in enumerate(warnings) if "薪资未读到" in w)
+    assert miss < ocr
+
+
+def test_a_salary_that_was_read_carries_no_failure_reason(client):
+    body = preview(client, candidate())
+    assert not any("薪资未读到" in w for w in body["rows"][0]["warnings"])

@@ -90,15 +90,32 @@ def to_posting(candidate) -> RawJobPosting:
 #: candidate; it used to be dropped here, leaving a job with no salary and no
 #: explanation anywhere.
 SALARY_OCR_WARNING_PREFIX = "本地薪资 OCR 未采用："
+#: Why the *DOM read* came back empty, before OCR was ever considered.
+SALARY_MISS_WARNING_PREFIX = "薪资未读到："
+
+
+def _warning_starting_with(candidate, prefix: str) -> str | None:
+    for warning in getattr(candidate, "warnings", None) or []:
+        text = str(warning)
+        if text.startswith(prefix):
+            return text[:200]
+    return None
 
 
 def salary_ocr_note(candidate) -> str | None:
     """The extension's own reason for not filling a missing salary, if any."""
-    for warning in getattr(candidate, "warnings", None) or []:
-        text = str(warning)
-        if text.startswith(SALARY_OCR_WARNING_PREFIX):
-            return text[: 200]
-    return None
+    return _warning_starting_with(candidate, SALARY_OCR_WARNING_PREFIX)
+
+
+def salary_miss_note(candidate) -> str | None:
+    """Why the page read produced no salary - a selector gap, unreadable text,
+    conflicting values, or no detail container.
+
+    Carried explicitly, like the OCR reason above: warnings are not passed
+    through wholesale, so a category the extension records is invisible here
+    until something asks for it. That cost a reload and a re-run to discover.
+    """
+    return _warning_starting_with(candidate, SALARY_MISS_WARNING_PREFIX)
 
 
 def source_name_for(candidate) -> str:
@@ -145,6 +162,11 @@ def inspect(db: Session, candidate, *, early_career_policy: str | None = None) -
 
     if not posting.company:
         warnings.append("没有识别到公司名称，导入后需要手动补充。")
+    # The DOM read comes first, so its reason is recorded first: "OCR was
+    # refused" explains nothing about why there was nothing to fall back from.
+    miss_note = salary_miss_note(candidate)
+    if miss_note:
+        warnings.append(miss_note)
     ocr_note = salary_ocr_note(candidate)
     if ocr_note:
         warnings.append(ocr_note)

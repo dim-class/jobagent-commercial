@@ -1117,3 +1117,54 @@ async def test_the_phrase_inside_a_job_description_does_not_close_the_job(browse
     whose entire text is the marker counts, so prose cannot retire a job."""
     await _load_fixture(browser_page, extension_bundle, "boss_job_detail_live_shape.html", url=DETAIL_URL)
     assert await browser_page.evaluate("() => BossExtract.postingClosed(document)") is False
+
+
+# --------------------------------------------------------------------------
+# salary on the page the runner actually captures from
+# --------------------------------------------------------------------------
+
+
+async def test_the_detail_panel_on_a_results_page_yields_its_own_salary(browser_page, extension_bundle):
+    """111 of 148 captures had no salary while the page plainly showed one.
+
+    Every other detail fixture is a standalone /job_detail/ page - the shape the
+    *backfill* visits, and it succeeds 334 times out of 334. The runner captures
+    from a results page with the posting open beside the list, where each card
+    carries a salary of its own. Nothing tested that, so this pins it: the
+    panel's own salary is what comes back, and the cards beside it must not turn
+    into a conflict that yields nothing.
+    """
+    await _load_fixture(
+        browser_page, extension_bundle, "boss_search_with_detail_panel.html",
+        url="https://www.zhipin.com/web/geek/jobs?query=&city=101210100",
+    )
+    # `captureAndMerge` is what the runner calls, so the test exercises the
+    # same entry point rather than a convenient inner one.
+    outcome = await browser_page.evaluate(
+        """() => BossExtract.captureAndMerge(
+             document,
+             document.location.href,
+             'https://www.zhipin.com/job_detail/panel111aaa~.html',
+             { title: '云驻场运维工程师', company: '杭州亮通', salary_text: null },
+           )"""
+    )
+    assert outcome["status"] == "ok", outcome
+    candidate = outcome["candidate"]
+    assert candidate["salary_text"] == "11-16K", (
+        f"read {candidate['salary_text']!r}; warnings {candidate.get('warnings')}"
+    )
+
+
+async def test_a_failed_salary_read_records_the_category_not_the_figure(browser_page, extension_bundle):
+    """Compensation values are never written to a note or a log - but the
+    *reason* has to be, or the intake note can only report that the OCR
+    fallback was refused, which explains nothing about the DOM read."""
+    await _load_fixture(browser_page, extension_bundle, "boss_job_pua_salary.html", url=DETAIL_URL)
+    result = await browser_page.evaluate(
+        "() => BossExtract.detect(document, document.location.href)"
+    )
+    candidate = result["candidates"][0]
+    assert candidate["salary_text"] is None
+    reasons = [w for w in candidate.get("warnings", []) if "薪资未读到" in w]
+    assert reasons, f"no reason recorded; warnings {candidate.get('warnings')}"
+    assert "unreadable" in reasons[0]

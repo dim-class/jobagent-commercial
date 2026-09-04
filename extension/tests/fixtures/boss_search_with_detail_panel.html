@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>杭州招聘-职位搜索-BOSS直聘</title>
+</head>
+<body>
+  <!-- The shape the search runner actually captures from: a results list on the
+       left, each card carrying its own salary, and the selected posting open in
+       a detail panel on the right. Every previous detail fixture was a
+       standalone /job_detail/ page, which is the shape the *backfill* visits -
+       so nothing tested the context 111 of 148 captures failed in. -->
+  <div class="search-job-result">
+    <ul class="job-list-box">
+      <li class="job-card-wrapper">
+        <a class="job-card-left" href="/job_detail/panel111aaa~.html">
+          <div class="job-title"><span class="job-name">云驻场运维工程师</span></div>
+          <div class="job-info">
+            <span class="salary">11-16K</span>
+            <ul class="tag-list"><li>1-3年</li><li>大专</li></ul>
+          </div>
+        </a>
+        <div class="job-card-right">
+          <h3 class="company-name"><a href="/gongsi/liangtong.html">杭州亮通</a></h3>
+        </div>
+      </li>
+
+      <li class="job-card-wrapper">
+        <a class="job-card-left" href="/job_detail/panel222bbb~.html">
+          <div class="job-title"><span class="job-name">云平台与服务器运维工程师</span></div>
+          <div class="job-info">
+            <span class="salary">12-16K</span>
+            <ul class="tag-list"><li>5-10年</li><li>本科</li></ul>
+          </div>
+        </a>
+        <div class="job-card-right">
+          <h3 class="company-name"><a href="/gongsi/feiyue.html">飞越机电</a></h3>
+        </div>
+      </li>
+
+      <li class="job-card-wrapper">
+        <a class="job-card-left" href="/job_detail/panel333ccc~.html">
+          <div class="job-title"><span class="job-name">高级运维工程师</span></div>
+          <div class="job-info">
+            <span class="salary">15-27K</span>
+            <ul class="tag-list"><li>3-5年</li><li>本科</li></ul>
+          </div>
+        </a>
+        <div class="job-card-right">
+          <h3 class="company-name"><a href="/gongsi/manfu.html">曼孚科技</a></h3>
+        </div>
+      </li>
+    </ul>
+
+    <!-- The open posting, to the right of that list. Its salary is ordinary
+         readable text - no private-font glyphs anywhere on this page. -->
+    <div class="job-detail-box">
+      <div class="job-banner">
+        <div class="name"><h1>云驻场运维工程师</h1></div>
+        <span class="salary">11-16K</span>
+        <div class="company-info"><a class="name" href="/gongsi/liangtong.html">杭州亮通</a></div>
+        <a class="btn btn-startchat" data-isfriend="false" href="javascript:;">立即沟通</a>
+      </div>
+      <div class="job-detail-section">
+        <div class="job-sec-text">
+          负责华为云平台驻场运维工作，包含云计算、DCS数据中心、虚拟化等核心模块的日常巡检、
+          运维监控、故障排查。熟悉云计算基础架构，掌握虚拟化技术（KVM/VMware）。
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

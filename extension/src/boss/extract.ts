@@ -184,24 +184,49 @@ var BossExtract = (function () {
   }
 
   /** A broken first node must not mask a usable fallback in the SAME job. */
-  function pickSalary(root: ParentNode | null, selectors: string[]): FieldHit {
-    if (!root) return { value: null, selector: null }
+  /** Why a salary could not be read, as a category - never the figure itself.
+   *
+   * Three live batches left 111 of 148 captures with no salary while the page
+   * plainly showed one, and the recorded note only ever said the OCR fallback
+   * had been refused. That is the wrong end of the story: it says nothing about
+   * why the DOM read came back empty, which is the part that could be fixed.
+   *
+   * `no_root` no container to search - the detail region was not identified
+   * `no_node` the container had no salary node at all (selector gap)
+   * `unreadable` a node was found and its text is not a salary (private-font
+   *              glyphs, or no digits)
+   * `conflict` several *different* readable salaries matched, so which one
+   *            belongs to the open posting is genuinely unknown
+   */
+  type SalaryMiss = 'no_root' | 'no_node' | 'unreadable' | 'conflict' | null
+
+  function pickSalary(
+    root: ParentNode | null,
+    selectors: string[],
+  ): FieldHit & { miss: SalaryMiss } {
+    if (!root) return { value: null, selector: null, miss: 'no_root' }
     let rejected: FieldHit = { value: null, selector: null }
     let usable: FieldHit | null = null
+    let seenAny = false
     for (const selector of selectors) {
       for (const node of Array.from(root.querySelectorAll(selector))) {
         if (!salaryRendered(node)) continue
+        seenAny = true
         const value = text(node)
         if (!isUsableSalary(value)) {
           if (!rejected.value && value) rejected = { value, selector }
           continue
         }
         // Conflicting valid values are not a reason to guess which is current.
-        if (usable && usable.value !== value) return { value: null, selector: null }
+        if (usable && usable.value !== value) {
+          return { value: null, selector: null, miss: 'conflict' }
+        }
         usable = usable || { value, selector }
       }
     }
-    return usable || rejected
+    if (usable) return { ...usable, miss: null }
+    if (rejected.value) return { ...rejected, miss: 'unreadable' }
+    return { value: null, selector: null, miss: seenAny ? 'unreadable' : 'no_node' }
   }
 
   function salaryDetailRoot(doc: Document): Element | null {
@@ -575,6 +600,12 @@ var BossExtract = (function () {
     // only unusable private-font glyphs. The value remains null and missing.
     if (rawSalary.value && rawSalary.selector && !explicitSalaryUsable) {
       candidate.matched_selectors.salary_text = rawSalary.selector
+    }
+    // The category, not the figure - compensation values are never recorded in
+    // a note or a log. Without this the intake note could only say that the OCR
+    // fallback was refused, which explains nothing about the DOM read.
+    if (rawSalary.miss) {
+      candidate.warnings.push(`薪资未读到：${rawSalary.miss}`)
     }
 
     const tags = pickAll(doc, BossSelectors.INFO_TAGS)

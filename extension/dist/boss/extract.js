@@ -79,16 +79,17 @@ var BossExtract = (function () {
         }
         return true;
     }
-    /** A broken first node must not mask a usable fallback in the SAME job. */
     function pickSalary(root, selectors) {
         if (!root)
-            return { value: null, selector: null };
+            return { value: null, selector: null, miss: 'no_root' };
         let rejected = { value: null, selector: null };
         let usable = null;
+        let seenAny = false;
         for (const selector of selectors) {
             for (const node of Array.from(root.querySelectorAll(selector))) {
                 if (!salaryRendered(node))
                     continue;
+                seenAny = true;
                 const value = text(node);
                 if (!isUsableSalary(value)) {
                     if (!rejected.value && value)
@@ -96,12 +97,17 @@ var BossExtract = (function () {
                     continue;
                 }
                 // Conflicting valid values are not a reason to guess which is current.
-                if (usable && usable.value !== value)
-                    return { value: null, selector: null };
+                if (usable && usable.value !== value) {
+                    return { value: null, selector: null, miss: 'conflict' };
+                }
                 usable = usable || { value, selector };
             }
         }
-        return usable || rejected;
+        if (usable)
+            return { ...usable, miss: null };
+        if (rejected.value)
+            return { ...rejected, miss: 'unreadable' };
+        return { value: null, selector: null, miss: seenAny ? 'unreadable' : 'no_node' };
     }
     function salaryDetailRoot(doc) {
         const title = pickNode(doc, BossSelectors.TITLE).node;
@@ -450,6 +456,12 @@ var BossExtract = (function () {
         // only unusable private-font glyphs. The value remains null and missing.
         if (rawSalary.value && rawSalary.selector && !explicitSalaryUsable) {
             candidate.matched_selectors.salary_text = rawSalary.selector;
+        }
+        // The category, not the figure - compensation values are never recorded in
+        // a note or a log. Without this the intake note could only say that the OCR
+        // fallback was refused, which explains nothing about the DOM read.
+        if (rawSalary.miss) {
+            candidate.warnings.push(`薪资未读到：${rawSalary.miss}`);
         }
         const tags = pickAll(doc, BossSelectors.INFO_TAGS);
         const parsed = parseInfoTags(tags.nodes.map((node) => text(node)));

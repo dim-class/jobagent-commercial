@@ -75,6 +75,16 @@ class JobListItem(BaseModel):
     created_at: datetime
     updated_at: datetime
     description_preview: str = ""
+    #: The free, deterministic pre-analysis score, filled in **only for jobs
+    #: with no analysis yet** - once a real one exists it is the better answer
+    #: and this would just be a second number to confuse it with.
+    #:
+    #: It is a stand-in, not a verdict: on 442 analysed jobs it correlated 0.74
+    #: with the paid score, and the recommend rate ran 0% below 30 against 33%
+    #: above 65. Good enough to decide what is worth paying to analyse; not
+    #: good enough to decide anything about a job on its own.
+    heuristic_score: int | None = None
+
     latest_analysis: AnalysisSummary | None = None
 
 

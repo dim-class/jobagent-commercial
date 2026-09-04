@@ -54,6 +54,8 @@ from app.services import (
 from app.services.application_cycles import effective_cycle
 from app.services.job_eligibility import classify_non_experienced_track
 from app.services.job_normalizer import normalize_city
+from app.core.career_strategy import load_strategy
+from app.services.job_matcher import build_pre_analysis
 from app.services.scoring import extract_experience_requirement
 
 logger = get_logger(__name__)
@@ -87,9 +89,18 @@ def _pick_latest(job: Job) -> JobAnalysis | None:
     return max(job.analyses, key=lambda a: (a.created_at, a.id))
 
 
-def _to_list_item(job: Job) -> JobListItem:
+def _optional_active_resume(db: Session) -> Resume | None:
+    """The analysis resume, or None. `get_active_resume` raises when there is
+    none, which is right for an analysis request and wrong for a list."""
+    return db.scalar(select(Resume).where(Resume.is_active.is_(True)).limit(1)) or db.scalar(
+        select(Resume).order_by(Resume.created_at.desc()).limit(1)
+    )
+
+
+def _to_list_item(job: Job, heuristic: int | None = None) -> JobListItem:
     preview = (job.normalized_description or "").strip().replace("\n", " ")
     return JobListItem(
+        heuristic_score=heuristic,
         id=job.id,
         source=job.source,
         source_url=job.source_url,
@@ -155,6 +166,13 @@ def list_jobs(
     early_career_cleanup: bool = Query(
         default=False,
         description="只列出尚未决定、且被确定性规则识别为应届/校招/实习的历史岗位",
+    ),
+    min_heuristic: int | None = Query(
+        default=None,
+        ge=0,
+        le=100,
+        description="只保留启发式预估分不低于该值的**未分析**岗位。"
+        "已分析的岗位不受影响——它们有真实分数，用 min_score。",
     ),
     max_required_years: int | None = Query(
         default=None,
@@ -237,6 +255,31 @@ def list_jobs(
     if verdict is not None:
         rows = [(j, a) for j, a in rows if a is not None and a.verdict == verdict]
 
+    # The free stand-in for jobs nobody has paid to analyse yet. Computed only
+    # for those rows - an analysed job has a real score, and a second number
+    # beside it would only invite confusing the two - and only when a resume
+    # exists, since the heuristic is a comparison against one.
+    heuristics: dict[int, int] = {}
+    unanalysed = [job for job, analysis in rows if analysis is None]
+    if unanalysed:
+        resume = _optional_active_resume(db)
+        if resume is not None:
+            strategy = load_strategy()
+            for job in unanalysed:
+                try:
+                    heuristics[job.id] = build_pre_analysis(job, resume, strategy).heuristic_score
+                except Exception:  # noqa: BLE001 - a stand-in must never break the list
+                    continue
+    if min_heuristic is not None:
+        # Applies to unanalysed rows only: an analysed job already has the real
+        # answer, and `min_score` is the filter for that. A row whose heuristic
+        # could not be computed is kept - unknown is not "low".
+        rows = [
+            (job, analysis)
+            for job, analysis in rows
+            if analysis is not None or heuristics.get(job.id, min_heuristic) >= min_heuristic
+        ]
+
     if sort == "score":
         rows.sort(key=lambda r: (r[1].overall_score if r[1] else -1, r[0].created_at), reverse=True)
     elif sort == "company":
@@ -258,7 +301,7 @@ def list_jobs(
         total=total,
         limit=limit,
         offset=offset,
-        items=[_to_list_item(job) for job, _ in page],
+        items=[_to_list_item(job, heuristics.get(job.id)) for job, _ in page],
         facets={
             "cities": dict(sorted(cities.items(), key=lambda kv: -kv[1])),
             "statuses": statuses,

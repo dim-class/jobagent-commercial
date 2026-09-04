@@ -155,6 +155,10 @@ export interface JobListItem {
   created_at: string
   updated_at: string
   description_preview: string
+  /** The free deterministic estimate, present only when nothing has been paid
+   *  to analyse this job yet. A stand-in for choosing what to spend on - never
+   *  a verdict about the job. */
+  heuristic_score: number | null
   latest_analysis: AnalysisSummary | null
 }
 

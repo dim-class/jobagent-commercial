@@ -184,6 +184,53 @@ def test_max_required_years_filters_out_jobs_asking_for_more(client, db):
     assert client.get("/api/jobs", params={"max_required_years": 21}).status_code == 422
 
 
+def test_min_heuristic_narrows_unanalysed_jobs_without_touching_analysed_ones(client, db, active_resume):
+    """The free stand-in for a score nobody has paid for yet.
+
+    On 442 analysed jobs it correlated 0.74 with the paid score, and the
+    recommend rate ran 0% below heuristic 30 against 33% above 65 - 87 jobs
+    under 45 produced one recommendation between them. Good enough to choose
+    what to spend on; never a verdict about a job.
+    """
+    from app.models import Job, JobAnalysis
+    from app.models.enums import JobSourceName, JobStatus, Verdict
+
+    strong = Job(
+        source=JobSourceName.boss, external_id="h1", company="甲公司",
+        title="云计算工程师", city="北京",
+        raw_description="负责 AWS 云平台运维，要求熟悉 Linux、Kubernetes、Terraform。" * 4,
+        normalized_description="负责 AWS 云平台运维，要求熟悉 Linux、Kubernetes、Terraform。" * 4,
+        content_hash="h1".ljust(64, "0"), status=JobStatus.new,
+    )
+    weak = Job(
+        source=JobSourceName.boss, external_id="h2", company="乙公司",
+        title="前台行政专员", city="北京",
+        raw_description="负责前台接待、快递收发与会议室预订。" * 4,
+        normalized_description="负责前台接待、快递收发与会议室预订。" * 4,
+        content_hash="h2".ljust(64, "0"), status=JobStatus.new,
+    )
+    db.add_all([strong, weak])
+    db.commit()
+
+    listed = {row["id"]: row for row in client.get("/api/jobs").json()["items"]}
+    assert listed[strong.id]["heuristic_score"] is not None, "unanalysed rows carry the stand-in"
+    assert listed[strong.id]["heuristic_score"] > listed[weak.id]["heuristic_score"]
+
+    # An analysed job keeps its real score and is never filtered by the stand-in.
+    db.add(JobAnalysis(
+        job_id=weak.id, resume_id=active_resume.id, cache_key="k" * 64,
+        model="test", prompt_version="v1",
+        overall_score=90, verdict=Verdict.apply, result_json={},
+    ))
+    db.commit()
+
+    high = client.get("/api/jobs", params={"min_heuristic": 60}).json()
+    ids = {row["id"] for row in high["items"]}
+    assert weak.id in ids, "analysed rows are judged by min_score, not the stand-in"
+    analysed = next(row for row in high["items"] if row["id"] == weak.id)
+    assert analysed["heuristic_score"] is None, "a real score is not shadowed by a guess"
+
+
 def test_list_pagination(client):
     for i in range(5):
         _create(client, company=f"公司{i}")

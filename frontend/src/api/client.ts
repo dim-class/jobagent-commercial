@@ -231,6 +231,9 @@ export interface JobFilters {
   /** Keep only jobs asking for at most this many years. Unreadable
    *  requirements are kept: "cannot be read" is not "asks for a lot". */
   max_required_years?: number
+  /** Keep only unanalysed jobs whose free heuristic reaches this. Analysed
+   *  jobs have a real score and are judged by `min_score` instead. */
+  min_heuristic?: number
   sort?: 'score' | 'created_at' | 'company'
   limit?: number
   offset?: number

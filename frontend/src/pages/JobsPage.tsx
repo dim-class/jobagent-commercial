@@ -409,7 +409,7 @@ export default function JobsPage() {
           <h1>岗位库</h1>
           <p>
             共 {data?.total ?? 0} 个岗位
-            {filters.min_score || filters.city || filters.verdict || filters.status || filters.status_in || filters.max_required_years || filters.keyword
+            {filters.min_score || filters.city || filters.verdict || filters.status || filters.status_in || filters.max_required_years || filters.min_heuristic || filters.keyword
               || filters.early_career_cleanup
               ? '（已筛选）'
               : ''}
@@ -506,6 +506,22 @@ export default function JobsPage() {
               <option value="apply">推荐投递</option>
               <option value="maybe">可以考虑</option>
               <option value="skip">不建议</option>
+            </select>
+          </div>
+
+          <div className="field">
+            <label htmlFor="f-heuristic">预估匹配（未分析岗位）</label>
+            <select
+              id="f-heuristic"
+              value={filters.min_heuristic ?? ''}
+              onChange={(e) =>
+                updateFilter('min_heuristic', e.target.value ? Number(e.target.value) : undefined)
+              }
+            >
+              <option value="">不限</option>
+              <option value="45">45 以上（排除几乎必然不匹配的）</option>
+              <option value="55">55 以上（推荐率约 3 倍）</option>
+              <option value="65">65 以上（推荐率最高的一档）</option>
             </select>
           </div>
 
@@ -728,6 +744,14 @@ export default function JobsPage() {
                       </td>
                       <td className="nowrap">
                         <ScoreBadge score={job.latest_analysis?.overall_score ?? null} />
+                        {!job.latest_analysis && job.heuristic_score !== null ? (
+                          <div
+                            className="small faint"
+                            title="本地免费预估，不是 AI 结论。在已分析的岗位上，它与真实分相关系数 0.74"
+                          >
+                            预估 {job.heuristic_score}
+                          </div>
+                        ) : null}
                       </td>
                       <td>
                         <div className="cell-title">

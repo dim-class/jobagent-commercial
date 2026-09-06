@@ -172,6 +172,16 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
   //: Every "the button does nothing" this project produced for a new pair of
   //: hands was one unmet prerequisite that the page never named.
   const [readiness, setReadiness] = useState<ReadinessOut | null>(null)
+  //: Clearing the backlog used to mean four trips through the jobs page: the
+  //: per-run cap is 50, and 178 jobs sat unanalysed for two days because of
+  //: it. One confirmation, naming the whole cost, then the same capped
+  //: endpoint called until the backlog is gone.
+  //: Collecting and analysing produce a pile nobody looks at unless the page
+  //: that finished the work says where the next decision is.
+  const [queueWaiting, setQueueWaiting] = useState<number | null>(null)
+  const [analyseConfirm, setAnalyseConfirm] = useState<number | null>(null)
+  const [analyseBusy, setAnalyseBusy] = useState(false)
+  const [analyseNote, setAnalyseNote] = useState('')
   const [salaryBusy, setSalaryBusy] = useState(false)
   const [salaryNote, setSalaryNote] = useState('')
   //: BOSS renders the salary in a private-use font everywhere a search can
@@ -337,6 +347,11 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     try { setReadiness(await api.getReadiness()) } catch { setReadiness(null) }
   }, [])
 
+  const loadQueue = useCallback(async () => {
+    try { setQueueWaiting((await api.applicationQueue({ limit: 1 })).total) }
+    catch { setQueueWaiting(null) }
+  }, [])
+
   const loadUnanalysed = useCallback(async () => {
     try {
       setUnanalysed((await api.listJobs({ analyzed: false, limit: 1 })).total)
@@ -352,6 +367,36 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       setMissingSalaries(null)
     }
   }, [])
+
+  async function analyseBacklog(total: number) {
+    if (analyseBusy) return
+    setAnalyseConfirm(null)
+    setAnalyseBusy(true)
+    let done = 0
+    let failed = 0
+    try {
+      // The endpoint caps each call at MAX_ANALYSES_PER_RUN and, with no ids,
+      // takes the unanalysed jobs itself - so this is the same gate, called
+      // until there is nothing left, not a way around it.
+      for (let round = 0; round < 40; round += 1) {
+        setAnalyseNote(`正在分析…已完成 ${done}/${total}`)
+        const result = await api.analyzeBatch(false)
+        done += result.analyzed + result.cached
+        failed += result.failed
+        // Nothing moved: either the backlog is gone or every job in this round
+        // failed. Either way, stop rather than loop.
+        if (result.analyzed + result.cached === 0) break
+      }
+      setAnalyseNote(
+        failed > 0
+          ? `完成 ${done} 个，失败 ${failed} 个（不会自动重试，可再点一次）。`
+          : `完成：${done} 个岗位已分析。`,
+      )
+      await loadUnanalysed()
+    } catch (err) {
+      setAnalyseNote(err instanceof ApiError ? err.message : '批量分析失败')
+    } finally { setAnalyseBusy(false) }
+  }
 
   async function fillSalaries(automatic = false) {
     if (salaryBusy) return
@@ -469,10 +514,11 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     void loadMissingSalaries()
     void loadUnanalysed()
     void loadReadiness()
+    void loadQueue()
     const visible = () => { if (document.visibilityState === 'visible') void refresh() }
     document.addEventListener('visibilitychange', visible)
     return () => { alive.current = false; refreshSequence.current++; document.removeEventListener('visibilitychange', visible) }
-  }, [loadSetup, refresh, loadMissingSalaries, loadUnanalysed, loadReadiness])
+  }, [loadSetup, refresh, loadMissingSalaries, loadUnanalysed, loadReadiness, loadQueue])
 
   async function prepare(event: React.FormEvent) {
     event.preventDefault()
@@ -834,7 +880,20 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
           <span className="small">
             {unanalysed} 个岗位还没做 AI 分析——在分析之前，你看不出哪些值得投。
           </span>
-          <Link className="btn-sm btn-primary" to="/jobs?analyzed=false">去分析</Link>
+          <button type="button" className="btn-sm btn-primary" disabled={analyseBusy}
+            onClick={() => setAnalyseConfirm(unanalysed)}>
+            {analyseBusy ? '分析中…' : '全部分析'}
+          </button>
+          <Link className="btn-sm" to="/jobs?analyzed=false">逐个挑选</Link>
+        </div>
+      ) : null}
+      {analyseNote ? <p className="small faint">{analyseNote}</p> : null}
+      {queueWaiting && !connection?.runner && !batchActive ? (
+        <div className="row mt-1">
+          <span className="small">
+            投递队列里有 {queueWaiting} 个岗位在等你决定投或不投。
+          </span>
+          <Link className="btn-sm btn-primary" to="/queue">去看看</Link>
         </div>
       ) : null}
       {portfolioTasks.some(row => row.state === 'paused_login_required' || row.paused_reason === 'login_required')
@@ -1126,6 +1185,22 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
         </div>
       </section> : null}
     </div> : null}
+    {analyseConfirm ? <Modal
+      title="确认批量分析"
+      onClose={() => setAnalyseConfirm(null)}
+      footer={<>
+        <button type="button" onClick={() => setAnalyseConfirm(null)}>取消</button>
+        <button type="button" className="btn-primary" onClick={() => void analyseBacklog(analyseConfirm)}>
+          确认分析 {analyseConfirm} 个
+        </button>
+      </>}
+    >
+      <p><strong>{analyseConfirm} 个岗位</strong>还没有分析，将产生<strong>最多 {analyseConfirm} 次</strong>
+        AI 调用（已缓存的不再收费）。</p>
+      <p>用当前分析简历和常规模型。失败的不会自动重试，也不会退回已经发出的调用。</p>
+      <p className="small faint">分析只给出建议评分，不会改变任何岗位的状态，更不会投递。</p>
+    </Modal> : null}
+
     {confirmation && <Modal title="确认免费采集" onClose={() => setConfirmation(null)} footer={<>
       <button className="btn btn-secondary" autoFocus onClick={() => setConfirmation(null)}>暂不执行</button>
       <button className="btn btn-primary" disabled={busy || checking || !backendReady || !connection}

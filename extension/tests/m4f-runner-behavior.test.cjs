@@ -3267,15 +3267,19 @@ test('a card whose title the strategy excludes never costs an open', { skip: SKI
   assert.ok(states.some(body => body.last_action === 'skipped_excluded_title'))
 })
 
-test('a backgrounded search never relaxes the check an application uses', { skip: SKIP }, async () => {
-  // The authorization covers search only. The relaxation lives in one helper
-  // the search runner calls; the salary capture and M6 call the strict check
-  // directly, so it cannot leak into them by editing a shared default.
+test('backgrounding never relaxes the check an application uses', { skip: SKIP }, async () => {
+  // Two runs may now be backgrounded - the search (2026-09-04) and the salary
+  // backfill (2026-09-06) - and each has its own flag and its own helper, so
+  // one cannot silently enable the other. M6 is neither: it calls the strict
+  // check directly, and the screenshot capture inside the backfill stays
+  // strictly foreground whatever the run is doing.
   const worker = fs.readFileSync(BACKGROUND_PATH, 'utf8')
-  assert.equal((worker.match(/!backgroundSearchRun/g) || []).length, 2,
-    'one helper, one stabilize guard')
   assert.match(worker, /verifyRunnerTab\(tabId, true\)/,
     'the application path pins the foreground check')
+  assert.equal((worker.match(/!backgroundSearchRun/g) || []).length, 2,
+    'the search: one helper, one stabilize guard')
+  assert.equal((worker.match(/!backgroundBackfillRun/g) || []).length, 2,
+    'the backfill: one helper, one tab activation')
 
   const between = (from, to) => {
     const a = worker.indexOf(from)
@@ -3283,13 +3287,18 @@ test('a backgrounded search never relaxes the check an application uses', { skip
     assert.ok(a >= 0 && b > a, `${from} .. ${to}`)
     return worker.slice(a, b)
   }
-  for (const [label, body] of [
-    ['salary backfill', between('async function runSalaryBackfillLoop', 'async function startSalaryBackfill')],
-    ['application', between('async function executeM6Application', 'async function consoleCommand')],
-  ]) {
-    assert.ok(!body.includes('verifySearchTab'), `${label} keeps the strict check`)
-    assert.ok(body.includes('verifyRunnerTab('), `${label} still checks the tab`)
-    // ...and neither repairs a page it cannot reach - both fail closed.
-    assert.ok(!body.includes('askRunnerTab('), `${label} does not self-heal the content script`)
-  }
+
+  const application = between('async function executeM6Application', 'async function consoleCommand')
+  assert.ok(!application.includes('verifySearchTab'), 'M6 keeps the strict check')
+  assert.ok(!application.includes('verifyBackfillTab'), 'M6 keeps the strict check')
+  assert.ok(application.includes('verifyRunnerTab('), 'M6 still checks the tab')
+
+  const backfill = between('async function runSalaryBackfillLoop', 'async function startSalaryBackfill')
+  assert.ok(!backfill.includes('verifySearchTab'), 'the backfill does not borrow the search flag')
+  assert.ok(backfill.includes('verifyBackfillTab('), 'it uses its own, and still checks the tab')
+
+  // The capture itself is unchanged: it refuses a tab that is not in front.
+  const capture = between('async function salaryForeground', 'async function salaryCrop')
+  assert.match(capture, /salary_not_foreground/)
+  assert.match(capture, /salary_tab_changed/)
 })

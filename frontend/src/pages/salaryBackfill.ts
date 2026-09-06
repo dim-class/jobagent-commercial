@@ -13,7 +13,14 @@ import { consoleExtension } from '@/pages/consoleExtension'
  *  verification, foreground loss, manual pause and worker error all halt it.
  *  Raising the session cap buys continuity, never permission.
  */
-export async function startFullSalaryBackfill(): Promise<{ ok: boolean; message: string }> {
+export async function startFullSalaryBackfill(
+  //: Let it keep going with the BOSS tab behind other windows (authorized
+  //: 2026-09-06). The tab must still exist and still be BOSS; only "in front"
+  //: is dropped, and the strictly-foreground screenshot OCR is skipped rather
+  //: than attempted - it recovered 4 salaries where re-reading the detail page
+  //: recovered 775.
+  background = false,
+): Promise<{ ok: boolean; message: string }> {
   const plan = await api.getSalaryBackfillPlan()
   if (!plan.eligible_jobs) {
     return { ok: false, message: '没有可回填的岗位。' }
@@ -22,6 +29,7 @@ export async function startFullSalaryBackfill(): Promise<{ ok: boolean; message:
   await api.authorizeSalaryBackfillRemaining(created.id)
   const reply = await consoleExtension(
     'start-salary-backfill', undefined, undefined, undefined, created.id,
+    undefined, undefined, background,
   )
   if (!reply.ok) {
     // The run exists and is authorised; only the browser side failed to start.

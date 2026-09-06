@@ -402,7 +402,7 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     if (salaryBusy) return
     setSalaryBusy(true); setSalaryNote('')
     try {
-      const result = await startFullSalaryBackfill()
+      const result = await startFullSalaryBackfill(runInBackground)
       setSalaryNote(automatic ? '搜索完成，已自动开始补全薪资。' + result.message : result.message)
       await loadMissingSalaries()
     } catch (err) {
@@ -768,7 +768,7 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
           }}
         />
         <label htmlFor="run-background">
-          后台搜索：BOSS 标签页被其他窗口挡住时继续搜索，你可以同时做别的
+          后台运行：BOSS 标签页被其他窗口挡住时继续搜索和补薪资，你可以同时做别的
         </label>
       </div>
       <p className="small faint indent">

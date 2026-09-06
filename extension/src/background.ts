@@ -1048,6 +1048,18 @@ type TabCheckFailure = 'tab_lost' | 'wrong_origin' | 'not_foreground'
  * next foreground run would silently inherit it. */
 let backgroundSearchRun = false
 
+/** True only while a salary backfill the user chose to background is running.
+ *
+ * Authorized 2026-09-06, superseding only "the backfill keeps the strict
+ * foreground check". Measured before asking: of the salaries this feature has
+ * recovered, 775 came from reading the standalone detail page's text and 4
+ * from the screenshot OCR, which had failed to run 685 times for want of an
+ * `activeTab` grant. So the foreground requirement was protecting a fallback
+ * that almost never fires, at the cost of holding the screen for the whole
+ * run. The capture itself stays strictly foreground (authorized 2026-08-28):
+ * a backgrounded run does not attempt it. */
+let backgroundBackfillRun = false
+
 /** The search runner's page message.
  *
  * `askTab` with the one-shot packaged-injection recovery that
@@ -1116,6 +1128,19 @@ function verifySearchTab(
   tabId: number,
 ): Promise<{ ok: true } | { ok: false; reason: TabCheckFailure }> {
   return verifyRunnerTab(tabId, !backgroundSearchRun)
+}
+
+/** The salary backfill's tab check.
+ *
+ * Same trade as `verifySearchTab`: the tab must still exist and still be
+ * exactly BOSS - those keep it off the wrong page and do not weaken when
+ * nobody is watching - while "is it in front" is dropped for a run the user
+ * put in the background. M6 still calls `verifyRunnerTab` directly.
+ */
+function verifyBackfillTab(
+  tabId: number,
+): Promise<{ ok: true } | { ok: false; reason: TabCheckFailure }> {
+  return verifyRunnerTab(tabId, !backgroundBackfillRun)
 }
 
 /** Ask the content script in `tabId` something - first re-verifying the tab
@@ -3150,9 +3175,11 @@ async function runSalaryBackfillLoop(runId: number, tabId: number): Promise<void
       const item = run.items.find(value => value.job_id === run.current_job_id)
       const canonical = item && canonicalizeJobDetailUrl(item.source_url)
       if (!item || !canonical) throw new Error('invalid_backfill_identity')
-      const alive = await verifyRunnerTab(tabId)
+      const alive = await verifyBackfillTab(tabId)
       if (!alive.ok) throw new Error(alive.reason)
-      await chrome.tabs.update(tabId, { url: canonical, active: true })
+      // Never pull the tab forward mid-run when the user chose the background:
+      // that is the whole point of the choice.
+      await chrome.tabs.update(tabId, { url: canonical, active: !backgroundBackfillRun })
 
       let detected: RunnerDetectResult | null = null
       for (let attempt = 0; attempt < RUNNER_CAPTURE_MAX_ATTEMPTS; attempt += 1) {
@@ -3187,7 +3214,15 @@ async function runSalaryBackfillLoop(runId: number, tabId: number): Promise<void
       if (detected?.candidates[0]) {
         let candidate = detected.candidates[0] as unknown as SalaryCandidate & Record<string, unknown>
         try {
-          if (!candidate.salary_text) candidate = await supplementSalary(tabId, candidate, async () => {
+          if (!candidate.salary_text && backgroundBackfillRun) {
+            // The screenshot OCR is strictly foreground (authorized
+            // 2026-08-28) and a backgrounded run has no foreground to offer
+            // it. Skip the attempt rather than fail on it: the detail page's
+            // own text is what recovers 775 of 779 salaries anyway, and a
+            // reason is recorded like every other OCR miss.
+            candidate = { ...candidate, warnings: [...((candidate.warnings as string[]) || []),
+              '本地薪资 OCR 未采用：background_backfill'] }
+          } else if (!candidate.salary_text) candidate = await supplementSalary(tabId, candidate, async () => {
             const current = await getSalaryBackfillPointer()
             return !!current && current.runId === runId && current.tabId === tabId && current.active
           })
@@ -3199,7 +3234,7 @@ async function runSalaryBackfillLoop(runId: number, tabId: number): Promise<void
             const row = preview.rows?.[0]
             if (row?.status !== 'duplicate' || row.existing_job_id !== item.job_id
               || !row.enrichable_fields?.includes('salary_text')) throw new Error('intake_identity_mismatch')
-            const beforeImport = await verifyRunnerTab(tabId)
+            const beforeImport = await verifyBackfillTab(tabId)
             if (!beforeImport.ok) throw new Error(beforeImport.reason)
             const imported = await fetchJson<{ job_id: number; duplicate: boolean }>('/api/extension/jobs/import', {
               method: 'POST', body: { confirmed: true, candidate },
@@ -3241,7 +3276,11 @@ async function runSalaryBackfillLoop(runId: number, tabId: number): Promise<void
   } finally { salaryBackfillBusy = false }
 }
 
-async function startSalaryBackfill(runId: number, source: chrome.tabs.Tab): Promise<{ ok: boolean; error?: string }> {
+async function startSalaryBackfill(
+  runId: number,
+  source: chrome.tabs.Tab,
+  background = false,
+): Promise<{ ok: boolean; error?: string }> {
   if (salaryBackfillBusy || activeRunToken !== null || await getRunnerPointer() || await getGlobalPointer()) {
     return { ok: false, error: '已有浏览器任务运行，不会并发回填。' }
   }
@@ -3252,9 +3291,11 @@ async function startSalaryBackfill(runId: number, source: chrome.tabs.Tab): Prom
   if (!tab?.id || !tab.url || !isRunnerNavOrigin(tab.url) || tab.windowId !== source.windowId) {
     return { ok: false, error: '请在同一 Chrome 窗口保持已登录的 BOSS 标签页。' }
   }
+  // Started by a human click either way; only what happens afterwards differs.
   await chrome.tabs.update(tab.id, { active: true })
   const focused = await foregroundStartTab()
   if (!focused.ok || focused.tab.id !== tab.id) return { ok: false, error: 'BOSS 标签页未处于前台。' }
+  backgroundBackfillRun = background
   const current = await fetchJson<SalaryBackfillRun>(`/api/jobs/salary-backfill/runs/${runId}`)
   if (current.state !== 'running') {
     await fetchJson<SalaryBackfillRun>(`/api/jobs/salary-backfill/runs/${runId}/start`, { method: 'POST' })
@@ -3696,7 +3737,7 @@ async function consoleCommand(message: unknown, sender: chrome.runtime.MessageSe
   }
   if (['start-salary-backfill', 'resume-salary-backfill'].includes(data.action || '')) {
     if (!Number.isSafeInteger(data.runId) || data.runId! <= 0) return { ok: false, error: 'bad_run_id' }
-    return startSalaryBackfill(data.runId!, source)
+    return startSalaryBackfill(data.runId!, source, data.background === true)
   }
   if (['pause-salary-backfill', 'cancel-salary-backfill'].includes(data.action || '')) {
     const stored = await getSalaryBackfillPointer()

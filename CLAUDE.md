@@ -1736,6 +1736,32 @@ show it.
 - it is not a scheduler. No timer starts it, nothing starts it on page load,
   and a worker or browser restart resumes nothing on its own.
 
+**The salary backfill may also run in the background (user authorized 2026-09-06).**
+This supersedes only the clause above that kept the backfill on the strict
+foreground check, and only for a run the user chose to background.
+
+Measured before asking, which is why the trade is small: of the salaries this
+feature has recovered, **775 came from reading the standalone detail page's
+text and 4 from the screenshot OCR**, which had failed to run 685 times for
+want of an `activeTab` grant. The foreground requirement was protecting a
+fallback that almost never fires, at the cost of holding the screen for the
+whole run.
+
+- `verifyBackfillTab()` is the backfill's own check and the only place its
+  foreground half is dropped. It has its own flag (`backgroundBackfillRun`),
+  separate from the search's, so one can never silently enable the other, and
+  M6 still calls `verifyRunnerTab` directly. A test pins all three;
+- **the capture itself is untouched.** `salaryForeground()` still refuses a tab
+  that is not in front (authorized 2026-08-28); a backgrounded run simply does
+  not attempt it, records `本地薪资 OCR 未采用：background_backfill` like every
+  other miss, and leaves the salary for a later run;
+- the tab must still exist and still be exactly BOSS, the run still starts from
+  a human click on a foreground tab, and it no longer pulls that tab forward
+  between jobs;
+- every stop condition is unchanged: login, verification, a lost or navigated
+  tab, worker error, the user's pause, the 100-job plan ceiling and the per-run
+  session cap.
+
 Login, verification, foreground loss or worker error pauses closed; it never logs in, reads
 credentials, bypasses verification, retries invisibly or runs after a worker restart. It never
 searches, scrolls, applies, favorites or messages. Offline implementation acceptance does not
@@ -1935,8 +1961,9 @@ Unique indexes that matter: `jobs.content_hash`, `(jobs.source, external_id)`,
 - Never rewrite a DecisionSnapshot. Later edits must not reach it.
 - Never claim JobAgent sent a message. Drafts are copied by the user and
   sent elsewhere; only an explicit confirmation records candidate_reply.
-- Never background an application. The 2026-09-04 authorization covers
-  search only; M6 and the salary capture keep the strict foreground check,
+- Never background an application. Search (2026-09-04) and the salary
+  backfill (2026-09-06) may run backgrounded; M6 and the screenshot
+  capture itself keep the strict foreground check,
   and a backgrounded search still stops on login, verification or risk
   control rather than pushing through unwatched.
 - Never add automatic/background inbox access, message polling or auto-reply.

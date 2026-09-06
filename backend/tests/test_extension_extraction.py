@@ -960,6 +960,49 @@ async def test_the_search_split_pane_is_not_an_application_surface(preflight):
 GREETING = "您好，我有近2年云基础设施经验，希望进一步沟通。"
 
 
+@pytest.mark.asyncio
+async def test_the_greeting_is_refused_once_the_tab_has_left_the_job_page(
+    browser_page, extension_bundle
+):
+    """BOSS answered 立即沟通 by navigating the whole tab to `/web/geek/chat`
+    on four consecutive applications on 2026-09-06, instead of opening its
+    usual in-page panel.
+
+    The composer resolves there perfectly well - it just belongs to whichever
+    conversation BOSS happened to select. Typing into it is a message to a
+    real person who may not be the one this approval names, so the page is
+    checked before anything is typed at all.
+    """
+    await _load_fixture(
+        browser_page, extension_bundle, "boss_job_detail_chat_open.html", url=DETAIL_URL
+    )
+    await browser_page.evaluate(
+        "() => { window.__sent = 0;"
+        "  document.querySelectorAll('.chat-panel .btn-send').forEach("
+        "    (b) => b.addEventListener('click', () => { window.__sent += 1 })) }"
+    )
+    outcome = await browser_page.evaluate(
+        """(text) => {
+          const chat = 'https://www.zhipin.com/web/geek/chat'
+          const other = 'https://www.zhipin.com/job_detail/zzz999~.html'
+          return {
+            chat: BossExtract.sendConfirmedGreeting(document, text, chat, 'aaa111bbb222~').status,
+            other: BossExtract.sendConfirmedGreeting(document, text, other, 'aaa111bbb222~').status,
+            missing: BossExtract.sendConfirmedGreeting(
+              document, text, document.location.href, '').status,
+            clicks: window.__sent,
+            typed: document.querySelector('.chat-panel .chat-input').value,
+          }
+        }""",
+        GREETING,
+    )
+    assert outcome["chat"] == "left_job_page", "the chat page is not this job's page"
+    assert outcome["other"] == "wrong_job", "another job's page is not this job's page"
+    assert outcome["missing"] == "wrong_job", "no bound id means no send"
+    assert outcome["clicks"] == 0, "nothing was sent"
+    assert outcome["typed"] == "", "and nothing was even typed"
+
+
 @pytest.fixture
 async def composer(browser_page, extension_bundle):
     """Load a fixture and run the real composer resolver on it."""
@@ -988,7 +1031,9 @@ async def send_greeting(browser_page, extension_bundle):
         if prepare:
             await browser_page.evaluate(prepare)
         status = await browser_page.evaluate(
-            "(text) => BossExtract.sendConfirmedGreeting(document, text).status", greeting
+            "(text) => BossExtract.sendConfirmedGreeting("
+            "  document, text, document.location.href, 'aaa111bbb222~').status",
+            greeting,
         )
         return {
             "status": status,

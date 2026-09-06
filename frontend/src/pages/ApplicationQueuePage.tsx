@@ -54,6 +54,44 @@ const M6_PREFLIGHT_REASON: Record<string, string> = {
   identity_mismatch: '页面上的岗位与本次确认的不是同一个，已停止。',
 }
 
+/** Plain-language readings of what happened to the greeting after the click.
+ *
+ * The click and the greeting are two separate actions (2026-09-03), and only
+ * the click was ever reported. On 2026-09-06 four applications in a row went
+ * out with no greeting because BOSS navigated the tab to the chat page, and
+ * the queue said 「已执行一次立即沟通」 for all of them - the user found out an
+ * hour later by looking at BOSS. A skipped greeting is now named, with what to
+ * do about it, because the fix is thirty seconds of typing in a conversation
+ * that already exists.
+ */
+const M6_GREETING_REASON: Record<string, string> = {
+  left_job_page:
+    'BOSS 点击后把整个标签页跳到了聊天页，招呼语没有发出去。'
+    + '为避免发错人，JobAgent 只在岗位详情页里打字——请在 BOSS 的这个对话里自己补一条。',
+  wrong_job: '点击后页面变成了另一个岗位，招呼语没有发出去，请到 BOSS 手动补一条。',
+  input_not_empty: 'BOSS 自己已经发了一条招呼语，所以没有再发第二条。',
+  no_composer: '没等到输入框出现，招呼语没有发出去，请到 BOSS 手动补一条。',
+  ambiguous_composer: '页面上有多个输入框，无法确定发给谁，没有发送。',
+  no_send_control: '找不到发送按钮，招呼语没有发出去，请到 BOSS 手动补一条。',
+  input_rejected: 'BOSS 拒绝或改写了输入内容，没有发送。',
+  foreground_lost: '中途切走了窗口，招呼语没有发出去，请到 BOSS 手动补一条。',
+  'greeting_unavailable:chat': 'BOSS 点击后跳到了聊天页，页面还在跳转中，招呼语没有发出去，请手动补一条。',
+  'greeting_unavailable:job_detail': '页面没有响应，招呼语没有发出去，请到 BOSS 手动补一条。',
+  'greeting_unavailable:other': 'BOSS 跳到了别的页面，招呼语没有发出去，请到 BOSS 手动补一条。',
+  'greeting_unavailable:unreadable': '无法确认页面状态，招呼语没有发出去，请到 BOSS 手动核对。',
+}
+
+/** What the attempt detail says about the greeting, in one sentence. */
+function explainM6Greeting(detail: string | undefined): string {
+  if (!detail) return ''
+  if (detail.startsWith('clicked_and_greeted')) return '招呼语已发送。'
+  const prefix = 'clicked_greeting_skipped:'
+  if (!detail.startsWith(prefix)) return ''
+  // The worker appends `|<shape>` diagnostics to some statuses.
+  const status = detail.slice(prefix.length).split('|')[0]
+  return M6_GREETING_REASON[status] || `招呼语没有发出去（${status}），请到 BOSS 手动补一条。`
+}
+
 function explainM6Failure(code: string | undefined, message: string): string {
   const status = code?.startsWith('m6_preflight/') ? code.slice('m6_preflight/'.length) : ''
   const reason = M6_PREFLIGHT_REASON[status]
@@ -307,9 +345,12 @@ export default function ApplicationQueuePage() {
         throw new Error(explainM6Failure(reply.code, reply.error || '扩展未确认执行结果'))
       }
       const attemptedJob = m6Target
+      const greetingNote = explainM6Greeting(reply.application?.detail)
       setFeedback({
         tone: 'warn',
-        text: '已执行一次「立即沟通」，并记录为结果待确认。请先在 BOSS 核对沟通是否建立，勿直接重试；再在弹窗中确认，确认后会通过现有唯一记录路径进入「已投递」列表。',
+        text: '已执行一次「立即沟通」，并记录为结果待确认。'
+          + (greetingNote ? greetingNote + ' ' : '')
+          + '请先在 BOSS 核对沟通是否建立，勿直接重试；再在弹窗中确认，确认后会通过现有唯一记录路径进入「已投递」列表。',
       })
       setM6Target(null)
       setM6Approval(null)

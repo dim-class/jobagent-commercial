@@ -1482,7 +1482,28 @@ Rules specific to it:
   (`clicked_and_greeted_site_result_unverified`, or
   `clicked_greeting_skipped:<reason>`);
 - **exactly one send.** No follow-up, no second attempt, no polling for the
-  composer beyond one bounded wait.
+  composer beyond one bounded wait;
+- **the greeting is typed on the job's own detail page, and nowhere else**
+  (2026-09-06). BOSS normally answers 立即沟通 with an in-page panel, but on
+  four consecutive applications it navigated the whole tab to
+  `/web/geek/chat` instead. The composer resolves there perfectly well - it
+  just belongs to whichever conversation BOSS happened to select, and typing
+  into it is a message to a real person who may not be the one this approval
+  names. `sendConfirmedGreeting` now takes the approval's `external_id` and
+  refuses (`left_job_page` / `wrong_job`) before anything is typed. Nothing
+  waits for a navigation to land: only `no_composer` - the right page, not
+  yet rendered - is worth the bounded retry.
+
+  Extending M6 to type on the chat page BOSS navigates to would need its own
+  explicit authorization, and would need to verify the open conversation's
+  header names the approved job first. Until then those applications go out
+  greeting-less and say so.
+
+  The queue used to report only the click, so all four read
+  「已执行一次立即沟通」 and the user found out an hour later by looking at
+  BOSS. `explainM6Greeting` names the outcome in the same feedback line: a
+  greeting that did not go is a thirty-second fix in a conversation that
+  already exists, but only if someone is told.
 
 Everything else about M6 is unchanged: one job per confirmation, the acceptance
 checkbox, one attempt per confirmation, no batch, no background, no automatic

@@ -3276,11 +3276,25 @@ async function executeM6Application(approvalId, source) {
                     break;
                 }
                 const greeted = await askTab(tabId, {
-                    type: 'jobagent:m6-greeting', greeting: approval.answers_text,
+                    type: 'jobagent:m6-greeting',
+                    greeting: approval.answers_text,
+                    expectedExternalId: approval.external_id,
                 });
-                status = greeted.ok && greeted.result ? greeted.result.status : 'greeting_unavailable';
-                // `no_composer` is the only status that proves nothing was typed, so
-                // it is the only one worth waiting out. Anything else is final.
+                if (greeted.ok && greeted.result) {
+                    status = greeted.result.status;
+                }
+                else {
+                    // The content script did not answer at all. On 2026-09-06 that was
+                    // BOSS navigating the tab to `/web/geek/chat` under the script's
+                    // feet, four times in a row, and the bare `greeting_unavailable`
+                    // told the user nothing about why. Read where the tab actually
+                    // went - path only, never the query, which carries session tokens.
+                    status = `greeting_unavailable:${await tabAreaOf(tabId)}`;
+                }
+                // `no_composer` is the only status that proves the page is the right
+                // one and simply has not rendered yet, so it is the only one worth
+                // waiting out. Anything else is final - a wrong page included: this
+                // never waits for a navigation to land somewhere it may not type.
                 if (status !== 'no_composer')
                     break;
                 if (attempt < M6_COMPOSER_ATTEMPTS - 1) {
@@ -3314,6 +3328,25 @@ async function executeM6Application(approvalId, source) {
     }
     finally {
         m6AttemptBusy = false;
+    }
+}
+/**
+ * Which BOSS area a tab is currently showing, for a failure note. The path
+ * only - BOSS puts `lid` and `securityId` in the query, and neither may reach
+ * a record or a log.
+ */
+async function tabAreaOf(tabId) {
+    try {
+        const tab = await chrome.tabs.get(tabId);
+        const url = new URL(tab.url || '');
+        if (url.pathname.startsWith('/job_detail/'))
+            return 'job_detail';
+        if (url.pathname.startsWith('/web/geek/chat'))
+            return 'chat';
+        return 'other';
+    }
+    catch {
+        return 'unreadable';
     }
 }
 /** Filter parameters BOSS puts in a results-page URL that JobAgent may reuse.

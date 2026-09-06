@@ -67,6 +67,9 @@ var BossContentScript = (function () {
     /** The human-confirmed greeting to type. Only the worker sends this, and
      *  only for an approval whose bound text it read back from the backend. */
     greeting?: string
+    /** The approval's own job id. The greeting is refused unless the page is
+     *  still that job's detail page - see `sendConfirmedGreeting`. */
+    expectedExternalId?: string
   }
 
   function handle(message: unknown): unknown {
@@ -108,7 +111,15 @@ var BossContentScript = (function () {
       // Types the human-confirmed greeting into an empty composer and sends it
       // once. Refuses on anything ambiguous, and never touches a box that
       // already holds text - BOSS sometimes greets on its own.
-      return { ok: true, result: BossExtract.sendConfirmedGreeting(document, request.greeting) }
+      return {
+        ok: true,
+        result: BossExtract.sendConfirmedGreeting(
+          document,
+          request.greeting,
+          document.location.href,
+          request.expectedExternalId || '',
+        ),
+      }
     }
 
     if (request.type === M6_PREFLIGHT && request.applicationIdentity) {

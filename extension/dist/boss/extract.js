@@ -1430,10 +1430,28 @@ var BossExtract = (function () {
      * 立即沟通, so this is its own authorized action (2026-09-03) rather than
      * "the other half" of one.
      */
-    function sendConfirmedGreeting(doc, greeting) {
+    /**
+     * Types and sends the one human-confirmed greeting - and only into the
+     * approved job's own detail page.
+     *
+     * The page check is not paranoia about a page that cannot move. Observed
+     * on 2026-09-06: BOSS answered 立即沟通 by navigating the whole tab to
+     * `/web/geek/chat` instead of opening its usual in-page panel, on four
+     * consecutive applications. There the composer resolves perfectly well -
+     * it just belongs to whichever conversation BOSS happened to select, which
+     * is a message to a real person and not necessarily the right one. Nothing
+     * is typed unless the page is still the job this approval names.
+     */
+    function sendConfirmedGreeting(doc, greeting, currentUrl, expectedExternalId) {
         const body = (greeting || '').trim();
         if (!body)
             return { status: 'empty_greeting' };
+        const observedUrl = cleanUrl(currentUrl);
+        const observedId = observedUrl ? externalIdOf(observedUrl) : null;
+        if (!observedId)
+            return { status: 'left_job_page' };
+        if (!expectedExternalId || observedId !== expectedExternalId)
+            return { status: 'wrong_job' };
         const composer = greetingComposer(doc);
         if (composer.status !== 'ok' || !composer.input || !composer.send) {
             return { status: composer.status };

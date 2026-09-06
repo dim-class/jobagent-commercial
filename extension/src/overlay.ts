@@ -314,7 +314,11 @@
     const cityKeyword = [state.city, state.keyword].filter(Boolean).join(' · ')
     const candidateText = state.currentCandidate ? ` · 当前候选人 ${state.currentCandidate}` : ''
     const actionText = state.lastAction ? ` · 最近动作 ${state.lastAction}` : ''
-    const pausedReasonText = state.pausedReason ? ` · 暂停原因 ${state.pausedReason}` : ''
+    // The one pause reason a human reading this bar can act on immediately:
+    // the window is covered, so BOSS has stopped loading. Say what to do.
+    const pausedReasonText = state.pausedReason === 'background_not_rendering'
+      ? ' · 暂停原因 窗口被完全遮挡，BOSS 不再加载新岗位（露出本窗口后点继续）'
+      : state.pausedReason ? ` · 暂停原因 ${state.pausedReason}` : ''
     label.textContent =
       `JobAgent 自动运行（M4e/M4f）· 任务 #${state.taskId}${cityKeyword ? ' · ' + cityKeyword : ''} · ${phaseText} · ` +
       `当前网址 ${state.currentUrl || '（尚未导航）'} · ` +

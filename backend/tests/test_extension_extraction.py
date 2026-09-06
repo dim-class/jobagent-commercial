@@ -1283,6 +1283,84 @@ async def test_one_scroll_round_reaches_the_end_of_the_list(browser_page, extens
 
 
 @pytest.mark.asyncio
+async def test_a_scroll_reports_whether_the_browser_painted_since_the_last_one(
+    browser_page, extension_bundle
+):
+    """A tab Chrome has stopped painting still scrolls - and loads nothing.
+
+    Measured in a real Chrome tab on 2026-09-06: with the tab backgrounded,
+    `scrollTop` advanced 700 -> 1600 while the frame counter, the scroll-event
+    counter and the `IntersectionObserver` counter all stayed put and the list
+    stayed at its first batch. BOSS loads from those callbacks, so a
+    backgrounded search reported fifteen cards per direction and called the
+    list finished.
+
+    One `requestAnimationFrame` per scroll step tells the two apart. The first
+    scroll has nothing to compare against and reports `undefined`.
+    """
+    await _load_fixture(
+        browser_page, extension_bundle, "boss_search_tall_list.html", url=SEARCH_URL
+    )
+    painting = await browser_page.evaluate(
+        """async () => {
+          const first = BossExtract.scrollResultsContainer(document)
+          await new Promise(r => requestAnimationFrame(() => r()))
+          const second = BossExtract.scrollResultsContainer(document)
+          return { first: first.rendered, second: second.rendered }
+        }"""
+    )
+    assert painting["first"] is None, "the first scroll has no previous frame to judge"
+    assert painting["second"] is True, "a painting tab reports rendered"
+
+    frozen = await browser_page.evaluate(
+        """async () => {
+          // Let the frame the previous scroll armed land first; replacing
+          // `requestAnimationFrame` does not cancel an already-queued callback.
+          await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+          // Exactly what a non-rendering tab does: script runs, the callback
+          // never arrives. Nothing else about the page changes.
+          const real = window.requestAnimationFrame
+          window.requestAnimationFrame = () => 0
+          BossExtract.scrollResultsContainer(document)
+          await new Promise(r => setTimeout(r, 50))
+          const next = BossExtract.scrollResultsContainer(document)
+          window.requestAnimationFrame = real
+          const box = document.querySelector('.job-list-box')
+          return { rendered: next.rendered, ok: next.ok, scrollTop: box.scrollTop }
+        }"""
+    )
+    assert frozen["ok"] is True, "the scroll itself still succeeds - that is the trap"
+    assert frozen["scrollTop"] > 0, "and scrollTop still moves"
+    assert frozen["rendered"] is False, "but nothing was painted, so nothing can load"
+
+
+@pytest.mark.asyncio
+async def test_the_frame_probe_arms_exactly_one_callback_per_scroll(
+    browser_page, extension_bundle
+):
+    """Bounded, single-shot - never a poll loop. CLAUDE.md M4f forbids
+    unbounded polling, and a frame counter is the obvious way to write this
+    wrong."""
+    await _load_fixture(
+        browser_page, extension_bundle, "boss_search_tall_list.html", url=SEARCH_URL
+    )
+    armed = await browser_page.evaluate(
+        """async () => {
+          const real = window.requestAnimationFrame
+          let calls = 0
+          window.requestAnimationFrame = cb => { calls += 1; return real(cb) }
+          BossExtract.scrollResultsContainer(document)
+          BossExtract.scrollResultsContainer(document)
+          BossExtract.scrollResultsContainer(document)
+          await new Promise(r => setTimeout(r, 80))
+          window.requestAnimationFrame = real
+          return calls
+        }"""
+    )
+    assert armed == 3, "one callback per scroll step, and no self-rescheduling loop"
+
+
+@pytest.mark.asyncio
 async def test_a_list_container_that_does_not_scroll_moves_the_page_instead(
     browser_page, extension_bundle
 ):

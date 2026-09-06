@@ -1611,6 +1611,84 @@ test('the per-page scroll budget is spent in full, then a page with no next cont
   assert.ok(!calls.some(c => /\/run\/fail$/.test(c.url)))
 })
 
+test('a tab the browser has stopped painting pauses the run instead of reporting a finished list', { skip: SKIP }, async () => {
+  // A backgrounded tab still runs script: `scrollBy` moves `scrollTop` and
+  // reports success, while BOSS - which loads its next batch from a frame,
+  // a scroll event or an IntersectionObserver callback - loads nothing.
+  // Measured in a real Chrome tab on 2026-09-06. Before this, sixteen
+  // directions each read their first fifteen cards and every one of them
+  // ended "completed", which is the same shape as a genuinely exhausted list.
+  let scrollCalls = 0
+  let nextPageCalls = 0
+  const emptyPage = searchPage([])
+  const { router, calls } = makeFetchRouter((url) => {
+    if (/\/run\/round$/.test(url)) return jsonResponse({ run_status: 'running' })
+    return undefined
+  })
+  const env = loadBackground({
+    fetchImpl: router,
+    respond: (msg) => {
+      if (msg.type === 'jobagent:detect') return Promise.resolve({ ok: true, result: emptyPage })
+      if (msg.type === 'jobagent:scroll-step') {
+        scrollCalls += 1
+        // The first scroll has no previous frame to judge; the second reports
+        // that none was painted since it.
+        return Promise.resolve({
+          ok: true,
+          result: scrollCalls === 1 ? { ok: true } : { ok: true, rendered: false },
+        })
+      }
+      if (msg.type === 'jobagent:next-page') {
+        nextPageCalls += 1
+        return Promise.resolve({ ok: true, result: { ok: false, error: 'no_control' } })
+      }
+      return Promise.resolve({ ok: false })
+    },
+  })
+  await env.send({ type: 'jobagent:runner-start', taskId: 5, candidateCap: 20 })
+  await settle()
+
+  assert.equal(scrollCalls, 2, 'it stops at the first scroll that can report a frozen tab')
+  assert.equal(nextPageCalls, 0, 'and never spends a page on a list that cannot grow')
+  const paused = calls.find(c => /\/run\/pause$/.test(c.url))
+  assert.ok(paused, 'the run pauses')
+  assert.equal(JSON.parse(paused.init.body).reason, 'background_not_rendering')
+  assert.ok(!calls.some(c => /\/run\/complete$/.test(c.url)), 'never "completed" - nothing was finished')
+  assert.ok(!calls.some(c => /\/run\/fail$/.test(c.url)), 'and not a failure - nothing broke')
+  const pointer = pointerOf(env)
+  assert.ok(pointer, 'the pointer survives, so 恢复 continues with the budgets it had')
+  assert.equal(pointer.pausedReason, 'background_not_rendering')
+})
+
+test('a painting tab is never mistaken for a frozen one', { skip: SKIP }, async () => {
+  let scrollCalls = 0
+  const emptyPage = searchPage([])
+  const { router, calls } = makeFetchRouter((url) => {
+    if (/\/run\/round$/.test(url)) return jsonResponse({ run_status: 'running' })
+    return undefined
+  })
+  const env = loadBackground({
+    fetchImpl: router,
+    respond: (msg) => {
+      if (msg.type === 'jobagent:detect') return Promise.resolve({ ok: true, result: emptyPage })
+      if (msg.type === 'jobagent:scroll-step') {
+        scrollCalls += 1
+        return Promise.resolve({ ok: true, result: { ok: true, rendered: true } })
+      }
+      if (msg.type === 'jobagent:next-page') {
+        return Promise.resolve({ ok: true, result: { ok: false, error: 'no_control' } })
+      }
+      return Promise.resolve({ ok: false })
+    },
+  })
+  await env.send({ type: 'jobagent:runner-start', taskId: 5, candidateCap: 20 })
+  await settle()
+
+  assert.equal(scrollCalls, 30, 'the whole scroll budget, exactly as before')
+  assert.ok(!calls.some(c => /\/run\/pause$/.test(c.url)))
+  assert.ok(calls.find(c => /\/run\/complete$/.test(c.url)))
+})
+
 test('a backend-reported no-new-round completion stops the loop without a further round', { skip: SKIP }, async () => {
   let scrollCalls = 0
   const emptyPage = searchPage([])

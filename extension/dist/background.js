@@ -1235,6 +1235,43 @@ async function pauseForHumanGate(taskId, runToken, reason) {
     releaseRunnerLoop(runToken);
 }
 /**
+ * Chrome stopped painting the search tab, so BOSS's list can no longer grow
+ * (see `ScrollResult.rendered`). Pauses the run and the batch with a reason
+ * the console can explain, rather than letting every remaining direction
+ * report its first fifteen cards as a finished list.
+ *
+ * A pause, not a failure: nothing was lost and nothing needs redoing. The
+ * budgets are preserved exactly as a verification pause preserves them, and
+ * bringing the window back into view and pressing 继续 carries on from here.
+ */
+async function pauseForFrozenTab(taskId, runToken) {
+    const fresh = await readCurrent(taskId, runToken);
+    if (!fresh) {
+        releaseRunnerLoop(runToken);
+        return;
+    }
+    const merged = {
+        ...fresh,
+        pauseRequested: true,
+        phase: 'stopped',
+        pausedReason: 'background_not_rendering',
+        lastAction: 'paused_not_rendering',
+        updatedAt: new Date().toISOString(),
+    };
+    await setRunnerPointer(merged);
+    await patchBatchForTask(merged.taskId, { state: 'paused', lastError: null });
+    broadcastRunnerState(merged);
+    try {
+        await postTaskRun(taskId, 'pause', { reason: 'background_not_rendering' });
+    }
+    catch (err) {
+        await persistPatch(taskId, runToken, {
+            lastError: 'not_rendering_transition_failed:' + String(err?.message || err),
+        });
+    }
+    releaseRunnerLoop(runToken);
+}
+/**
  * The loop hit a `checkpoint()` other than `'continue'`. A cancel is
  * terminal (`endRunner`); a plain pause is not - it stops here, keeps the
  * pointer, and waits for an explicit `resumeRunner()` call.
@@ -1870,6 +1907,12 @@ async function runScrollRound(taskId, runToken, tabId) {
     // to stabilization/inventory/round-recording below.
     if (!confirmed.ok)
         return { status: 'error', reason: confirmed.error || 'confirm_failed' };
+    // The tab is not being painted, so BOSS cannot load its next batch however
+    // far this scrolled - see `ScrollResult.rendered`. Reported before the
+    // stabilization wait, because waiting five seconds for cards that cannot
+    // arrive is what made a frozen run look like a finished one.
+    if (scrolled.result?.rendered === false)
+        return { status: 'not_rendering' };
     // Bounded post-scroll stabilization - CLAUDE.md M4f review item 5: "do not
     // treat the immediate post-scroll DOM as final." Polls until the card
     // canonical URL set gains a card (including same-size virtualized lists), or the
@@ -2446,6 +2489,10 @@ async function runRoundsLoop(taskId, runToken, tabId) {
             if (step === 'returned')
                 return;
             continue;
+        }
+        if (scrollOutcome.status === 'not_rendering') {
+            await pauseForFrozenTab(taskId, runToken);
+            return;
         }
         if (scrollOutcome.status === 'error') {
             await endRunner(taskId, runToken, 'failed', scrollOutcome.reason);

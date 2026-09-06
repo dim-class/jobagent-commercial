@@ -40,6 +40,7 @@ function stopHint(error: string | null | undefined): string | null {
 function taskStatusLabel(task: SearchPlanTask): string {
   if (task.state === 'paused_login_required' || task.paused_reason === 'login_required') return '需要登录 BOSS'
   if (task.state === 'paused_verification' || task.paused_reason === 'verification') return '等待人工验证'
+  if (task.paused_reason === 'background_not_rendering') return '窗口被盖住，已暂停'
   return task.state || '未开始'
 }
 
@@ -615,7 +616,7 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       )
       if (!result.ok) throw new Error(result.error || '未确认执行，请刷新状态。')
       setMessage(runInBackground && action === 'start'
-        ? '请求已接收（后台搜索）。BOSS 标签页被挡住也会继续；关闭它或离开 BOSS 仍会停止。进度回到本页查看。'
+        ? '请求已接收（后台搜索）。可以切到别的窗口，但别把 BOSS 窗口最小化或完全盖住，否则 BOSS 不再加载新岗位；关闭它或离开 BOSS 仍会停止。进度回到本页查看。'
         : '请求已接收。BOSS 页顶部显示执行进度；返回控制台会刷新后端状态。切换离开 BOSS 会停止后续浏览器动作。')
       await refresh()
     } catch (err) { setError(err instanceof Error ? err.message : '请求失败') }
@@ -752,7 +753,7 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       <details>
       <summary className="small">
         搜索选项：{runInBackground
-          ? '后台搜索'
+          ? '后台搜索（窗口别盖住）'
           : <strong>前台搜索（切走会立即停止）</strong>} ·{' '}
         {autoFillSalary ? '结束后自动补薪资' : '不自动补薪资'}
         {activeBandCodes.length ? ` · 按 ${activeBandCodes.length} 个薪资档分段` : ''}
@@ -768,9 +769,14 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
           }}
         />
         <label htmlFor="run-background">
-          后台运行：BOSS 标签页被其他窗口挡住时继续搜索和补薪资，你可以同时做别的
+          后台运行：可以切到别的窗口去做别的事，搜索和补薪资继续
         </label>
       </div>
+      <p className="small faint indent">
+        BOSS 窗口不能最小化、也不能被完全盖住——Chrome 会停掉看不见的标签页的渲染，
+        BOSS 就不再往下加载新岗位，一个方向只剩首屏十几个。露出一条边就够了。
+        遇到这种情况会暂停并在上面告诉你，不会当成“搜完了”。
+      </p>
       <p className="small faint indent">
         只影响搜索，投递仍需前台确认。登录、验证码、风控照样立即停止，但你不会当场看见——回本页查看。
       </p>
@@ -898,6 +904,14 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       ) : null}
       {portfolioTasks.some(row => row.state === 'paused_login_required' || row.paused_reason === 'login_required')
         ? <div className="small text-danger mt-1" role="alert">请在当前 BOSS 标签页完成登录；登录成功后回到这里点击“恢复”。JobAgent 不会读取或填写登录凭据。</div>
+        : null}
+      {portfolioTasks.some(row => row.paused_reason === 'background_not_rendering')
+        ? (
+          <div className="small text-danger mt-1" role="alert">
+            BOSS 窗口被完全盖住或最小化了，Chrome 停止了它的渲染，BOSS 就不再加载新岗位——继续跑下去每个方向只会读到首屏的十几个。
+            把 BOSS 窗口露出来（不用点它，露出一部分即可），再点“恢复”，已用的额度都保留着。
+          </div>
+        )
         : null}
       <div className="actions mt-1">
         <button className="btn btn-secondary" disabled={busy || !batchActive || !connection?.runner}

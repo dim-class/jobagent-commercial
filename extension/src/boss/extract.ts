@@ -912,6 +912,32 @@ var BossExtract = (function () {
   interface ScrollResult {
     ok: boolean
     error?: 'not_scrollable' | 'container_ambiguous'
+    /**
+     * Did the browser paint a frame between the PREVIOUS scroll of this run
+     * and this one? `undefined` on the first scroll, which has nothing to
+     * compare against.
+     *
+     * A tab Chrome has stopped rendering - minimised, or a window another
+     * window completely covers - still runs script, so `scrollBy` moves
+     * `scrollTop` and reports success. What it does not do is run the
+     * rendering steps, and BOSS loads its next batch from those: no frame,
+     * no `scroll` event, no `IntersectionObserver` callback, no new cards.
+     * Measured in a real Chrome tab on 2026-09-06: backgrounded, `scrollTop`
+     * advanced 700 -> 1600 while the frame counter, the scroll-event counter
+     * and the observer counter all stayed exactly where they were, and the
+     * list stayed at its first batch.
+     *
+     * That is why a backgrounded search reported 15 cards per direction and
+     * called it a finished list. One `requestAnimationFrame` per scroll step
+     * - never a loop, never a poll - is enough to tell the two apart.
+     */
+    rendered?: boolean
+  }
+
+  interface FrameProbe {
+    frames: number
+    framesAtLastScroll: number
+    armed: boolean
   }
 
   /**
@@ -970,8 +996,32 @@ var BossExtract = (function () {
     // still one scroll per approved round, still no `scrollTo`/`scrollIntoView`
     // anywhere: only the distance changed.
     const remaining = container.scrollHeight - container.scrollTop - container.clientHeight
+    const rendered = readFrameProbe(view)
     container.scrollBy({ top: Math.max(step, remaining), left: 0 })
-    return { ok: true }
+    return { ok: true, rendered }
+  }
+
+  /**
+   * Reads whether a frame was painted since the last scroll step, and arms
+   * the probe for the next one. Exactly one `requestAnimationFrame` per
+   * scroll step: a bounded, single-shot callback, not a loop and not a poll.
+   */
+  function readFrameProbe(view: Window | null): boolean | undefined {
+    if (!view || typeof view.requestAnimationFrame !== 'function') return undefined
+    const host = view as Window & { __jobagentFrameProbe?: FrameProbe }
+    const probe: FrameProbe =
+      host.__jobagentFrameProbe || { frames: 0, framesAtLastScroll: 0, armed: false }
+    host.__jobagentFrameProbe = probe
+    // A counter, not a timestamp: `Date.now()` has millisecond resolution and
+    // a frame can land inside the same millisecond as the scroll that armed
+    // it, which reads as "no frame" and would report a painting tab frozen.
+    const rendered = probe.armed ? probe.frames > probe.framesAtLastScroll : undefined
+    probe.framesAtLastScroll = probe.frames
+    probe.armed = true
+    view.requestAnimationFrame(() => {
+      probe.frames += 1
+    })
+    return rendered
   }
 
   /**

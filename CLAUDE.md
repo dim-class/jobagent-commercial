@@ -1031,6 +1031,47 @@ is what a human dragging the scrollbar does, and rounds buy depth again.
   button does nothing". `test_schema_bounds_match_the_service_ceilings` now
   pins the pair.
 
+#### A backgrounded tab cannot deepen the list (measured 2026-09-06)
+
+The 2026-09-04 background-search authorization traded away the foreground
+check. What nobody knew then is that Chrome takes the search's depth with it.
+
+Measured in a real Chrome tab on 2026-09-06, with a page that counts frames,
+scroll events and `IntersectionObserver` callbacks: with the tab backgrounded,
+`scrollTop` advanced 700 -> 1600 and all three counters stayed exactly where
+they were. The list did not grow. Chrome runs the script of a tab it is not
+painting; it does not run the rendering steps, and scroll events and observer
+callbacks are delivered from those. BOSS loads its next batch from exactly
+that machinery.
+
+So a backgrounded search reads the first server-rendered batch - about 15
+cards - and nothing more, however far it scrolls and however long it runs.
+The 上海+杭州 run that prompted this measured it precisely: 15 of 16
+directions reported **exactly 15 observed cards**, two barren scroll rounds
+each, and every one of them ended `completed`. The sixteenth reported 30 -
+the one moment the window came back into view. The same batch shape run in
+the foreground the day before averaged 41 cards per direction.
+
+`document.visibilityState` does not catch this: in the frozen tab it still
+read `visible`. The page cannot tell, and neither can a check that asks it.
+
+- **`ScrollResult.rendered` is the signal.** One `requestAnimationFrame` per
+  scroll step - a single-shot callback, never a loop and never a poll - says
+  whether a frame landed since the previous scroll. A frame counter rather
+  than a timestamp, because `Date.now()` has millisecond resolution and a
+  frame can land inside the same millisecond that armed it;
+- **a frozen tab pauses the run, it never completes it.** `pauseForFrozenTab`
+  posts a plain `pause` with reason `background_not_rendering`, keeps the
+  pointer and every budget, and stops the batch. A completed task is a claim
+  that the list ran out, and that claim was false sixteen times in a row;
+- **the console says what to do**: leave the BOSS window visible - unfocused
+  and mostly covered is fine, minimised or completely covered is not - then
+  press 恢复. Chrome keeps painting a visible-but-unfocused window;
+- the checkbox no longer promises what it cannot deliver. 「后台运行」 now
+  states the constraint instead of implying a covered window is fine;
+- nothing else moves. Every ceiling, every hard stop, the foreground-only
+  application and salary capture, and the opt-in flag itself are unchanged.
+
 #### Bounded results pagination (user authorized 2026-09-05)
 
 The user authorized the search runner to use the results pages M4 section 1a's
@@ -1966,6 +2007,9 @@ Unique indexes that matter: `jobs.content_hash`, `(jobs.source, external_id)`,
   capture itself keep the strict foreground check,
   and a backgrounded search still stops on login, verification or risk
   control rather than pushing through unwatched.
+- Never report a list as finished when the browser stopped painting the
+  tab. A frozen tab scrolls and loads nothing, so that is a pause, not a
+  completion.
 - Never add automatic/background inbox access, message polling or auto-reply.
   M7 is the only exception: one explicit human click may perform the bounded,
   foreground-only BOSS conversation scan defined above; it is not a mailbox

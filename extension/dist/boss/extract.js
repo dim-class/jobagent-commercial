@@ -769,8 +769,31 @@ var BossExtract = (function () {
         // still one scroll per approved round, still no `scrollTo`/`scrollIntoView`
         // anywhere: only the distance changed.
         const remaining = container.scrollHeight - container.scrollTop - container.clientHeight;
+        const rendered = readFrameProbe(view);
         container.scrollBy({ top: Math.max(step, remaining), left: 0 });
-        return { ok: true };
+        return { ok: true, rendered };
+    }
+    /**
+     * Reads whether a frame was painted since the last scroll step, and arms
+     * the probe for the next one. Exactly one `requestAnimationFrame` per
+     * scroll step: a bounded, single-shot callback, not a loop and not a poll.
+     */
+    function readFrameProbe(view) {
+        if (!view || typeof view.requestAnimationFrame !== 'function')
+            return undefined;
+        const host = view;
+        const probe = host.__jobagentFrameProbe || { frames: 0, framesAtLastScroll: 0, armed: false };
+        host.__jobagentFrameProbe = probe;
+        // A counter, not a timestamp: `Date.now()` has millisecond resolution and
+        // a frame can land inside the same millisecond as the scroll that armed
+        // it, which reads as "no frame" and would report a painting tab frozen.
+        const rendered = probe.armed ? probe.frames > probe.framesAtLastScroll : undefined;
+        probe.framesAtLastScroll = probe.frames;
+        probe.armed = true;
+        view.requestAnimationFrame(() => {
+            probe.frames += 1;
+        });
+        return rendered;
     }
     function isNextPageDisabled(el) {
         const classes = Array.prototype.slice.call(el.classList).join(' ').toLowerCase();

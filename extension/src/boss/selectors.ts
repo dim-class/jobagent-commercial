@@ -159,6 +159,23 @@ var BossSelectors = {
   GREETING_SEND: ['button', '[role="button"]', 'a', 'div', 'span'] as string[],
   GREETING_SEND_TEXT: ['发送'] as string[],
 
+  /**
+   * The open conversation's pane on `/web/geek/chat` - the right-hand half,
+   * holding one conversation's header, messages and composer.
+   *
+   * Read from the live page on 2026-09-06 (read-only: one navigation and a
+   * DOM read, no conversation selected, nothing clicked). The page's own
+   * structure is `.chat-wrap > .list-warp.v2` (the conversation list) and
+   * `.chat-conversation` (the open one, or `.chat-no-data` when none is).
+   * Exactly one exists.
+   *
+   * It is what makes a text identity check safe: the forty conversations in
+   * the left list are outside it, so matching the approved company and title
+   * inside this pane is a statement about the conversation BOSS opened and
+   * not about some other one further down the list.
+   */
+  CHAT_CONVERSATION: ['.chat-conversation'] as string[],
+
   COMPANY: [
     '.job-boss-info .boss-info-attr',
     '.job-banner .company-info .name',

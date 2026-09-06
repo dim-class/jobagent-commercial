@@ -1495,18 +1495,35 @@ Rules specific to it:
   So `sendConfirmedGreeting` takes the approval's `external_id`, and:
 
   - on `/job_detail/<id>.html` the URL's own id must match (`wrong_job`);
-  - on `/web/geek/chat` the page must reference **exactly one**
-    `/job_detail/<id>.html` link, and it must be this job
+  - on `/web/geek/chat` the **open conversation's own pane** must carry both
+    the approved company and the approved title
     (`chat_wrong_job` / `chat_job_ambiguous` / `chat_job_unknown`);
   - anywhere else, nothing is typed at all (`left_job_page`).
 
-  An id rather than a company/title text comparison, because the id is what
-  the approval binds and text would need normalizing to compare - guessing,
-  on a page no fixture was ever captured from. The one-link rule is
-  deliberately blunt for the same reason: on a page whose composer sends to a
-  real person, "probably that one" is not an answer. `boss_chat_conversation.html`
-  is **authored, not captured**, exactly like the salary-filter fixtures; it
-  pins the reader's logic, and whether it matches the live page stays a
+  The first version of that second rule read `/job_detail/<id>.html` links,
+  because an id is what an approval binds and text needs normalizing to
+  compare. The live page has **none**: read read-only on 2026-09-06 (one
+  navigation, DOM reads, no conversation selected, nothing clicked) it
+  reported zero such anchors, and its forty conversation-list items are plain
+  `div`s. So the header's text is the only identity the page exposes, which
+  is what the user authorized checking in the first place.
+
+  **`CHAT_CONVERSATION` scoping is the whole safety argument.** The left list
+  holds every recruiter this account has ever spoken to, so a document-wide
+  text match would happily confirm a job applied to yesterday while BOSS had
+  a different conversation open - the exact wrong-person send this prevents.
+  One pane, one conversation. Both company *and* title must be found: several
+  roles at one company is normal, and so is the same title at two companies.
+  A leaf's text may *lead* with what is wanted, because BOSS renders
+  「公司 | 招聘者职位」 and 「职位 25-40K 北京」 as single nodes - but only when
+  what follows is a separator, a space or a digit, so 「云运维工程师(高级)」
+  never matches 「云运维工程师」.
+
+  `boss_chat_conversation.html`'s **class names come from that live read; its
+  content is authored**, because no conversation was opened to capture one and
+  no automated test may visit zhipin.com. The header's internal markup is
+  still a reconstruction from a screenshot, so what the tests pin is the
+  reader's logic and its scoping - whether it matches the live header stays a
   manual claim the user makes in their own Chrome.
 
   Two statuses mean "not ready yet" and are the only ones the bounded retry

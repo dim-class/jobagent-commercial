@@ -73,7 +73,7 @@ var BossContentScript = (function () {
             // already holds text - BOSS sometimes greets on its own.
             return {
                 ok: true,
-                result: BossExtract.sendConfirmedGreeting(document, request.greeting, document.location.href, request.expectedExternalId || ''),
+                result: BossExtract.sendConfirmedGreeting(document, request.greeting, document.location.href, request.expectedExternalId || '', request.expectedCompany || '', request.expectedTitle || ''),
             };
         }
         if (request.type === M6_PREFLIGHT && request.applicationIdentity) {

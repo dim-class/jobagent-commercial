@@ -1484,32 +1484,58 @@ var BossExtract = (function () {
         }
     }
     /**
-     * Which job the open conversation is about, read from the page's own
-     * `/job_detail/<id>.html` links.
+     * Whether the conversation BOSS opened is the one this approval names.
      *
-     * An id, not a company/title text comparison: the id is what the approval
-     * binds, and text would have to be normalized to compare, which is guessing
-     * on a page no fixture was ever captured from. The rule is deliberately
-     * blunt - the page must reference exactly ONE job, and it must be this one.
-     * Two would mean the header is not the only thing linking to a posting, and
-     * on a page whose composer sends to a real person, "probably that one" is
-     * not an answer.
+     * The first attempt read `/job_detail/<id>.html` links, because an id is
+     * what an approval binds. The live page has **none** - checked read-only on
+     * 2026-09-06: zero such anchors anywhere, and the forty conversation-list
+     * items are plain `div`s, not links. So the only identity the page exposes
+     * is the header's own text, which is what the user authorized checking.
+     *
+     * Scoped to `CHAT_CONVERSATION`, and that scope is the whole safety
+     * argument: the left list holds every other recruiter this account has
+     * spoken to, and a document-wide text match would happily confirm a job we
+     * applied to yesterday while BOSS had a different conversation open. One
+     * pane, one conversation.
+     *
+     * Both the company and the title must be found. Either alone is not an
+     * identification - several roles at one company is normal, and the same
+     * title at two companies is normal too.
      */
-    function chatConversationJob(doc) {
-        const ids = new Set();
-        const anchors = Array.from(doc.querySelectorAll('a[href*="/job_detail/"]'));
-        for (const node of anchors) {
-            const href = node.getAttribute('href') || '';
-            const absolute = href.startsWith('http') ? href : `https://www.zhipin.com${href}`;
-            const id = externalIdOf(cleanUrl(absolute));
-            if (id)
-                ids.add(id);
-        }
-        if (!ids.size)
+    function chatConversationMatches(doc, expectedCompany, expectedTitle) {
+        if (!expectedCompany || !expectedTitle)
             return { status: 'chat_job_unknown' };
-        if (ids.size > 1)
+        const panes = pickAll(doc, BossSelectors.CHAT_CONVERSATION);
+        if (panes.nodes.length > 1)
             return { status: 'chat_job_ambiguous' };
-        return { status: 'ok', externalId: Array.from(ids)[0] };
+        const pane = panes.nodes[0];
+        if (!pane)
+            return { status: 'chat_job_unknown' };
+        // A leaf's text, because a parent's `textContent` is every descendant
+        // concatenated and would match almost anything.
+        const leaves = Array.from(pane.querySelectorAll('*'))
+            .filter((node) => !node.children.length)
+            .map((node) => text(node))
+            .filter(Boolean);
+        const found = (wanted) => leaves.some((value) => {
+            if (value === wanted)
+                return true;
+            // BOSS renders 「公司 | 招聘者职位」 and 「职位 25-40K 北京」 as single
+            // nodes, so a prefix counts - but only when what follows is a separator,
+            // a space or a digit. 「云运维工程师(高级)」 is a different job and the
+            // '(' stops it matching 「云运维工程师」.
+            if (!value.startsWith(wanted))
+                return false;
+            const rest = value.slice(wanted.length);
+            return /^[\s·•|｜/\-–—]/.test(rest) || /^\d/.test(rest);
+        });
+        const company = found(expectedCompany);
+        const title = found(expectedTitle);
+        if (company && title)
+            return { status: 'ok' };
+        // Neither read means the header could not be read at all; one of the two
+        // means this is a conversation about something else.
+        return { status: company || title ? 'chat_wrong_job' : 'chat_job_unknown' };
     }
     /**
      * Types and sends the one human-confirmed greeting - and only into the
@@ -1521,13 +1547,14 @@ var BossExtract = (function () {
      * - it just belongs to whichever conversation BOSS happened to select,
      * which is a message to a real person and not necessarily the right one.
      *
-     * So the greeting goes to one of exactly two places, and both are checked
-     * the same way, against the approval's own `external_id`: the job's detail
-     * page, or the conversation BOSS itself opened for that job (user
-     * authorized 2026-09-06). Anywhere else, and anything ambiguous, is
-     * refused before a character is typed.
+     * So the greeting goes to one of exactly two places (user authorized the
+     * second on 2026-09-06): the job's detail page, checked by the URL's own
+     * id, or the conversation BOSS itself opened for that job, checked by the
+     * open pane's company and title - see `chatConversationMatches`, and note
+     * the live chat page exposes no job id at all. Anywhere else, and anything
+     * ambiguous, is refused before a character is typed.
      */
-    function sendConfirmedGreeting(doc, greeting, currentUrl, expectedExternalId) {
+    function sendConfirmedGreeting(doc, greeting, currentUrl, expectedExternalId, expectedCompany = '', expectedTitle = '') {
         const body = (greeting || '').trim();
         if (!body)
             return { status: 'empty_greeting' };
@@ -1540,11 +1567,9 @@ var BossExtract = (function () {
                 return { status: 'wrong_job' };
         }
         else if (isChatPage(currentUrl)) {
-            const owner = chatConversationJob(doc);
+            const owner = chatConversationMatches(doc, expectedCompany, expectedTitle);
             if (owner.status !== 'ok')
                 return { status: owner.status };
-            if (owner.externalId !== expectedExternalId)
-                return { status: 'chat_wrong_job' };
         }
         else {
             return { status: 'left_job_page' };

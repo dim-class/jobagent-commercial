@@ -960,12 +960,14 @@ async def test_the_search_split_pane_is_not_an_application_surface(preflight):
 GREETING = "您好，我有近2年云基础设施经验，希望进一步沟通。"
 
 
-CHAT_URL = "https://www.zhipin.com/web/geek/chat?t=1757165367"
+CHAT_URL = "https://www.zhipin.com/web/geek/chat"
+CHAT_COMPANY = "中信建投证券"
+CHAT_TITLE = "私有云运维工程师"
 
 
 @pytest.fixture
 async def chat_greeting(browser_page, extension_bundle):
-    """One real send attempt against the authored chat-page fixture.
+    """One real send attempt against the chat-page fixture.
 
     BOSS sometimes answers 立即沟通 by navigating the whole tab here instead of
     opening its in-page panel (observed 2026-09-06, four times in a row). The
@@ -974,7 +976,8 @@ async def chat_greeting(browser_page, extension_bundle):
     first - the composer here belongs to whichever conversation BOSS selected.
     """
 
-    async def _send(*, prepare: str = "", expected: str = "aaa111bbb222~") -> dict:
+    async def _send(*, prepare: str = "", company: str = CHAT_COMPANY,
+                    title: str = CHAT_TITLE) -> dict:
         await _load_fixture(
             browser_page, extension_bundle, "boss_chat_conversation.html", url=CHAT_URL
         )
@@ -986,9 +989,9 @@ async def chat_greeting(browser_page, extension_bundle):
         if prepare:
             await browser_page.evaluate(prepare)
         status = await browser_page.evaluate(
-            "([text, id]) => BossExtract.sendConfirmedGreeting("
-            "  document, text, document.location.href, id).status",
-            [GREETING, expected],
+            "([text, company, title]) => BossExtract.sendConfirmedGreeting("
+            "  document, text, document.location.href, 'any-id', company, title).status",
+            [GREETING, company, title],
         )
         return {
             "status": status,
@@ -1003,6 +1006,8 @@ async def chat_greeting(browser_page, extension_bundle):
 
 @pytest.mark.asyncio
 async def test_the_conversation_boss_opened_for_this_job_accepts_the_greeting(chat_greeting):
+    """The title shares its node with the salary (「私有云运维工程师 25-40K」),
+    which is why a leaf's text may lead with what we are looking for."""
     result = await chat_greeting()
     assert result["status"] == "sent"
     assert result["clicks"] == 1, "exactly one send, as on the detail page"
@@ -1010,40 +1015,54 @@ async def test_the_conversation_boss_opened_for_this_job_accepts_the_greeting(ch
 
 
 @pytest.mark.asyncio
-async def test_a_conversation_about_another_job_is_refused(chat_greeting):
+async def test_a_conversation_about_another_company_is_refused(chat_greeting):
     """The whole reason the check exists: BOSS picks which conversation is
     open, and the wrong one is a message to a real person."""
-    result = await chat_greeting(expected="zzz999~")
-    assert result["status"] == "chat_wrong_job"
+    result = await chat_greeting(company="浩鲸科技")
+    assert result["status"] == "chat_wrong_job", "the title matched and the company did not"
     assert result["clicks"] == 0
     assert result["typed"] == "", "nothing is typed, not even before the send"
 
 
 @pytest.mark.asyncio
-async def test_a_page_referencing_two_jobs_is_refused_rather_than_guessed(chat_greeting):
-    """No fixture was ever captured from this page, so the reader refuses
-    anything it cannot read unambiguously instead of picking the likeliest."""
-    result = await chat_greeting(
-        prepare="""() => {
-          const a = document.createElement('a')
-          a.href = '/job_detail/other999~.html'
-          document.body.appendChild(a)
-        }"""
-    )
-    assert result["status"] == "chat_job_ambiguous"
+async def test_a_conversation_about_another_role_at_the_same_company_is_refused(chat_greeting):
+    """Several roles at one company is normal, so the company alone is not an
+    identification."""
+    result = await chat_greeting(title="云安全工程师")
+    assert result["status"] == "chat_wrong_job"
     assert result["clicks"] == 0
     assert result["typed"] == ""
 
 
 @pytest.mark.asyncio
-async def test_a_conversation_with_no_job_link_is_refused(chat_greeting):
+async def test_a_longer_title_starting_with_the_approved_one_is_not_a_match(chat_greeting):
+    """「云运维工程师」 must not match 「云运维工程师(高级)」. A prefix counts
+    only when what follows is a separator, a space or a digit."""
+    result = await chat_greeting(title="私有云运维")
+    assert result["status"] == "chat_wrong_job"
+    assert result["clicks"] == 0
+
+
+@pytest.mark.asyncio
+async def test_another_conversation_in_the_list_never_confirms_the_open_one(chat_greeting):
+    """The list holds every recruiter this account has spoken to, including
+    jobs already applied to. A document-wide text match would confirm one of
+    those while BOSS had a different conversation open - which is exactly the
+    wrong-person send this check exists to prevent."""
+    result = await chat_greeting(company="嘉环科技股份有限公司", title="云计算工程师")
+    assert result["status"] == "chat_job_unknown", "both are on the page, neither is in the pane"
+    assert result["clicks"] == 0
+    assert result["typed"] == ""
+
+
+@pytest.mark.asyncio
+async def test_a_pane_that_cannot_be_read_is_refused(chat_greeting):
     result = await chat_greeting(
-        prepare="() => document.querySelectorAll('a[href*=\"/job_detail/\"]')"
-                ".forEach((a) => a.remove())"
+        prepare="() => { document.querySelector('.chat-title').remove();"
+                "  document.querySelector('.job-info .job-name').remove() }"
     )
     assert result["status"] == "chat_job_unknown"
     assert result["clicks"] == 0
-    assert result["typed"] == ""
 
 
 @pytest.mark.asyncio
@@ -1083,10 +1102,12 @@ async def test_the_greeting_is_refused_once_the_tab_has_left_the_job_page(
           const chat = 'https://www.zhipin.com/web/geek/chat'
           const other = 'https://www.zhipin.com/job_detail/zzz999~.html'
           return {
-            chat: BossExtract.sendConfirmedGreeting(document, text, chat, 'aaa111bbb222~').status,
-            other: BossExtract.sendConfirmedGreeting(document, text, other, 'aaa111bbb222~').status,
+            chat: BossExtract.sendConfirmedGreeting(
+              document, text, chat, 'aaa111bbb222~', 'c', 't').status,
+            other: BossExtract.sendConfirmedGreeting(
+              document, text, other, 'aaa111bbb222~', 'c', 't').status,
             missing: BossExtract.sendConfirmedGreeting(
-              document, text, document.location.href, '').status,
+              document, text, document.location.href, '', 'c', 't').status,
             clicks: window.__sent,
             typed: document.querySelector('.chat-panel .chat-input').value,
           }
@@ -1131,7 +1152,7 @@ async def send_greeting(browser_page, extension_bundle):
             await browser_page.evaluate(prepare)
         status = await browser_page.evaluate(
             "(text) => BossExtract.sendConfirmedGreeting("
-            "  document, text, document.location.href, 'aaa111bbb222~').status",
+            "  document, text, document.location.href, 'aaa111bbb222~', 'c', 't').status",
             greeting,
         )
         return {

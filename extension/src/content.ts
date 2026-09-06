@@ -70,6 +70,10 @@ var BossContentScript = (function () {
     /** The approval's own job id. The greeting is refused unless the page is
      *  still that job's detail page - see `sendConfirmedGreeting`. */
     expectedExternalId?: string
+    /** The approval's company. Paired with the existing `expectedTitle`, it
+     *  identifies the conversation BOSS opened - the live chat page exposes
+     *  no job id at all. */
+    expectedCompany?: string
   }
 
   function handle(message: unknown): unknown {
@@ -118,6 +122,8 @@ var BossContentScript = (function () {
           request.greeting,
           document.location.href,
           request.expectedExternalId || '',
+          request.expectedCompany || '',
+          request.expectedTitle || '',
         ),
       }
     }

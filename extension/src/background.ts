@@ -3612,6 +3612,8 @@ async function executeM6Application(
           type: 'jobagent:m6-greeting',
           greeting: approval.answers_text,
           expectedExternalId: approval.external_id,
+          expectedCompany: approval.company,
+          expectedTitle: approval.title,
         })
         if (greeted.ok && greeted.result) {
           status = greeted.result.status

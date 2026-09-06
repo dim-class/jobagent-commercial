@@ -1,41 +1,70 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>BOSS chat (authored fixture)</title>
+<title>BOSS chat (structure read from the live page, content authored)</title>
 <!--
-  AUTHORED, NOT CAPTURED. No save of BOSS's /web/geek/chat page exists, and no
-  automated test may visit zhipin.com to make one. This pins the reader's
-  logic - "the page must reference exactly one job, and it must be this one" -
-  which is deliberately blunt precisely because the real DOM is unknown.
-  Whether it matches the live page stays a manual claim the user makes in
-  their own Chrome.
+  The CLASS NAMES here were read from the live /web/geek/chat page on
+  2026-09-06 (read-only: one navigation, DOM reads, no conversation selected,
+  nothing clicked): `.chat-wrap > .list-warp.v2` is the conversation list and
+  `.chat-conversation` is the open one. The page carries ZERO
+  /job_detail/ anchors and its list items are plain divs, which is why the
+  identity check reads the open pane's own company and title.
+
+  The CONTENT is authored - no conversation was opened to capture one, and no
+  automated test may visit zhipin.com. The header's internal markup is
+  therefore still a reconstruction from a screenshot; what the test pins is
+  the reader's logic and its scoping to `.chat-conversation`.
 -->
 <style>
-  .chat-header { padding: 8px }
-  .chat-panel { padding: 8px }
+  .chat-wrap { display: flex }
+  .list-warp { width: 300px }
+  .chat-conversation { width: 600px }
   .chat-input { width: 320px; height: 60px }
   .btn-send { display: inline-block; width: 60px; height: 24px }
-  .conv-list li { list-style: none; padding: 4px }
+  .friend-content-warp { padding: 4px }
 </style>
 
-<div class="chat-header">
-  <span class="boss-name">余锡琨</span>
-  <span class="company">云纷</span>
-  <span class="boss-title">安全架构师</span>
-  <div class="job-row">
-    <span class="job-title">云运维工程师</span>
-    <span class="salary">10-14K</span>
-    <span class="city">上海</span>
-    <a class="view-job" href="/job_detail/aaa111bbb222~.html?lid=trackme">查看职位</a>
+<div class="chat-container page-container">
+  <div class="chat-wrap">
+
+    <!-- Every other recruiter this account has spoken to. A document-wide
+         text match would confirm any of these; the scoping is the point. -->
+    <div class="list-warp v2">
+      <div class="chat-user v2">
+        <div class="chat-content"><div class="user-list"><div class="user-list-content">
+          <div class="friend-content-warp"><div class="friend-content">
+            <div class="text"><div class="title-box"><span class="name">盛女士</span><span
+              class="company-name">浩鲸科技</span></div>
+              <div class="gray last-msg">阿里云运维工程师</div></div>
+          </div></div>
+          <div class="friend-content-warp"><div class="friend-content">
+            <div class="text"><div class="title-box"><span class="name">陈星星</span><span
+              class="company-name">嘉环科技股份有限公司</span></div>
+              <div class="gray last-msg">云计算工程师</div></div>
+          </div></div>
+        </div></div></div>
+      </div>
+    </div>
+
+    <!-- The open conversation. -->
+    <div class="chat-conversation">
+      <div class="chat-title">
+        <span class="name">雷宇博</span>
+        <span class="company">中信建投证券</span>
+        <span class="boss-title">信息技术部人力资源</span>
+      </div>
+      <div class="job-info">
+        <span class="job-name">私有云运维工程师 25-40K</span>
+        <span class="city">北京</span>
+        <span class="view-job">查看职位</span>
+      </div>
+      <div class="chat-message-list">
+        <div class="message-card">你与该职位竞争者PK情况</div>
+      </div>
+      <div class="chat-editor">
+        <textarea class="chat-input" placeholder="按Enter键发送，按Ctrl+Enter键换行"></textarea>
+        <span class="btn-send">发送</span>
+      </div>
+    </div>
+
   </div>
-</div>
-
-<!-- The conversation list: recruiters and message previews, no job links. -->
-<ul class="conv-list">
-  <li role="listitem"><span>盛女士</span><span>浩鲸科技</span><span>[送达]您好……</span></li>
-  <li role="listitem"><span>陈星星</span><span>嘉环科技</span><span>[送达]您好……</span></li>
-</ul>
-
-<div class="chat-panel">
-  <textarea class="chat-input" placeholder="按Enter键发送，按Ctrl+Enter键换行"></textarea>
-  <span class="btn-send">发送</span>
 </div>

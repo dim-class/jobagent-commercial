@@ -40,7 +40,7 @@ class JobMatchResult(BaseModel):
     experience_gap: str = Field(default="", description="一句话说明经验年限差距")
     role_summary: str = Field(default="", description="一句话概括这个岗位在做什么")
     reasoning_summary: str = Field(default="", description="2-4 句简短结论理由，不要输出思考过程")
-    greeting_message: str = Field(default="", description="中文招呼语，60-140 字")
+    greeting_message: str = Field(default="", description="中文招呼语，40-90 字，写成聊天消息而不是简历摘要")
 
 
 class AnalysisMeta(BaseModel):

@@ -130,6 +130,38 @@ role + no meaningful skill overlap → capped and forced to `skip`).
 
 Most of the pipeline is therefore testable without spending a token.
 
+### The greeting is a chat message, not a summary (prompt v2, 2026-09-06)
+
+`greeting_message` is the first thing a recruiter reads, and until v2 the
+prompt prescribed the shape that made it useless: *"一句话说明自己是谁 + 2-4 个
+相关经历 + 一句表达希望进一步沟通"*. Every output obeyed it exactly, so all of
+them read「您好，我目前从事云基础设施与中间件工程，具备 A、B、C 经验，期待进一步
+沟通。」- 90 to 130 characters of flattened résumé, identical opener, and not one
+word about the posting.
+
+What v2 asks for instead: 40-90 characters, three sentences - something the JD
+actually says, the one or two things the résumé actually has that match it, and
+**a question the recruiter can answer in one line**. The question is the part
+that matters:「期待进一步沟通」gives them nothing to reply to, while「这个岗位更偏
+平台建设还是值班运维？」gets answered on the way to the next message. It must ask
+about something the JD says or conspicuously omits - never an invented detail.
+
+The opener rule is written as "start from the job, not from yourself" rather
+than "vary it", because a single-shot call cannot know what the last greeting
+looked like. Feeding it recent greetings would work and is deliberately not
+done: they are not in `analysis_cache_key`, so the same job would quietly
+produce different results while the key claimed the inputs were identical.
+Starting from the JD varies the opener for free, because the JDs vary.
+
+Grounding is unchanged and is the one rule that never bends: nothing may
+appear that is not in the résumé. A better register must never buy itself a
+fabricated project.
+
+`PROMPT_VERSION` moved to `v2`, so **only newly analyzed jobs get the new
+greeting**. Everything already cached keeps the old one until it is
+re-analyzed, which costs a call - the per-job 重新分析 on the job page is the
+cheap way to refresh one.
+
 ### Browser capture (v0.2)
 
 ```

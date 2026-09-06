@@ -36,6 +36,11 @@ class Settings(BaseSettings):
 
     # --- OpenAI -----------------------------------------------------------
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
+    #: Where to send the calls. Empty means OpenAI itself. Any OpenAI-compatible
+    #: endpoint works here (DeepSeek, Moonshot, 通义 and most domestic providers
+    #: expose one), which is the whole of this project's "other providers"
+    #: support - it speaks one protocol, not several SDKs.
+    openai_base_url: str | None = Field(default=None, alias="OPENAI_BASE_URL")
     openai_model_fast: str = Field(default="gpt-5.6-luna", alias="OPENAI_MODEL_FAST")
     openai_model_smart: str = Field(default="gpt-5.6-terra", alias="OPENAI_MODEL_SMART")
     openai_timeout_seconds: float = Field(default=120.0, alias="OPENAI_TIMEOUT_SECONDS")

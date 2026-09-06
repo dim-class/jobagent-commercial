@@ -42,8 +42,18 @@ from app.services import task_console
 #: from a config file or a client-supplied value, only hardcoded here.
 MAX_CONCURRENT_SESSIONS = 1
 MAX_PAGE_CAP = 3
-MAX_CANDIDATE_CAP = 20
-MAX_SCROLL_CAP = 5
+#: Opened details per session. Raised from 20 to 60 (user authorized
+#: 2026-09-05) - see the extension's `RUNNER_MAX_CANDIDATES`. The human's own
+#: target of NEW jobs stays 1-20 and is validated by the search-plan schema.
+MAX_CANDIDATE_CAP = 60
+#: Raised from 5 to 30 (user authorized 2026-09-05). The old 5 was written
+#: when a scroll round moved one viewport; a round now reaches the end of the
+#: list, which is where BOSS loads its next batch, so rounds finally buy depth
+#: instead of falling behind a list that keeps growing. Opens stay capped at
+#: 20 per task, so deeper scrolling costs scrolling time and nothing else, and
+#: the consecutive-no-new threshold (3) still ends a direction that has really
+#: run dry - this is a ceiling, not a target.
+MAX_SCROLL_CAP = 30
 
 #: The exact host `extension/manifest.json`'s `content_scripts.matches`
 #: declares. Fail closed on anything else - no subdomain, no other scheme,

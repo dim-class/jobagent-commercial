@@ -9,10 +9,14 @@
     if (event.source !== window || event.origin !== location.origin || location.pathname !== '/'
       || !['#/console', '#/queue', '#/recruiter'].includes(location.hash)) return
     const data = event.data as { channel?: string; id?: string; action?: string; taskId?: number;
-      taskIds?: number[]; candidateCap?: number; runId?: number; approvalId?: number; jobId?: number }
+      taskIds?: number[]; candidateCap?: number; runId?: number; approvalId?: number; jobId?: number;
+      //: Whether this search may continue with the tab behind others
+      //: (authorized 2026-09-04, search only). A mode, like the candidate cap -
+      //: never a URL, a script or a browser identifier.
+      background?: boolean }
     if (!data || data.channel !== 'jobagent-console-request' || typeof data.id !== 'string'
       || data.id.length > 80 || !['status', 'start', 'pause', 'resume', 'cancel',
-        'start-batch', 'pause-batch', 'resume-batch', 'cancel-batch',
+        'start-batch', 'pause-batch', 'resume-batch', 'cancel-batch', 'read-salary-filter',
         'start-salary-backfill', 'pause-salary-backfill', 'resume-salary-backfill',
         'cancel-salary-backfill', 'execute-application',
         // Read-only: reports the filters already set on a BOSS tab the human
@@ -34,7 +38,8 @@
     try {
       chrome.runtime.sendMessage({ type: 'jobagent:console-command', action: data.action,
         taskId: data.taskId, taskIds: data.taskIds, candidateCap: data.candidateCap,
-        runId: data.runId, approvalId: data.approvalId, jobId: data.jobId }, result => {
+        runId: data.runId, approvalId: data.approvalId, jobId: data.jobId,
+        background: data.background === true }, result => {
         if (chrome.runtime.lastError) reply({ ok: false, code: 'worker_unavailable',
           error: '桥接脚本已响应，但扩展后台不可达。请刷新控制台后重新检查；不会启动任务。' })
         else reply(result)

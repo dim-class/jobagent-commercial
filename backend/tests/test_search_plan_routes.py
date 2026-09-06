@@ -26,6 +26,10 @@ def test_search_plan_options_are_backend_owned_and_loopback_only(client):
         "supported_cities": ["北京", "上海", "广州", "杭州"],
         "max_selected_cities": 4,
         "max_batch_tasks": 16,
+        # Exposed so the console can state, before a run, how many units the
+        # plan will create - a backend that was not restarted after this
+        # number changed used to be invisible from the page.
+        "max_directions": 16,
     }
 
 
@@ -99,7 +103,7 @@ def test_quick_prepare_returns_a_fresh_resume_bound_bounded_task(client, active_
 def test_quick_prepare_validates_the_hard_candidate_bound(client, active_resume):
     response = client.post(
         "/api/tasks/search-plan/quick-prepare",
-        json={"cities": ["北京"], "target_count": 21},
+        json={"cities": ["北京"], "target_count": 61},
     )
     assert response.status_code == 422
 
@@ -342,3 +346,61 @@ def test_pause_accepts_an_optional_reason_and_reports_it_back(client, plan_task_
     response = client.post(f"/api/tasks/{plan_task_id}/run/pause", json={"reason": "user_pause"})
     assert response.status_code == 200
     assert response.json()["paused_reason"] == "user_pause"
+
+
+# ---------------------------------------------------------------------------
+# salary segments, from BOSS's own codes rather than a pasted URL
+# ---------------------------------------------------------------------------
+
+
+def test_salary_codes_become_segments_and_cost_directions(client, active_resume):
+    """The same mechanism a pasted URL already used, with the paste removed.
+
+    Segments multiply the plan, and the batch ceiling does not move - so they
+    come out of the direction budget, visibly, rather than overflowing it.
+    """
+    response = client.post(
+        "/api/tasks/search-plan/quick-prepare",
+        json={"cities": ["北京"], "target_count": 5, "salary_codes": ["406", "407"]},
+    )
+    assert response.status_code == 200
+    tasks = response.json()["tasks"]
+    # One city x two bands: 16 // 2 = 8 directions, each split in two.
+    assert len(tasks) == 16
+    assert sum("salary=406" in task["name"] for task in tasks) == 8
+    assert sum("salary=407" in task["name"] for task in tasks) == 8
+
+
+def test_a_repeated_salary_code_is_not_a_second_segment(client, active_resume):
+    response = client.post(
+        "/api/tasks/search-plan/quick-prepare",
+        json={"cities": ["北京"], "target_count": 5, "salary_codes": ["406", "406"]},
+    )
+    assert response.status_code == 200
+    assert all("salary=406" in task["name"] for task in response.json()["tasks"])
+
+
+def test_a_salary_code_that_is_not_a_code_is_refused_before_anything_is_created(
+    client, active_resume, db
+):
+    """A filter value is not free text - it ends up in a URL the extension
+    will navigate to."""
+    from app.models import JobSearchTask
+
+    before = db.query(JobSearchTask).count()
+    response = client.post(
+        "/api/tasks/search-plan/quick-prepare",
+        json={"cities": ["北京"], "target_count": 5, "salary_codes": ["406; drop"]},
+    )
+    assert response.status_code == 422
+    db.expire_all()
+    assert db.query(JobSearchTask).count() == before
+
+
+def test_no_salary_codes_behaves_exactly_as_before(client, active_resume):
+    response = client.post(
+        "/api/tasks/search-plan/quick-prepare",
+        json={"cities": ["北京"], "target_count": 5},
+    )
+    assert response.status_code == 200
+    assert all("salary=" not in task["name"] for task in response.json()["tasks"])

@@ -5,6 +5,8 @@ export type ConsoleAction = 'status' | 'start' | 'pause' | 'resume' | 'cancel'
   //: Read-only: reports the filters already set on a BOSS tab the human
   //: has open. No navigation, no DOM, no page change.
   | 'read-search-filters'
+  //: Read-only: BOSS's own salary bands and codes, off the open results page.
+  | 'read-salary-filter'
 export interface ConsoleBatchStatus {
   state: 'running' | 'paused' | 'completed' | 'stopped'
   taskIds: number[]
@@ -20,11 +22,17 @@ export interface ConsoleReply {
    *  the extension from an allowlist - never the raw tab URL, which holds
    *  session tokens. Present only for `read-search-filters`. */
   filterUrl?: string
+  /** BOSS's own salary bands, label and code, read off the open results page.
+   *  Present only for `read-salary-filter`. */
+  options?: { label: string; code: string }[]
   error?: string
   code?: string
   protocol?: number
   extensionVersion?: string
   capabilities?: string[]
+  /** The ceilings the loaded extension build enforces. Absent on an older
+   *  build - which is itself the answer when a start is refused. */
+  limits?: { target: number; opens: number; scrolls: number; pages: number }
   runner?: { taskId: number; phase: string; paused: boolean; paid: boolean; candidateCap: number } | null
   batch?: ConsoleBatchStatus | null
   salaryBackfill?: { runId: number; active: boolean; updatedAt: string } | null
@@ -89,7 +97,10 @@ export function assessConsoleConnection(reply: ConsoleReply): { ready: boolean; 
 
 /** One bounded request. Timeouts are UNKNOWN, never an automatic retry. */
 export function consoleExtension(action: ConsoleAction, taskId?: number, candidateCap?: number,
-  taskIds?: number[], runId?: number, approvalId?: number, jobId?: number): Promise<ConsoleReply> {
+  taskIds?: number[], runId?: number, approvalId?: number, jobId?: number,
+  //: Let a *search* continue with the BOSS tab behind other windows
+  //: (authorized 2026-09-04). Applying is never backgrounded.
+  background?: boolean): Promise<ConsoleReply> {
   return new Promise((resolve, reject) => {
     const id = crypto.randomUUID()
     let bridgeSeen = false
@@ -118,6 +129,6 @@ export function consoleExtension(action: ConsoleAction, taskId?: number, candida
       : action === 'execute-application' ? 30000 : 15000)
     window.addEventListener('message', listener)
     window.postMessage({ channel: 'jobagent-console-request', id, action, taskId, taskIds,
-      candidateCap, runId, approvalId, jobId }, location.origin)
+      candidateCap, runId, approvalId, jobId, background }, location.origin)
   })
 }

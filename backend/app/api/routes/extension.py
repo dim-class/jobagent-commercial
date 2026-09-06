@@ -25,6 +25,7 @@ from app.core.errors import AppError
 from app.core.logging import get_logger, log_event
 from app.db.session import get_db
 from app.schemas.extension import (
+    KnownJobCard,
     KnownJobsRequest,
     KnownJobsResponse,
     ImportRequest,
@@ -144,8 +145,120 @@ def known_jobs(
         ).all()
         known = [external_ids[value] for value in rows if value in external_ids]
 
-    log_event(logger, "extension.known_checked", asked=len(payload.urls), known=len(known))
+    by_card = _known_by_card_signature(db, payload.cards, set(known))
+    known.extend(by_card)
+
+    log_event(
+        logger,
+        "extension.known_checked",
+        asked=len(payload.urls),
+        known=len(known),
+        by_signature=len(by_card),
+    )
     return KnownJobsResponse(known=known)
+
+
+def _signature(*values: str | None) -> tuple[str, ...] | None:
+    """The card fields, whitespace-normalized. ``None`` when identity is thin.
+
+    Company and title must both be present: without them there is no claim to
+    make, and skipping on a partial match would refuse a posting the library
+    has never seen.
+    """
+
+    cleaned = tuple("".join((value or "").split()) for value in values)
+    return cleaned if cleaned[0] and cleaned[1] else None
+
+
+def _salary_blind(signature: tuple[str, ...]) -> tuple[str, ...]:
+    """The same signature without the salary.
+
+    Used only when one side has no salary at all. BOSS obfuscates a great many
+    card salaries with a private-use font, so the card reads empty while the
+    stored job carries a figure the OCR or the salary backfill supplied later -
+    409 of 632 jobs in the library that motivated this were created with no
+    readable card salary. Requiring exact equality there sent the run to open
+    the posting again, every run, forever.
+
+    The cost is measured, not assumed: on that library the full key collided
+    for 2 rows and this one for 7, so it trades five rows of ambiguity for the
+    two-thirds of postings whose salary a card never shows.
+    """
+
+    return signature[:2] + signature[3:]
+
+
+def _known_by_card_signature(
+    db: Session,
+    cards: list[KnownJobCard],
+    already: set[str],
+) -> list[str]:
+    """Cards the library already holds under a *different* job id.
+
+    BOSS re-lists the same posting under a new ``job_detail`` id, so the
+    ``(source, external_id)`` check above says "new" and the run spends a
+    candidate slot opening it - only for the content hash to report a duplicate
+    and import nothing. Over one 15-task run that was 66 of 78 opened details.
+
+    The claim is deliberately narrow: company, title, salary, experience *and*
+    city must all agree, which is everything a card shows. On the library this
+    was written against, that key collided for 2 rows in 581 - so a genuinely
+    different posting is occasionally skipped, and the description (which the
+    card does not carry) is never guessed at. A looser key on company+title
+    alone would have collided for 18.
+    """
+
+    wanted: dict[tuple[str, ...], list[str]] = {}
+    blind: dict[tuple[str, ...], list[str]] = {}
+    for card in cards:
+        canonical = canonical_url(card.url)
+        if not canonical or canonical in already:
+            continue
+        signature = _signature(
+            card.company, card.title, card.salary_text, card.experience_text, card.city
+        )
+        if not signature:
+            continue
+        if signature[2]:
+            wanted.setdefault(signature, []).append(canonical)
+        else:
+            blind.setdefault(_salary_blind(signature), []).append(canonical)
+    if not wanted and not blind:
+        return []
+
+    titles = {signature[1] for signature in list(wanted) + list(blind)}
+    rows = db.execute(
+        select(
+            Job.company,
+            Job.title,
+            Job.salary_text,
+            Job.experience_text,
+            Job.city,
+        ).where(Job.source == JobSourceName.boss)
+    ).all()
+
+    found: list[str] = []
+    seen: set[str] = set()
+
+    def take(urls: list[str]) -> None:
+        for canonical in urls:
+            if canonical not in seen:
+                seen.add(canonical)
+                found.append(canonical)
+
+    for row in rows:
+        signature = _signature(*row)
+        if signature is None or signature[1] not in titles:
+            continue
+        take(wanted.get(signature, []))
+        take(blind.get(_salary_blind(signature), []))
+        # The mirror case: the stored job is the one with no salary (collected
+        # before the backfill ran) and the card now shows one.
+        if not signature[2]:
+            for key, urls in wanted.items():
+                if _salary_blind(key) == _salary_blind(signature):
+                    take(urls)
+    return found
 
 
 @router.post("/jobs/preview", response_model=PreviewResponse)

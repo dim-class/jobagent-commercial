@@ -17,7 +17,7 @@ from __future__ import annotations
 import base64
 import time
 
-from agents import Agent, AsyncOpenAI, OpenAIResponsesModel, RunConfig, Runner
+from agents import Agent, OpenAIResponsesModel, RunConfig, Runner
 
 from app.agents.import_prompts import (
     IMPORT_PROMPT_VERSION,
@@ -27,6 +27,7 @@ from app.agents.import_prompts import (
     build_text_user_prompt,
 )
 from app.agents.job_match_agent import require_openai
+from app.agents.openai_client import build_client
 from app.core.config import Settings, get_settings
 from app.core.errors import UpstreamError
 from app.core.logging import get_logger, log_event
@@ -41,7 +42,7 @@ MAX_TEXT_CHARS = 20_000
 
 
 def _build_agent(model_name: str, instructions: str, cfg: Settings) -> Agent:
-    client = AsyncOpenAI(api_key=cfg.openai_api_key, timeout=cfg.openai_timeout_seconds)
+    client = build_client(cfg)
     return Agent(
         name=AGENT_NAME,
         instructions=instructions,

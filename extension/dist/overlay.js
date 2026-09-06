@@ -207,9 +207,12 @@
         label.textContent =
             `JobAgent 自动运行（M4e/M4f）· 任务 #${state.taskId}${cityKeyword ? ' · ' + cityKeyword : ''} · ${phaseText} · ` +
                 `当前网址 ${state.currentUrl || '（尚未导航）'} · ` +
-                `已用名额 ${state.candidatesAttempted ?? '未知'}/${state.candidateCap ?? '未知'} · ` +
+                //: The target counts NEW jobs; opens are shown beside it against the
+                //: immutable ceiling, so neither number hides behind the other.
+                `新岗位 ${state.importedJobs}/${state.candidateCap ?? '未知'} · ` +
+                `已打开 ${state.candidatesAttempted ?? '未知'}/60 · ` +
                 `已处理候选人(jobs) ${state.candidatesProcessed} · 已导入(imported) ${state.importedJobs} · ` +
-                `可见(visible) ${state.visibleJobs} · 已滚动(scroll) ${state.scrollsUsed}/5 · ` +
+                `可见(visible) ${state.visibleJobs} · 第 ${state.pagesVisited ?? 1}/3 页 · 本页滚动 ${state.scrollsUsed}/30 · ` +
                 `观察(observed) ${state.observedCount} · 新增(new) ${state.newCount} · ` +
                 `重复(duplicate) ${state.duplicateCount} · 连续无新增(no-new) ${state.noNewRounds}` +
                 candidateText +
@@ -301,7 +304,10 @@
     }
     function progressText(session) {
         return (`JobAgent 受监督会话（M4b/M4c）· 任务「${session.approved_criteria.task_name}」· ` +
-            `结果为连续滚动列表（无翻页控件）· ` +
+            //: This used to assert 「无翻页控件」 unconditionally - a hardcoded claim,
+            //: not a detection, and it read as evidence that BOSS had no pages when
+            //: in fact the runner simply never used them.
+            `第 ${session.pages_visited}/${session.page_cap} 页 · ` +
             `本页滚动 ${session.scrolls_used}/${session.scroll_cap} · ` +
             `候选人 ${session.candidates_extracted}/${session.candidate_cap} · ` +
             `不会自动滚动/翻页/投递/发消息`);

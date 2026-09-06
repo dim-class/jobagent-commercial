@@ -4,7 +4,6 @@ import { Link } from 'react-router-dom'
 import { ApiError, api } from '@/api/client'
 import { nextMatchResult } from '@/pages/matchResultLifecycle'
 import AutoMatchReviewPanel from '@/pages/AutoMatchReviewPanel'
-import { startFullSalaryBackfill } from '@/pages/salaryBackfill'
 import ConsoleSearchPanel from '@/pages/ConsoleSearchPanel'
 import CrossTaskMatchPanel from '@/pages/CrossTaskMatchPanel'
 import SalaryBackfillPanel from '@/pages/SalaryBackfillPanel'
@@ -81,14 +80,11 @@ export default function ConsolePage() {
   //: Missing salaries are invisible until you open a collapsed section three
   //: screens down, so the count is surfaced where the user already is. Reading
   //: the plan calls no model and starts no browser work.
-  const [missingSalaries, setMissingSalaries] = useState<number | null>(null)
   //: Set when the pointer opens the section, consumed once the panel has
   //: actually rendered. A ref rather than state, and an effect rather than
   //: requestAnimationFrame: rAF fires before React commits, so the scroll
   //: looked up an element that did not exist yet and silently did nothing.
   const pendingSalaryScroll = useRef(false)
-  const [salaryBusy, setSalaryBusy] = useState(false)
-  const [salaryNote, setSalaryNote] = useState('')
   const [showAdvancedConsole, setShowAdvancedConsole] = useState(false)
 
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null)
@@ -159,16 +155,6 @@ export default function ConsolePage() {
     }
   }
 
-  //: Free: a count over rows that already exist. No model call, no browser
-  //: work, nothing on a recruitment site.
-  const loadMissingSalaries = useCallback(async () => {
-    try {
-      setMissingSalaries((await api.getSalaryBackfillPlan()).salary_missing)
-    } catch {
-      setMissingSalaries(null)
-    }
-  }, [])
-
   const loadAttention = useCallback(async () => {
     setAttentionLoading(true)
     setAttentionError(null)
@@ -181,11 +167,7 @@ export default function ConsolePage() {
     } finally {
       setAttentionLoading(false)
     }
-    // A finished search is exactly when this number changes, and it is the
-    // moment the user is looking at the page. Reading it at mount only meant
-    // the prompt showed a figure from before the search.
-    await loadMissingSalaries()
-  }, [loadMissingSalaries])
+  }, [])
 
   const loadTasks = useCallback(async () => {
     setTasksLoading(true)
@@ -445,9 +427,7 @@ export default function ConsolePage() {
       <header className="page-head">
         <div>
           <h1>搜索适合我的岗位</h1>
-          <p>
-            只需选择意向城市和岗位数量；JobAgent 会综合当前简历与职业方向，搜索多个相关岗位方向。
-          </p>
+          <p>选择城市和数量，JobAgent 会按当前简历挑选岗位方向。</p>
         </div>
       </header>
 
@@ -460,46 +440,6 @@ export default function ConsolePage() {
           {showAdvancedConsole ? '收起更多功能' : '更多功能'}
         </button>
       </div>
-
-      {missingSalaries ? (
-        <div className="row mb-1">
-          <span className="small">
-            {missingSalaries} 个岗位缺少薪资 —— 搜索时看到的是 BOSS 的特殊字体，
-            但岗位详情页上是可读的，补全会去那里取。
-          </span>
-          <button
-            type="button"
-            className="btn-primary btn-sm"
-            disabled={salaryBusy}
-            onClick={() => {
-              setSalaryBusy(true)
-              setSalaryNote('')
-              void startFullSalaryBackfill()
-                .then(async (result) => {
-                  setSalaryNote(result.message)
-                  await loadMissingSalaries()
-                })
-                .catch((err) => setSalaryNote(
-                  err instanceof ApiError ? err.message : '启动薪资补全失败。',
-                ))
-                .finally(() => setSalaryBusy(false))
-            }}
-          >
-            {salaryBusy ? '正在启动…' : '现在补全'}
-          </button>
-          <button
-            type="button"
-            className="btn-sm"
-            onClick={() => {
-              pendingSalaryScroll.current = true
-              setShowAdvancedConsole(true)
-            }}
-          >
-            查看详情
-          </button>
-          {salaryNote ? <span className="small faint">{salaryNote}</span> : null}
-        </div>
-      ) : null}
 
       {feedback ? (
         <Alert tone={feedback.tone} onDismiss={() => setFeedback(null)}>

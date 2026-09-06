@@ -14,9 +14,10 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from agents import Agent, AsyncOpenAI, OpenAIResponsesModel, RunConfig, Runner
+from agents import Agent, OpenAIResponsesModel, RunConfig, Runner
 
 from app.agents.prompts import SYSTEM_PROMPT, build_user_prompt
+from app.agents.openai_client import build_client
 from app.core.config import Settings, get_settings
 from app.core.errors import ConfigurationError, UpstreamError
 from app.core.logging import get_logger, log_event
@@ -52,8 +53,7 @@ def require_openai(settings: Settings | None = None) -> Settings:
 def build_agent(model_name: str, settings: Settings | None = None, *, no_retries: bool = False) -> Agent:
     """Construct the agent bound to a specific model."""
     cfg = require_openai(settings)
-    client = AsyncOpenAI(api_key=cfg.openai_api_key, timeout=cfg.openai_timeout_seconds,
-                         **({"max_retries": 0} if no_retries else {}))
+    client = build_client(cfg, no_retries=no_retries)
     return Agent(
         name=AGENT_NAME,
         instructions=SYSTEM_PROMPT,

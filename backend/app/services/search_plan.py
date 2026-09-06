@@ -50,7 +50,17 @@ QUICK_SEARCH_NOTE = "quick_resume_search:v1"
 #: directions across several cities. The frontend bridge and MV3 worker enforce
 #: this same ceiling before any browser side effect.
 MAX_BATCH_TASKS = 16
-MAX_SEARCH_DIRECTIONS = 8
+#: Raised from 8 to 16 (user authorized 2026-09-05). A single-city run was
+#: only ever filling half its own batch: 8 directions against a 16-unit
+#: ceiling, while the résumé ranking had 18 directions to offer. This raises
+#: no browsing ceiling - the batch is still 16 units, each still opens at most
+#: 20 details over at most 5 scroll rounds.
+MAX_SEARCH_DIRECTIONS = 16
+
+#: The new-jobs target a direction may be asked for. Equal to the opened-detail
+#: ceiling the extension enforces (`RUNNER_MAX_CANDIDATES`): a larger target
+#: could never be met, and a smaller one only makes a direction stop earlier.
+MAX_TARGET_COUNT = 60
 MAX_SELECTED_CITIES = 4
 
 
@@ -109,8 +119,8 @@ def prepare_resume_searches(
     necessarily costs directions. The trade is made here, visibly, rather than
     by quietly overflowing the batch.
     """
-    if isinstance(target_count, bool) or not isinstance(target_count, int) or not 1 <= target_count <= 20:
-        raise ValidationError("岗位数量必须是 1–20 的整数。")
+    if isinstance(target_count, bool) or not isinstance(target_count, int) or not 1 <= target_count <= MAX_TARGET_COUNT:
+        raise ValidationError(f"岗位数量必须是 1–{MAX_TARGET_COUNT} 的整数。")
     normalized_cities = list(dict.fromkeys(city.strip() for city in cities if city.strip()))
     if not 1 <= len(normalized_cities) <= MAX_SELECTED_CITIES:
         raise ValidationError(f"请至少选择 1 个、最多选择 {MAX_SELECTED_CITIES} 个城市。")

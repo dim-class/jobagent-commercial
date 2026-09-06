@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.application import ApplicationProposal, QueueSummary
 from app.schemas.interview import UpcomingInterviewsResponse
@@ -49,3 +49,49 @@ class ConsoleAttentionOut(BaseModel):
     recruiter: RecruiterAttentionSection
     interviews: UpcomingInterviewsResponse
     offers: OfferAttentionSection
+
+
+class ReadinessCheck(BaseModel):
+    """One prerequisite, whether it is met, and what to do when it is not."""
+
+    key: str
+    label: str
+    ok: bool
+    detail: str
+    #: Empty for a check that is informational rather than a blocker.
+    fix: str = ""
+    #: Whether an unmet check stops the user from searching at all. The API
+    #: key is not: collection works without it, only AI analysis needs it, and
+    #: a red banner over a working search would be a lie.
+    blocking: bool = True
+
+
+class ReadinessOut(BaseModel):
+    """Everything a fresh installation needs, in the order to fix it."""
+
+    ready: bool
+    version: str
+    checks: list[ReadinessCheck] = Field(default_factory=list)
+
+
+class AiSettingsOut(BaseModel):
+    """What the UI may know about the AI credentials - never the key itself."""
+
+    configured: bool
+    #: The last four characters, so two keys can be told apart when replacing
+    #: one. Never enough to use.
+    hint: str = ""
+    base_url: str = ""
+    model_fast: str
+    model_smart: str
+    #: Shown so the user knows which file this writes.
+    env_path: str
+
+
+class AiSettingsIn(BaseModel):
+    """Only the fields the user may set. Absent means "leave unchanged"."""
+
+    api_key: str | None = Field(default=None, max_length=200)
+    base_url: str | None = Field(default=None, max_length=200)
+    model_fast: str | None = Field(default=None, max_length=64)
+    model_smart: str | None = Field(default=None, max_length=64)

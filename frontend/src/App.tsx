@@ -28,24 +28,31 @@ import SettingsPage from '@/pages/SettingsPage'
 import StrategyPage from '@/pages/StrategyPage'
 import type { HealthResponse } from '@/types'
 
+//: The four steps of an actual working day: search, decide, look things up,
+//: keep the résumé current. Everything else is real and still reachable - it
+//: just does not deserve a permanent slot while it has nothing in it. Nothing
+//: was deleted; every route below still exists.
 const PRIMARY_NAV = [
   { to: '/console', label: '搜索岗位', icon: '🔎' },
   { to: '/queue', label: '投递队列', icon: '🎯' },
   { to: '/jobs', label: '岗位库', icon: '💼' },
-  { to: '/interviews', label: '面试', icon: '🗓️' },
-  { to: '/offers', label: 'Offer', icon: '📨' },
   { to: '/resume', label: '简历', icon: '📄' },
 ]
 
+//: 面试 / Offer / HR沟通 are the back half of the funnel and are empty until
+//: something comes back from a recruiter; the analytics pages need those same
+//: outcomes before they can say anything. 快速采集 (/quick-capture) and
+//: 浏览器采集 (/capture) are gone from the menu entirely - the extension
+//: replaced both - but their routes still work if one is ever needed.
 const SECONDARY_NAV = [
-  { to: '/setup', label: '个人设置', icon: '👤' },
-  { to: '/dashboard', label: '数据概览', icon: '📊' },
+  { to: '/interviews', label: '面试', icon: '🗓️' },
+  { to: '/offers', label: 'Offer', icon: '📨' },
   { to: '/recruiter', label: 'HR沟通记录', icon: '💬' },
-  { to: '/quick-capture', label: '快速采集', icon: '⚡' },
-  { to: '/capture', label: '浏览器采集', icon: '🧭' },
-  { to: '/resume-analytics', label: '简历表现', icon: '🧪' },
-  { to: '/analytics', label: '策略分析', icon: '📈' },
+  { to: '/setup', label: '个人设置', icon: '👤' },
   { to: '/strategy', label: '求职策略', icon: '🎯' },
+  { to: '/dashboard', label: '数据概览', icon: '📊' },
+  { to: '/analytics', label: '策略分析', icon: '📈' },
+  { to: '/resume-analytics', label: '简历表现', icon: '🧪' },
   { to: '/settings', label: '设置', icon: '⚙️' },
 ]
 

@@ -97,6 +97,19 @@ async def detect(browser_page, extension_bundle):
 
 
 @pytest.fixture
+async def read_salary_filter(browser_page, extension_bundle):
+    """Load a fixture at a faked BOSS URL and run the real filter reader."""
+
+    async def _read(fixture: str, *, url: str) -> dict:
+        await _load_fixture(browser_page, extension_bundle, fixture, url=url)
+        return await browser_page.evaluate(
+            "() => BossExtract.readSalaryFilterOptions(document)"
+        )
+
+    return _read
+
+
+@pytest.fixture
 async def diagnose(browser_page, extension_bundle):
     """Load a fixture at a faked BOSS URL and run the real structural diagnostic."""
 
@@ -1168,3 +1181,138 @@ async def test_a_failed_salary_read_records_the_category_not_the_figure(browser_
     reasons = [w for w in candidate.get("warnings", []) if "薪资未读到" in w]
     assert reasons, f"no reason recorded; warnings {candidate.get('warnings')}"
     assert "unreadable" in reasons[0]
+
+
+# --------------------------------------------------------------------------
+# the results-page salary filter, read (never clicked)
+#
+# These fixtures are AUTHORED, not captured - no save of the BOSS filter bar
+# existed, and no automated test may visit zhipin.com to make one. They pin the
+# reader's logic. Whether the live bar matches stays a manual claim, which is
+# why the console shows every label with its code and asks the human to check
+# one against BOSS's own URL.
+# --------------------------------------------------------------------------
+
+SEARCH_URL = "https://www.zhipin.com/web/geek/jobs?city=101010100&query=%E8%BF%90%E7%BB%B4"
+
+
+async def test_salary_bands_are_read_with_their_codes(read_salary_filter):
+    result = await read_salary_filter("boss_search_salary_filter.html", url=SEARCH_URL)
+    assert result["reason"] is None
+    assert result["options"] == [
+        {"label": "不限", "code": "401"},
+        {"label": "3K以下", "code": "402"},
+        {"label": "10-20K", "code": "405"},
+        {"label": "20-50K", "code": "406"},
+        {"label": "50K以上", "code": "407"},
+    ]
+
+
+async def test_the_neighbouring_menus_are_never_read_as_salary(read_salary_filter):
+    """区域 and 经验 sit in identical markup right beside it.
+
+    Anchoring on BOSS's own label is the whole reason this does not read the
+    wrong menu - and a district code offered as a salary band would produce a
+    search nobody asked for.
+    """
+    result = await read_salary_filter("boss_search_salary_filter.html", url=SEARCH_URL)
+    codes = {row["code"] for row in result["options"]}
+    assert not codes & {"110105", "110108", "110106", "104", "105"}
+
+
+async def test_a_code_on_the_option_itself_is_read(read_salary_filter):
+    result = await read_salary_filter(
+        "boss_search_salary_filter_data_attr.html", url=SEARCH_URL
+    )
+    assert [row["code"] for row in result["options"]] == ["401", "405", "406", "407"]
+
+
+async def test_bands_without_codes_are_reported_not_paired_with_a_guess(read_salary_filter):
+    result = await read_salary_filter(
+        "boss_search_salary_filter_no_codes.html", url=SEARCH_URL
+    )
+    assert result["options"] == []
+    assert result["labels_without_code"] == 3
+    assert result["reason"] == "codes_not_found"
+
+
+async def test_a_detail_page_is_not_read_for_filters(read_salary_filter):
+    result = await read_salary_filter(
+        "boss_job_detail.html", url="https://www.zhipin.com/job_detail/abc123.html"
+    )
+    assert result["options"] == []
+    assert result["reason"] == "not_a_search_page"
+
+
+async def test_a_search_page_without_a_filter_bar_says_so(read_salary_filter):
+    result = await read_salary_filter("boss_search.html", url=SEARCH_URL)
+    assert result["options"] == []
+    assert result["reason"] == "menu_not_found"
+
+
+@pytest.mark.asyncio
+async def test_one_scroll_round_reaches_the_end_of_the_list(browser_page, extension_bundle):
+    """BOSS loads its next batch when the list's end comes into view.
+
+    A fixed one-viewport step reached the end of the first 15 cards, pulled in
+    15 more, and then fell behind forever: every later scroll landed in the
+    middle of a list whose end had moved away. Measured on 2026-09-05 as
+    "exactly 30 observed cards, then nothing" on every task in every city -
+    which read like a BOSS limit and was ours.
+    """
+    await _load_fixture(
+        browser_page, extension_bundle, "boss_search_tall_list.html", url=SEARCH_URL
+    )
+    reached = await browser_page.evaluate(
+        """() => {
+          const box = document.querySelector('.job-list-box')
+          const before = box.scrollTop
+          const result = BossExtract.scrollResultsContainer(document)
+          return {
+            ok: result.ok,
+            before,
+            after: box.scrollTop,
+            end: box.scrollHeight - box.clientHeight,
+          }
+        }"""
+    )
+    assert reached["ok"] is True
+    assert reached["before"] == 0
+    # The whole point: one round ends at the bottom, where the loader lives.
+    assert reached["after"] == reached["end"] > 0
+
+
+@pytest.mark.asyncio
+async def test_a_list_container_that_does_not_scroll_moves_the_page_instead(
+    browser_page, extension_bundle
+):
+    """`scrollBy` on a non-scrolling container is a silent no-op.
+
+    No error, no movement, no lazy load - and that is what pinned eleven of
+    sixteen directions to BOSS's first 15 cards on 2026-09-05 while two others
+    reached 60. The two that worked were the ones that opened many details:
+    clicking a card low in the list makes the browser scroll it into view,
+    which loaded the next batch by accident rather than by design.
+    """
+    await _load_fixture(
+        browser_page, extension_bundle, "boss_search_page_scroller.html", url=SEARCH_URL
+    )
+    moved = await browser_page.evaluate(
+        """() => {
+          const box = document.querySelector('.job-list-box')
+          const doc = document.scrollingElement
+          const before = doc.scrollTop
+          const result = BossExtract.scrollResultsContainer(document)
+          return {
+            ok: result.ok,
+            before,
+            after: doc.scrollTop,
+            end: doc.scrollHeight - doc.clientHeight,
+            boxScrolled: box.scrollTop,
+          }
+        }"""
+    )
+    assert moved["ok"] is True
+    assert moved["before"] == 0
+    assert moved["after"] == moved["end"] > 0, "the page reached the end of the list"
+    assert moved["boxScrolled"] == 0, "the container itself never scrolls - it cannot"

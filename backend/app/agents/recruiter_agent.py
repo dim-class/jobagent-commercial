@@ -15,7 +15,7 @@ import base64
 import time
 from typing import Any
 
-from agents import Agent, AsyncOpenAI, OpenAIResponsesModel, RunConfig, Runner
+from agents import Agent, OpenAIResponsesModel, RunConfig, Runner
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.agents.job_match_agent import require_openai
@@ -27,6 +27,7 @@ from app.agents.recruiter_prompts import (
     build_user_prompt,
     language_instruction,
 )
+from app.agents.openai_client import build_client
 from app.core.config import Settings, get_settings
 from app.core.errors import UpstreamError
 from app.core.logging import get_logger, log_event
@@ -56,7 +57,7 @@ class VisionTranscript(BaseModel):
 
 
 def _client(cfg: Settings) -> AsyncOpenAI:
-    return AsyncOpenAI(api_key=cfg.openai_api_key, timeout=cfg.openai_timeout_seconds)
+    return build_client(cfg)
 
 
 def _build_agent(model_name: str, instructions: str, output_type, cfg: Settings) -> Agent:

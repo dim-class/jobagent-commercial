@@ -714,6 +714,106 @@ point: `inspect()` normalizes and hashes exactly as a save would and then
 `job_intake.save_posting`. **There is no parallel persistence path** - an
 extension job is indistinguishable downstream from a pasted JD.
 
+Two ownership rules the 2026-09-05 runs proved were missing:
+
+- **the toolbar popup never stops a session it did not start.** A run started
+  from the console has no pointer in `session.ts`, and the popup was treating
+  that as a zombie and stopping it - 0.6s after the session was created, while
+  the console tells the user to click that very icon to grant `activeTab` for
+  salary OCR. It now reports the other entry point's run and touches nothing,
+  the same way the worker's `resolveSessionForTab` already refuses another
+  owner's tab;
+- **a run that ends releases its prepare lock.** `navigatePrepareForTab`
+  deliberately keeps the lock on a *denied* prepare, because the overlay's
+  hard-stop releases it once its stop is confirmed. The runner's own
+  termination never did, so one denied prepare made every later run on that
+  tab fail in 70ms with `prepare_in_flight` until the worker restarted.
+  `stopRunnerSession` now releases it where it already clears the global
+  pointer - that *is* the confirmed stop.
+
+**The approved per-task number counts NEW jobs, not opened details (user asked
+2026-09-05).** A posting the library already holds costs nothing: it is skipped
+before the click when the URL or the card signature says so, and when only the
+description reveals the duplicate it costs an *open* but not one of the
+requested jobs. Before this, a direction could report "8 of 8" having collected
+nothing at all.
+
+Two numbers, both enforced and both shown:
+
+- the human's number (1-20) is the **target of new jobs**. It lives on the
+  task (`max_candidates`) and stops the task as soon as it is met;
+- **opened details stay hard-capped at 20** - the immutable ceiling from M4
+  section 1a, which nothing may raise. It is what the `SupervisedSession`'s
+  `candidate_cap` carries, because that is the count the backend denies on,
+  and it is what ends a task whose target can never be met.
+
+Neither hides behind the other: the console states both before a run, and the
+overlay shows 新岗位 x/target beside 已打开 y/20. A pause/resume never gives back
+a spent *open*; it does continue collecting toward a target that was not met,
+because progress toward it is preserved too.
+
+**Salary segments now come from BOSS's own menu (user asked 2026-09-05).**
+This module still holds no table of filter codes and still cannot say what
+`406` means - what changed is where a code comes from. The extension reads the
+results-page 薪资待遇 menu on a tab the human already has open
+(`readSalaryFilterOptions`, read-only: it opens no menu, clicks nothing,
+changes nothing), and the console shows every band **with its code** and asks
+the human to check one against BOSS's own URL before using it. A band whose
+code cannot be found is reported as such, never paired with a neighbour's.
+
+`salary_codes` on the quick-prepare request becomes one segment each, through
+the same `filter_sets` path a pasted URL already used - there is no second
+segmentation mechanism, and the same `_VALUE` pattern validates both, because
+the value ends up in a URL the extension will navigate to.
+
+The fixtures for this reader are **authored, not captured**: no save of the
+BOSS filter bar existed, and no automated test may visit zhipin.com to make
+one. The tests pin the reader's logic; whether it matches the live bar stays a
+manual claim the user makes in their own Chrome - which is exactly why the
+console displays the codes rather than hiding them.
+
+**A card the strategy excludes is skipped before the click (2026-09-05).** The
+same discipline the early-career title filter already followed, for the same
+reason: an opened detail is the scarce resource. `excluded_title_keywords` on
+the task carries `career_strategy.yaml`'s own `excluded_keywords`, read fresh
+on every task read so an edited strategy applies to a task created last week,
+and never written back.
+
+Matched on the **card's title only** - the card carries no description, and a
+guess about the JD is exactly what this must not make. Measured on the library
+it was added against: 21 stored jobs had one of these words in the title, and
+the model judged 20 of them `skip` and none `apply`, so those opens bought
+nothing. All three pre-open skips (already stored, early-career, excluded
+title) now report their `last_action`, because a run that skipped everything
+used to look from the console like a run that did nothing.
+
+`POST /api/extension/jobs/known` is what keeps a run from spending its budget
+on work already done. A candidate slot is an *opened detail pane*, so the only
+place a duplicate can be skipped for free is before the click. Two answers, and
+the second is the one that matters in practice:
+
+- `(source, external_id)` - the posting itself is stored;
+- **the card signature** - company, title, salary, experience *and* city all
+  agree with a stored BOSS job. BOSS re-lists the same posting under a new
+  `job_detail` id, so the id check says "new", the run opens it, and the
+  content hash then reports a duplicate and imports nothing. Over one real
+  15-task run that was 66 of 78 opened details.
+
+The signature is deliberately the *whole* card and nothing more. Company and
+title alone collided for 18 rows in a 581-job library; all five fields collided
+for 2. A card is never matched on a partial agreement, because the description
+- which decides the real duplicate - is not on the card, and a wrongly skipped
+posting never enters the library at all. When one side has **no** salary the other four decide it. BOSS hides most card
+salaries behind a private-use font, so the card reads empty while the stored
+job carries a figure the OCR or the salary backfill supplied later - 409 of the
+632 jobs in the library this was written against were created that way, and
+requiring the salary to agree sent the run to reopen them on every run. The
+cost is measured too: on that library the full key collided for 2 rows and the
+salary-less one for 7.
+
+The endpoint still writes nothing, and
+an extension build that sends no `cards` behaves exactly as it did before.
+
 Both endpoints refuse a non-loopback peer. The server already binds to
 127.0.0.1; the guard makes that an assertion rather than a deployment
 assumption. `CORS_ORIGIN_REGEX` matches the *shape* of a Chrome extension
@@ -829,6 +929,212 @@ All privacy, foreground, verification, extraction, intake and forbidden-action r
   stealth, CAPTCHA bypass, fingerprint spoofing, Playwright or CDP is authorized.
 - Fixture-only code acceptance precedes a separately confirmed live run of at most two tasks with
   candidate cap one. A live run is not started merely by this implementation authorization.
+
+**Sixteen directions per run (user authorized 2026-09-05).** `MAX_SEARCH_DIRECTIONS`
+rises from 8 to 16, superseding only P3A's "covering at most eight configured
+resume/career directions" clause. Nothing else moves: the batch is still at most
+sixteen already-created `pending` tasks, each still opens at most 20 details over
+at most 5 scroll rounds, and every stop condition is unchanged.
+
+Why: a single-city run was filling half its own batch. 8 directions against a
+16-unit ceiling, while `search_direction_ranking` had 18 directions to offer -
+so the reachable set was 8 x 30 = 240 postings when the already-authorized
+ceiling allowed 480. Measured the same day: a BOSS search returns exactly 30
+cards and has no next-page control, so the *only* way to reach more postings is
+more distinct queries. Directions are the one axis that needs no filter codes.
+
+The search panel also now reads BOSS's salary bands **without being asked** -
+one silent, read-only DOM probe per page load, only while nothing is running and
+only when none are stored. If they are in the DOM it offers segmentation in one
+click; if BOSS keeps them behind the menu the explicit button is still there.
+Nothing about `boss_search_filters.py` changes: the codes still come from BOSS's
+own page and are still shown with their labels.
+
+#### Sixty opened details per task (user authorized 2026-09-05)
+
+`RUNNER_MAX_CANDIDATES` / `MAX_CANDIDATE_CAP` rise from 20 to 60, superseding
+only M4 section 1a's "at most 20 candidate jobs opened/extracted". Everything
+else stands: one session, one tab, at most 3 results pages, 30 scroll rounds
+per page, and every hard stop.
+
+Measured on the run that prompted it: three directions stopped at exactly 20
+opens with `no_new_rounds` 0 - still turning up new cards - having spent 3 of
+their 30 scroll rounds. The budget ran out, not the list.
+
+- **the human's own number is a different limit.** It counts NEW jobs
+  collected, not details opened, and has its own constant
+  (`RUNNER_MAX_TARGET`) so that raising what a run may open is never an
+  accident of raising what the console may ask for;
+- **the target may now be asked for up to the same 60**, and defaults to it
+  (user asked 2026-09-05). It is not a policy ceiling - opens are, and they are
+  capped at 60 whatever the target says; a target above that could never be
+  met, and one below it only makes a direction stop earlier. Two numbers that
+  differed only because one had not been raised yet is exactly the confusion
+  the console showed: 「值は 20 以下にする必要があります」 on a field sitting
+  beside the words 「最多打开 60 个详情」. `RUNNER_MAX_TARGET` stays a separate
+  constant so raising one is never an accident of raising the other. The
+  console remembers a typed value per browser.
+- a card already in the library, an early-career title, or a title the strategy
+  excludes is still skipped *before* the click, so a bigger budget is spent on
+  postings the library does not have rather than on more of the same;
+- my objection, recorded because the user asked for it anyway: this triples the
+  detail clicks a single run makes on BOSS, and BOSS restricted this account
+  once already (M7, 2026-08-31). Sixteen directions at the new ceiling is a run
+  of hours rather than minutes. Every stop condition still applies, and pause
+  and cancel still work, but the exposure is real and it is the reason to watch
+  the first run rather than start it and walk away.
+
+#### Scrolling reaches the list's end; 30 rounds per page (user authorized 2026-09-05)
+
+`MAX_SCROLL_CAP` / `RUNNER_MAX_SCROLL_ROUNDS` rise from 5 to 30, superseding
+only M4 section 1a's "at most 5 scroll steps per results page". Nothing else
+moves: one session, one foreground-or-authorized-background tab, at most 3
+results pages, at most 20 candidates opened per task, and every hard stop.
+
+The reason the old 5 looked sufficient was a bug in what a round did.
+`scrollResultsContainer` moved **one viewport height**. BOSS loads its next
+batch when the list's end comes into view, so the first round reached the end
+of 15 cards and pulled in 15 more - and every round after that landed in the
+middle of a list whose end had moved further away. Every task on 2026-09-05,
+every city, every keyword, reported exactly 30 observed cards and then nothing.
+That read like a BOSS page size, and a whole round of work (bounded pagination)
+was built on the misreading. A round now scrolls to the end of the list, which
+is what a human dragging the scrollbar does, and rounds buy depth again.
+
+- **the element that scrolls is found, not assumed.** `.job-list-box` is where
+  the cards live but not necessarily the element with the scrollbar, and
+  `scrollBy` on a container that does not scroll is a silent no-op - no error,
+  no movement, no lazy load. On 2026-09-05 that pinned eleven of sixteen
+  directions to BOSS's first 15 cards while two reached 60; the two that worked
+  were the ones that opened many details, because clicking a card low in the
+  list makes the browser scroll it into view and loaded the next batch by
+  accident. `scrollableFor()` walks up a bounded six ancestors for the first
+  one that is scrollable by style and has somewhere left to scroll, and falls
+  back to the document. Confirmed by the user against the live page before it
+  was written: manual scrolling on a keyword that had been stuck at 15 does
+  keep loading.
+- still exactly one `scrollBy` call site, still one scroll per approved round,
+  still no `scrollTo`/`scrollIntoView` anywhere - a contract test pins the
+  count, and only the distance changed;
+- **depth costs scrolling, not opens.** The 20-candidate ceiling is untouched,
+  and a card already in the library is skipped before the click, so a deeper
+  run spends its budget on new postings rather than on more of the same;
+- the consecutive-no-new threshold (default 3) still ends a direction that has
+  genuinely run dry, so 30 is a ceiling and rarely a target.
+- **a cap lives in two files, and they must be changed together.** The request
+  schema (`schemas/supervised_session.py`) repeats every ceiling that
+  `services/supervised_sessions.py` enforces, because the service imports the
+  schema and the dependency cannot run the other way. Raising the scroll
+  ceiling in the service alone made Pydantic reject the request before the
+  service was ever reached, and the run failed with the generic
+  「请求参数不合法」 - which names no field, so it reads to the user as "the
+  button does nothing". `test_schema_bounds_match_the_service_ceilings` now
+  pins the pair.
+
+#### Bounded results pagination (user authorized 2026-09-05)
+
+The user authorized the search runner to use the results pages M4 section 1a's
+immutable ceiling already permitted - **at most 3** - superseding only the
+M4e/M4f clause "Pagination and page controls are forbidden". Nothing else moves,
+and no ceiling is raised.
+
+What made it necessary, measured rather than assumed: on 2026-09-05 every one
+of 15 tasks reported **exactly 30 observed cards** and ended with two barren
+scroll rounds. A BOSS search renders 15, one scroll loads a second 15, and
+nothing loads after that. 30 is one BOSS page - so with `page_cap: 1` every
+search could only ever reach the first 30 results, and a library that already
+held them found nothing however long it ran. It also means the earlier reading
+of "14 of 15 tasks hit the scroll ceiling" was wrong: they had already stopped
+finding cards, and raising the scroll ceiling would have bought nothing.
+
+- `runNextPageRound` is the only page advance, and it is the same
+  detect -> prepare -> act -> confirm -> bounded-stabilize shape as
+  `runScrollRound`. It clicks exactly one next-page control through
+  `activateNextPage`, which refuses an ambiguous or disabled one;
+- **the scroll budget is per page** - 5 rounds each - which is what M4 1a
+  always said and what the backend's `record_navigation` already implemented
+  by resetting `scrolls_used` on a confirmed `results` navigation;
+- a page is left as soon as it has produced nothing twice, while the
+  task-level no-new threshold (3) still has room - once *that* fires the task
+  is completed, and a completed task is never reset;
+- **no next control, a disabled one, or nothing new rendered after the click,
+  all end the task normally.** Only an ambiguous control or a failed confirm
+  is an error;
+- the 20-candidate ceiling, the foreground/verification/login/risk-control
+  stops, the one-tab rule and the batch rules are all untouched. Pages are
+  visited in the same tab, one at a time, and never in the background beyond
+  what the 2026-09-04 background-search authorization already allows.
+
+The overlay used to state 「结果为连续滚动列表（无翻页控件）」 unconditionally -
+a hardcoded sentence, never a detection. It now shows 第 N/3 页, so what the run
+is actually doing is visible.
+
+#### Background search amendment (user authorized 2026-09-04)
+
+The user authorized a search run to keep going while its BOSS tab sits behind
+other windows, so searching no longer holds the screen hostage. **Search only.**
+Applying (M6) and the salary capture are untouched and stay strictly foreground.
+
+My objection, recorded because the user overrode it knowingly: the foreground
+rule was never really about the tab, it is what keeps a human in front of the
+page while it acts. Backgrounded, a login prompt, a verification interstitial or
+a risk-control page still stops the run - but nobody watches it happen, and BOSS
+has restricted this account once already (M7, 2026-08-31). The user accepted
+that and asked for it anyway. The run still reports its state to the console,
+which is where they will find out.
+
+What changed, and nothing else:
+
+- `verifySearchTab()` in `extension/src/background.ts` is the search runner's
+  only tab check and the single place the foreground half is dropped. The
+  salary backfill and M6 call `verifyRunnerTab()` directly and keep it; a test
+  reads the built worker and asserts neither of those bodies mentions the
+  helper;
+- **the tab must still exist and still be exactly `https://www.zhipin.com`.**
+  Those are the checks that keep the runner off the wrong page, and they do not
+  weaken when nobody is watching. Only "is it in front" was traded away;
+- it is **opt-in, and remembered once chosen** (the reset-every-run behaviour
+  was changed 2026-09-05: a run is hours long now, and a choice that silently
+  reset itself killed one ten seconds in with `not_foreground` while the
+  option sat collapsed out of sight). It is off until the human ticks it, the
+  console states 「前台搜索（切走会立即停止）」 in bold while it is off, and the
+  choice rides on the run's own `RunnerPointer.background`, so a resume after a
+  worker restart continues as whatever it was started as and any older pointer
+  with no flag resumes strictly foreground;
+- **the run still starts in the foreground.** The tab is created or activated by
+  the human's own click, exactly as before; what is relaxed is only what happens
+  after they switch away. The search runner never re-activates the tab mid-run -
+  the `active: true` updates left in the worker belong to start, to an explicit
+  resume, to the salary backfill and to M6;
+- **a backgrounded search skips the salary OCR entirely.** The local capture is
+  strictly foreground (authorized 2026-08-28) and that has not moved one inch:
+  what changed is that the runner no longer *attempts* it when there is no
+  foreground to attempt it in. The salary stays unknown, the reason is recorded
+  in the intake note like every other OCR miss, and the salary backfill fills
+  it in later. Before this, one candidate with an unreadable salary ended the
+  whole run;
+- **an unrendered detail pane skips one candidate, it does not end the run.**
+  A backgrounded tab renders lazily-populated content late, and a tab an opaque
+  window fully covers is not painted at all - so the pane failing to come up
+  stopped being rare the moment background search existed. The wait is longer
+  when backgrounded (`RUNNER_CAPTURE_BACKGROUND_ATTEMPTS`) and still hard
+  bounded, still one wait and never a retry; a candidate whose pane never
+  arrives is marked handled and reported as `skipped_capture_timeout`, so a run
+  where nothing rendered says so rather than reporting a quiet zero;
+- **the batch advance travels with the run.** An approved M4g batch started in
+  the background advances to its next task without the foreground check as
+  well; requiring it there ended a sixteen-task batch after task one, which is
+  what the authorization was for. The advance still needs the *same* tab, still
+  exactly BOSS, and still happens only after a normal completion - every other
+  outcome stops the batch. Every human-initiated start (console, popup, resume)
+  keeps the strict check;
+- every stop condition is unchanged: login, verification, risk control, wrong
+  origin, ambiguous selector, a lost or navigated tab, the 20-candidate and
+  5-scroll ceilings, and the human's pause/cancel. A background run pauses or
+  fails exactly where a foreground one would, and never retries;
+- this is not a background *browser*: no hidden tab, no minimised window, no
+  timer, no scheduler, no unattended trigger, and no chaining beyond the M4g
+  batch that was already authorized. One task, one tab, one operation at a time.
 
 **Status: the user has explicitly authorized M4a, M4b and M4c.** M4a —
 bounded-session scaffolding only, with no navigation — is implemented (a
@@ -1395,6 +1701,33 @@ cap is stored on the run (`salary_backfill_runs.session_cap`) and applies to tha
 default stays 3 for every other run, and nothing raises a cap without a fresh human click. Every
 stop condition below is unchanged: a larger cap buys continuity, never permission.
 
+**Automatic salary backfill after a search (user authorized 2026-09-05).** The
+user asked for this to stop being a chore they must remember: *「我还是想你想办
+法直接就解决了不要每次都回填」*. This supersedes only the clause above that
+made starting a real backfill run "a separate human action in the console", and
+only for a run that follows the user's own just-completed search.
+
+Why it is a second pass at all, and why that cannot be fixed in the search: BOSS
+renders the salary in a private-use font both in the results list and in the
+detail pane beside it, and only the standalone `/job_detail/<id>.html` page
+carries it as text. 409 of 632 jobs in the library were created with no readable
+salary for exactly this reason. The search cannot read what the page does not
+show it.
+
+- the chain fires **once** per completed batch, from the console the user is
+  looking at, and only when the batch actually completed - never after a
+  failure, a cancellation, a pause, or a verification stop;
+- it is a **checkbox, on by default, remembered per browser**. Turning it off
+  restores the old one-click prompt;
+- nothing else moves: the backfill's own plan ceiling (100 jobs), its
+  per-run session cap, and every stop condition - login, verification,
+  foreground loss, worker error, the user's pause - are exactly as they were.
+  It still visits only stored jobs' own canonical detail URLs, still enriches
+  through `extension_intake -> job_intake`, and still never applies, favourites
+  or messages;
+- it is not a scheduler. No timer starts it, nothing starts it on page load,
+  and a worker or browser restart resumes nothing on its own.
+
 Login, verification, foreground loss or worker error pauses closed; it never logs in, reads
 credentials, bypasses verification, retries invisibly or runs after a worker restart. It never
 searches, scrolls, applies, favorites or messages. Offline implementation acceptance does not
@@ -1444,6 +1777,25 @@ Rules that are load-bearing:
 - **evidence still outranks fit.** A model reading a résumé is a better guess
   than counting bigrams, but it is still a guess about what BOSS will return; a
   direction that already surfaced 28 jobs has told us the answer;
+**A keyword BOSS returns nothing for is demoted (2026-09-05).** The ranking
+already weighed outcome evidence, but only over jobs it had *collected* - a
+keyword whose searches render no card at all had no cohort, so it kept being
+picked. Five of sixteen units in one run went to `Infrastructure Engineer`,
+`Cloud Engineer`, `Cloud Operations Engineer`, `Cloud Infrastructure Engineer`
+and `DevOps Engineer`, each observing zero cards.
+
+`_barren_keywords()` reads the user's own completed runs and marks a keyword
+whose runs have summed to zero observed cards, after at least two of them - one
+run can end early for its own reasons. `DirectionRanking.top()` then **drops**
+it rather than merely ranking it last: with sixteen units to spend, four dead
+keywords are a quarter of the run, and demotion alone was not enough because
+the candidate list is short enough that a demoted keyword still gets picked.
+Fourteen searches that return jobs beat sixteen where four return none. If every
+direction were barren the order stands, so the planner always gets a plan.
+Deterministic, no model call, and a different claim from "these jobs are a poor
+match": that is a judgement the ranking makes, this is a fact the search itself
+established, twice.
+
 - **suggested keywords are used, never written.** The model may propose Chinese
   keywords the strategy lacks (a résumé saying 基础设施工程师 while the strategy
   only lists the English `Infrastructure Engineer`). They join *this* search and
@@ -1512,7 +1864,15 @@ Unique indexes that matter: `jobs.content_hash`, `(jobs.source, external_id)`,
 
 - `OPENAI_API_KEY` lives **only** in the backend process, read from `.env`.
   Never put it in React, never commit it, never log it, never return it from an
-  API, never store it in SQLite. `core/logging.py` has a redaction filter as a
+  API, never store it in SQLite. `services/ai_settings.py` lets the user *set*
+  one from the app (so a new user need not edit a file and restart): it writes
+  the same `.env`, clears `get_settings`'s cache so it takes effect at once,
+  and returns only whether a key is configured plus its last four characters.
+  Reading one back, storing it anywhere else, or logging it stays forbidden -
+  a test asserts the saved key reaches neither the response nor the log.
+  `OPENAI_BASE_URL` is how this project supports providers other than OpenAI:
+  one OpenAI-compatible protocol, not several SDKs, and
+  `agents/openai_client.py` is the single place a client is built. `core/logging.py` has a redaction filter as a
   backstop — it scrubs credential *values*, not mentions of the variable name.
 - **There is no global `AUTO_APPLY` mode.** Application execution is permitted
   only through the M6 per-job explicit human confirmation gate. AI recommends,
@@ -1567,6 +1927,10 @@ Unique indexes that matter: `jobs.content_hash`, `(jobs.source, external_id)`,
 - Never rewrite a DecisionSnapshot. Later edits must not reach it.
 - Never claim JobAgent sent a message. Drafts are copied by the user and
   sent elsewhere; only an explicit confirmation records candidate_reply.
+- Never background an application. The 2026-09-04 authorization covers
+  search only; M6 and the salary capture keep the strict foreground check,
+  and a backgrounded search still stops on login, verification or risk
+  control rather than pushing through unwatched.
 - Never add automatic/background inbox access, message polling or auto-reply.
   M7 is the only exception: one explicit human click may perform the bounded,
   foreground-only BOSS conversation scan defined above; it is not a mailbox
@@ -1595,6 +1959,10 @@ Unique indexes that matter: `jobs.content_hash`, `(jobs.source, external_id)`,
   — see "Implementation gate" at the end of it.
 - Never read cookies, localStorage, sessionStorage, form values or auth
   headers from a page, and never send a whole document.body.
+- Never skip a candidate on a partial card match. Company, title,
+  salary, experience and city must all agree with a stored job; the
+  description is not on the card, and a wrongly skipped posting never
+  enters the library.
 - Never add a second persistence path for extension imports - it goes
   through job_intake like every other source.
 - Never accept extension requests from a non-loopback peer.

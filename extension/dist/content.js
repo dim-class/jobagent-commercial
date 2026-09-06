@@ -52,6 +52,11 @@ var BossContentScript = (function () {
             // have navigated since the script was injected.
             return { ok: true, result: BossExtract.detect(document, document.location.href) };
         }
+        if (request.type === 'jobagent:read-salary-filter') {
+            // Read-only: it opens no menu and clicks nothing. If BOSS keeps the
+            // options out of the DOM until the menu is open, the human opens it.
+            return { ok: true, result: BossExtract.readSalaryFilterOptions(document) };
+        }
         if (request.type === DIAGNOSE) {
             // Developer-mode only, explicit-click structural diagnostic. See
             // `boss/extract.ts` - it never sends anything anywhere by itself.

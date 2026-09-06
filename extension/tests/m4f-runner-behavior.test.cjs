@@ -144,6 +144,9 @@ function makeFetchRouter(overrides) {
     if (/\/navigate\/prepare$/.test(url) || /\/navigate\/confirm$/.test(url)) {
       return jsonResponse(defaultSession())
     }
+    if (/\/api\/extension\/jobs\/known$/.test(url)) {
+      return jsonResponse({ known: [] })
+    }
     if (/\/api\/extension\/jobs\/preview$/.test(url)) {
       return jsonResponse({ new_count: 1, duplicate_count: 0 })
     }
@@ -172,6 +175,7 @@ function loadBackground({ tab, fetchImpl, respond, tabUrlOverride, storage, befo
   const tabsGetCalls = []
   const tabsCreateCalls = []
   const scriptingExecuteCalls = []
+  const captureCalls = []
   let sendMessageCallCount = 0
 
   const sandbox = {
@@ -237,6 +241,10 @@ function loadBackground({ tab, fetchImpl, respond, tabUrlOverride, storage, befo
           }
           return Promise.resolve({ ...tabState })
         },
+        captureVisibleTab: async () => {
+          captureCalls.push(Date.now())
+          return 'data:image/png;base64,iVBORw0KGgo='
+        },
         sendMessage: (tabId, message) => {
           sendMessageCallCount += 1
           tabsSendMessageCalls.push({ tabId, message })
@@ -295,6 +303,7 @@ function loadBackground({ tab, fetchImpl, respond, tabUrlOverride, storage, befo
     tabsGetCalls,
     tabsCreateCalls,
     scriptingExecuteCalls,
+    captureCalls,
   }
 }
 
@@ -315,7 +324,9 @@ function detectCallsOf(env) {
 // Approved lower limits: run the real built worker, with no Chrome or network.
 function budgetResponder(msg) {
   if (msg.type === 'jobagent:detect') return Promise.resolve({ ok: true, result: searchPage(
-    Array.from({ length: 25 }, (_, i) => candidate('budget' + i)),
+    // More than the 60-open ceiling, so a test about the ceiling is bounded
+    // by the ceiling and not by how many cards this fixture happens to render.
+    Array.from({ length: 80 }, (_, i) => candidate('budget' + i)),
   ) })
   if (msg.type === 'jobagent:open-candidate') return Promise.resolve({ ok: true, result: { ok: true } })
   if (msg.type === 'jobagent:capture-detail') return Promise.resolve({ ok: true, result: {
@@ -490,8 +501,13 @@ test('console status exposes no browser/session secrets or discovery history and
   // hard to distinguish from a broken new one.
   assert.deepEqual(Array.from(reply.capabilities), ['console-search-v1', 'console-batch-v1',
     'salary-backfill-v1', 'human-confirmed-apply-v1', 'skip-stored-candidates-v1',
-    'read-search-filters-v1'])
-  assert.deepEqual(Object.keys(reply).sort(), ['batch', 'capabilities', 'extensionVersion', 'ok', 'protocol', 'runner', 'salaryBackfill'])
+    'read-search-filters-v1', 'read-salary-filter-v1', 'background-search-v1',
+    'card-signature-dedup-v1'])
+  assert.deepEqual(Object.keys(reply).sort(), ['batch', 'capabilities', 'extensionVersion', 'limits', 'ok', 'protocol', 'runner', 'salaryBackfill'])
+  // The ceilings this build enforces, so the console can name the mismatch
+  // instead of letting a refusal read as "the button does nothing".
+  // Across the vm realm, so compare structure rather than identity.
+  assert.deepEqual(JSON.parse(JSON.stringify(reply.limits)), { target: 60, opens: 60, scrolls: 30, pages: 3 })
   assert.equal(reply.salaryBackfill, null)
   assert.equal(env.tabsCreateCalls.length, 0)
   assert.equal(calls.length, 0)
@@ -654,7 +670,10 @@ test('batch-only controls cannot pause or cancel an unrelated single-task runner
 test('worker restart does not auto-resume a batch; explicit batch resume preserves its budget', async () => {
   const storage = {
     [RUNNER_KEY]: pausedConsolePointer({ pauseRequested: false, pauseConfirmed: false,
-      candidateCap: 1, candidatesAttempted: 0, candidatesProcessed: 0, scrollsUsed: 0 }),
+      candidateCap: 1, candidatesAttempted: 0, candidatesProcessed: 0, scrollsUsed: 0,
+      //: The target counts new jobs, so a fixture carrying two of them would
+      //: be finished before it began.
+      importedJobs: 0 }),
     [BATCH_KEY]: { taskIds: [5], candidateCap: 1, currentIndex: 0, state: 'running',
       tabId: 7, lastError: null, updatedAt: new Date().toISOString() },
     [GLOBAL_SESSION_KEY]: { sessionId: 42, tabId: 7 },
@@ -820,7 +839,16 @@ test('resume handoff preserves three-job budget and waits for the same tab', asy
   state.open = false
   state.focused = true
   await until(() => pointerOf(env) === null)
-  assert.equal(opensOf(env).length, 1, 'resume cannot replenish the two spent slots')
+  // Two opens were already spent against the immutable ceiling, and a resume
+  // never gives them back: the counter continues from 2 rather than restarting.
+  // What it does resume is the target - three *new* jobs, none of which had
+  // been collected when it paused.
+  assert.equal(opensOf(env).length, 3)
+  const attempts = env.tabsSendMessageCalls
+    .filter(c => c.message.type === 'jobagent:runner-state' && c.message.state)
+    .map(c => c.message.state.candidatesAttempted)
+  assert.equal(Math.max(...attempts), 5, 'continued from the two already spent')
+  assert.ok(Math.max(...attempts) <= 20)
 })
 
 test('content script cannot claim popup focus exception', async () => {
@@ -841,18 +869,21 @@ for (const cap of [1, 3, 20]) {
     assert.equal(calls.filter(c => /\/jobs\/import$/.test(c.url)).length, cap)
     assert.equal(calls.filter(c => /\/tasks\/5\/candidates$/.test(c.url)).length, cap)
     const sessionCreate = calls.find(c => /\/extension\/sessions$/.test(c.url))
-    assert.equal(JSON.parse(sessionCreate.init.body).candidate_cap, cap)
+    // The session caps *opens*, which is what the backend denies on, and that
+    // is the immutable ceiling. The human's own number is the new-jobs target
+    // and lives on the task; here every opened job is new, so they coincide.
+    assert.equal(JSON.parse(sessionCreate.init.body).candidate_cap, 60)
     const states = env.tabsSendMessageCalls.filter(c => c.message.type === 'jobagent:runner-state' && c.message.state)
       .map(c => c.message.state)
-    assert.ok(states.every(s => s.candidateCap === cap && s.candidatesAttempted <= cap))
-    assert.ok(states.some(s => s.candidatesAttempted === cap && s.candidatesProcessed === cap))
+    assert.ok(states.every(s => s.candidateCap === cap && s.candidatesAttempted <= 60))
+    assert.ok(states.some(s => s.importedJobs === cap && s.candidatesProcessed === cap))
     assert.equal(env.tabsSendMessageCalls.some(c => c.message.type === 'jobagent:scroll-step'), false)
     assert.ok(calls.some(c => /\/run\/complete$/.test(c.url)))
     assert.equal(pointerOf(env), null)
   })
 }
 
-for (const cap of [undefined, null, 0, -1, 21, 1.5, '3', NaN, Infinity]) {
+for (const cap of [undefined, null, 0, -1, 61, 1.5, '3', NaN, Infinity]) {
   test(`invalid candidate cap ${String(cap)} fails before any fetch/navigation`, { skip: SKIP }, async () => {
     const { router, calls } = makeFetchRouter()
     const env = loadBackground({ fetchImpl: router, respond: budgetResponder })
@@ -878,13 +909,15 @@ test('a lower task-specific cap is not overridden by the popup', { skip: SKIP },
   assert.equal(opensOf(env).length, 2)
 })
 
-test('identity mismatches consume slots and never cause a fourth candidate attempt', { skip: SKIP }, async () => {
+test('identity mismatches cost opens, and the immutable ceiling still ends the run', { skip: SKIP }, async () => {
   const { router, calls } = makeFetchRouter()
   const env = loadBackground({ fetchImpl: router, respond: msg => msg.type === 'jobagent:capture-detail'
     ? Promise.resolve({ ok: true, result: { status: 'identity_mismatch' } }) : budgetResponder(msg) })
   await env.send({ type: 'jobagent:runner-start', taskId: 5, candidateCap: 3 })
   await settle()
-  assert.equal(opensOf(env).length, 3)
+  // Nothing is ever captured, so the three requested new jobs never arrive -
+  // and the run is bounded by opens, not by hope.
+  assert.equal(opensOf(env).length, 60)
   assert.equal(calls.filter(c => /\/jobs\/(preview|import)$/.test(c.url)).length, 0)
   assert.ok(calls.some(c => /\/run\/complete$/.test(c.url)))
 })
@@ -910,16 +943,36 @@ test('the 3-candidate budget spans scroll rounds instead of resetting per batch'
   assert.ok(calls.some(c => /\/run\/complete$/.test(c.url)))
 })
 
-test('global duplicates consume slots without new imports', { skip: SKIP }, async () => {
+test('a global duplicate costs an open but not one of the requested new jobs', { skip: SKIP }, async () => {
+  // The approved number counts jobs the library did not have. A posting it
+  // already holds used to consume one of them, so a direction could finish
+  // "3 of 3" having collected nothing. Opens are still bounded - by the
+  // immutable 20, which no setting may raise.
   const { router, calls } = makeFetchRouter(url => /\/jobs\/preview$/.test(url)
     ? jsonResponse({ new_count: 0, rows: [{ existing_job_id: 99 }] }) : undefined)
   const env = loadBackground({ fetchImpl: router, respond: budgetResponder })
   await env.send({ type: 'jobagent:runner-start', taskId: 5, candidateCap: 3 })
   await settle()
-  assert.equal(opensOf(env).length, 3)
   assert.equal(calls.filter(c => /\/jobs\/import$/.test(c.url)).length, 0)
-  assert.equal(calls.filter(c => /\/tasks\/5\/candidates$/.test(c.url)).length, 3)
+  assert.equal(opensOf(env).length, 60, 'it keeps looking, up to the immutable ceiling')
+  assert.equal(calls.filter(c => /\/tasks\/5\/candidates$/.test(c.url)).length, 60)
   assert.ok(calls.some(c => /\/run\/complete$/.test(c.url)))
+  assert.equal(pointerOf(env), null)
+})
+
+test('the immutable open ceiling still ends a run that never finds a new job', { skip: SKIP }, async () => {
+  // The whole point of keeping two numbers: the target may be unreachable,
+  // and the ceiling is what stops it. 25 rendered cards, none of them new.
+  const { router, calls } = makeFetchRouter(url => /\/jobs\/preview$/.test(url)
+    ? jsonResponse({ new_count: 0, rows: [{ existing_job_id: 99 }] }) : undefined)
+  const env = loadBackground({ fetchImpl: router, respond: budgetResponder })
+  await env.send({ type: 'jobagent:runner-start', taskId: 5, candidateCap: 20 })
+  await settle()
+  assert.equal(opensOf(env).length, 60)
+  const states = env.tabsSendMessageCalls
+    .filter(c => c.message.type === 'jobagent:runner-state' && c.message.state)
+    .map(c => c.message.state)
+  assert.ok(states.every(s => s.candidatesAttempted <= 60))
 })
 
 async function pausedBudgetRun() {
@@ -956,15 +1009,21 @@ for (const reloadWorker of [false, true]) {
     ])
     assert.equal(results.filter(r => r.ok).length, 1, 'simultaneous resume cannot start two loops')
     await settle()
-    assert.equal(opensOf(resumed).length, reloadWorker ? 2 : 3)
-    assert.equal(calls.filter(c => /\/jobs\/import$/.test(c.url)).length, 2)
+    // One open was spent before the pause and is never given back; the three
+    // requested *new* jobs still have to be collected, and none had been.
+    assert.equal(opensOf(resumed).length, reloadWorker ? 3 : 4)
+    assert.equal(calls.filter(c => /\/jobs\/import$/.test(c.url)).length, 3)
     assert.equal(pointerOf(resumed), null)
   })
 }
 
 for (const patch of [{ candidateCap: undefined }, { candidatesAttempted: undefined },
-  { candidateCap: 21 }, { candidatesAttempted: -1 }, { candidatesAttempted: 4 }, { candidatesProcessed: 2 },
-  { scrollsUsed: undefined }, { scrollsUsed: -1 }, { scrollsUsed: 6 }, { scrollsUsed: 1.5 }]) {
+  // 21 opens, not 4: attempts are bounded by the immutable ceiling now, not by
+  // the human's number - which counts new jobs collected, not details opened.
+  // 61 opens, not 21: attempts are bounded by the open ceiling (60), while the
+  // human's own target stays 1-20 and `candidateCap: 21` is still invalid.
+  { candidateCap: 61 }, { candidatesAttempted: -1 }, { candidatesAttempted: 61 }, { candidatesProcessed: 2 },
+  { scrollsUsed: undefined }, { scrollsUsed: -1 }, { scrollsUsed: 31 }, { scrollsUsed: 1.5 }]) {
   test(`invalid saved budget refuses resume: ${JSON.stringify(patch)}`, { skip: SKIP }, async () => {
     const { env, router, calls } = await pausedBudgetRun()
     env.storageData[RUNNER_KEY] = { ...pointerOf(env), ...patch }
@@ -1150,7 +1209,7 @@ test('batch visible_jobs updates when cards load after the initial empty snapsho
   await env.send({ type: 'jobagent:runner-start', taskId: 5, candidateCap: 1 })
   await settle()
   const reports = calls.filter(c => /\/run\/state$/.test(c.url)).map(c => JSON.parse(c.init.body))
-  assert.equal(reports.filter(r => r.visible_jobs !== undefined).at(-1).visible_jobs, 25)
+  assert.equal(reports.filter(r => r.visible_jobs !== undefined).at(-1).visible_jobs, 80)
 })
 
 test('batch scroll storage failure prevents the scroll side effect', { skip: SKIP }, async () => {
@@ -1192,7 +1251,9 @@ test('batch scroll reservation survives pause and worker recreation without extr
   const restored = loadBackground({ fetchImpl: router, respond, storage: structuredClone(env.storageData) })
   await restored.send({ type: 'jobagent:runner-resume' })
   await settle()
-  assert.equal(scrolls, 5, 'resume spends only the four remaining scroll reservations')
+  // One scroll was performed and durably reserved before the pause; a resume
+  // spends the rest of the per-page budget and never refunds that one.
+  assert.equal(scrolls, 30, 'resume spends only the remaining scroll reservations')
   assert.equal(pointerOf(restored), null)
 })
 
@@ -1346,6 +1407,37 @@ test('startup safely injects the packaged content stack once when the new BOSS t
   assert.equal(pointerOf(env), null)
 })
 
+test('every runner step recovers from a missing content script, not just the first DETECT', async () => {
+  // What a real run hit on 2026-09-04, 0.2s in: DETECT repaired itself by
+  // injecting the packaged stack, and the card click - the very next message -
+  // had no recovery of its own and failed the whole run with
+  // `content_unavailable`. Worst case: the page loses the receiver again after
+  // answering each message.
+  let live = false
+  const { router, calls } = makeFetchRouter()
+  const env = loadBackground({
+    fetchImpl: router,
+    onExecuteScript: () => { live = true },
+    respond: msg => {
+      if (!live) return Promise.reject(new Error('Could not establish connection. Receiving end does not exist.'))
+      live = false
+      return budgetResponder(msg)
+    },
+  })
+  await env.send({ type: 'jobagent:runner-start', taskId: 5, candidateCap: 3 })
+  await settle()
+
+  assert.ok(!calls.some(c => c.url.endsWith('/run/fail')), 'no step fails closed on a repairable tab')
+  assert.equal(calls.filter(c => c.url.endsWith('/jobs/import')).length, 3)
+  assert.ok(env.scriptingExecuteCalls.length > 1, 'recovery is not limited to the first DETECT')
+  for (const injection of env.scriptingExecuteCalls) {
+    assert.deepEqual(JSON.parse(JSON.stringify(injection)), {
+      target: { tabId: 7 },
+      files: ['dist/boss/selectors.js', 'dist/boss/extract.js', 'dist/content.js', 'dist/overlay.js'],
+    })
+  }
+})
+
 test('a search page that never stabilizes ends the run failed after exactly the bounded attempt ceiling', { skip: SKIP }, async () => {
   const { router, calls } = makeFetchRouter()
   const env = loadBackground({
@@ -1486,8 +1578,9 @@ test('reaching the candidate cap ends the run completed without opening a 21st c
   assert.equal(pointerOf(env), null)
 })
 
-test('the scroll round loop never performs a 6th scroll', { skip: SKIP }, async () => {
+test('the per-page scroll budget is spent in full, then a page with no next control ends the task', { skip: SKIP }, async () => {
   let scrollCalls = 0
+  let nextPageCalls = 0
   const emptyPage = searchPage([])
   const { router, calls } = makeFetchRouter((url, init) => {
     if (/\/run\/round$/.test(url)) return jsonResponse({ run_status: 'running' }) // never auto-completes
@@ -1501,15 +1594,21 @@ test('the scroll round loop never performs a 6th scroll', { skip: SKIP }, async 
         scrollCalls += 1
         return Promise.resolve({ ok: true, result: { ok: true } })
       }
+      // A single-page search has no next-page control at all.
+      if (msg.type === 'jobagent:next-page') {
+        nextPageCalls += 1
+        return Promise.resolve({ ok: true, result: { ok: false, error: 'no_control' } })
+      }
       return Promise.resolve({ ok: false })
     },
   })
   await env.send({ type: 'jobagent:runner-start', taskId: 5, candidateCap: 20 })
   await settle()
 
-  assert.equal(scrollCalls, 5) // RUNNER_MAX_SCROLL_ROUNDS
-  const completeCall = calls.find((c) => /\/run\/complete$/.test(c.url))
-  assert.ok(completeCall)
+  assert.equal(scrollCalls, 30, 'RUNNER_MAX_SCROLL_ROUNDS, on this page')
+  assert.equal(nextPageCalls, 1, 'and then it asks for the next page exactly once')
+  assert.ok(calls.find(c => /\/run\/complete$/.test(c.url)), 'no next page is a normal end')
+  assert.ok(!calls.some(c => /\/run\/fail$/.test(c.url)))
 })
 
 test('a backend-reported no-new-round completion stops the loop without a further round', { skip: SKIP }, async () => {
@@ -1812,10 +1911,46 @@ test('retrying a pending terminal transition clears the pointer once the backend
 // 10. absence of pagination / concurrency in the built code
 // --------------------------------------------------------------------------
 
-test('the built runner never sends a pagination message type', { skip: SKIP }, async () => {
+test('pagination is bounded by the immutable three-page ceiling', { skip: SKIP }, async () => {
+  // Authorized 2026-09-05, inside the ceiling CLAUDE.md M4 1a always allowed.
+  // Every search saw only page one before this, and BOSS renders 30 cards per
+  // page - so 30 was every task's ceiling on what it could ever find.
   const code = fs.readFileSync(BACKGROUND_PATH, 'utf8')
-  assert.doesNotMatch(code, /jobagent:next-page/)
-  assert.doesNotMatch(code, /['"]results-page['"]/)
+  assert.match(code, /RUNNER_MAX_PAGES = 3/)
+  assert.match(code, /jobagent:next-page/)
+  // The click still goes through the same prepare/confirm the backend counts.
+  const body = code.slice(code.indexOf('async function runNextPageRound'),
+    code.indexOf('async function runScrollRound'))
+  assert.match(body, /navigatePrepareForTab\(tabId, 'results'/)
+  assert.match(body, /navigateConfirmForTab\(/)
+})
+
+test('a run stops at the third page even when BOSS offers a fourth', { skip: SKIP }, async () => {
+  let pages = 1
+  let nextPageCalls = 0
+  const { router, calls } = makeFetchRouter(url => /\/run\/round$/.test(url)
+    ? jsonResponse({ run_status: 'running', no_new_rounds: 2 }) : undefined)
+  const env = loadBackground({
+    fetchImpl: router,
+    respond: msg => {
+      // Each page renders its own three cards, so "something new appeared".
+      if (msg.type === 'jobagent:detect') return Promise.resolve({ ok: true, result: searchPage(
+        [candidate(`p${pages}a`), candidate(`p${pages}b`), candidate(`p${pages}c`)]) })
+      if (msg.type === 'jobagent:scroll-step') return Promise.resolve({ ok: true, result: { ok: true } })
+      if (msg.type === 'jobagent:next-page') {
+        nextPageCalls += 1
+        pages += 1
+        return Promise.resolve({ ok: true, result: { ok: true } })
+      }
+      return budgetResponder(msg)
+    },
+  })
+  await env.send({ type: 'jobagent:runner-start', taskId: 5, candidateCap: 20 })
+  await settle()
+
+  assert.equal(nextPageCalls, 2, 'page 1 -> 2 -> 3, and never a fourth')
+  assert.ok(calls.find(c => /\/run\/complete$/.test(c.url)))
+  assert.equal(pointerOf(env), null)
 })
 
 test('the built background worker uses at most one runner loop at a time (single in-memory guard)', { skip: SKIP }, async () => {
@@ -2382,13 +2517,20 @@ test('an intake-incomplete candidate consumes its slot and the bounded run conti
           source_url: msg.canonicalUrl,
         }) } })
       }
+      // The three cards yield only two usable jobs, so the run now goes on
+      // looking rather than declaring "3 of 3" - the list simply has nothing
+      // more to give, and with no further page the task ends normally.
+      if (msg.type === 'jobagent:scroll-step') return Promise.resolve({ ok: true, result: { ok: true } })
+      if (msg.type === 'jobagent:next-page') {
+        return Promise.resolve({ ok: true, result: { ok: false, error: 'no_control' } })
+      }
       return Promise.resolve({ ok: false })
     },
   })
   await env.send({ type: 'jobagent:runner-start', taskId: 5, candidateCap: 3 })
   await settle()
 
-  assert.equal(opensOf(env).length, 3, 'the incomplete candidate consumes one of exactly three attempts')
+  assert.equal(opensOf(env).length, 3, 'the incomplete candidate costs an open, and the list holds no more')
   assert.equal(calls.filter(c => c.url.endsWith('/jobs/import')).length, 2)
   assert.equal(calls.filter(c => /\/api\/tasks\/5\/candidates$/.test(c.url)).length, 2)
   assert.ok(!calls.some(c => c.url.endsWith('/run/fail')))
@@ -2826,4 +2968,328 @@ test('reading BOSS filters refuses when there is nothing to read', { skip: SKIP 
   )
   assert.equal(reply.ok, false)
   assert.match(reply.error, /没有设置任何可复用的筛选条件/)
+})
+
+
+// A console run that the user put in the background, then switched away from.
+// `tabs.update({active:true})` at start makes the BOSS tab foreground exactly
+// as Chrome would, so the only faithful way to background it is mid-run -
+// after the first stabilize DETECT, the same point the strict test below uses.
+function backgroundEnv(background) {
+  const consoleTab = { id: 8, windowId: 2, url: consoleSender.url, active: true }
+  const { router, calls } = makeFetchRouter(url => {
+    const match = url.match(/\/search-plan\/(\d+)$/)
+    return match ? jsonResponse(defaultTask({ id: Number(match[1]), run_status: 'pending' })) : undefined
+  })
+  let detectCalls = 0
+  const env = loadBackground({
+    fetchImpl: router, consoleTab,
+    respond: (msg, count) => {
+      if (msg.type === 'jobagent:detect') {
+        detectCalls += 1
+        if (detectCalls === 1) env.tabState.active = false // user switched windows
+      }
+      return budgetResponder(msg, count)
+    },
+  })
+  const send = () => env.send(background === undefined ? consoleStart
+    : { ...consoleStart, background }, consoleSender)
+  return { env, calls, send }
+}
+
+test('a background search keeps going with the tab behind other windows', { skip: SKIP }, async () => {
+  // Authorized 2026-09-04, search only. The tab must still exist and still be
+  // exactly BOSS - those stop it acting on the wrong page and do not weaken
+  // when nobody is watching. Being in front is the part that was traded away.
+  const { env, calls, send } = backgroundEnv(true)
+  const result = await send()
+  assert.equal(result.ok, true, result.error)
+  await until(() => pointerOf(env) === null)
+
+  assert.equal(env.tabState.active, false, 'it really did run hidden')
+  assert.equal(opensOf(env).length, 3, 'it ran the whole cap instead of stopping')
+  assert.equal(calls.filter(c => /\/jobs\/import$/.test(c.url)).length, 3)
+  assert.ok(!calls.some(c => /\/run\/fail$/.test(c.url)), 'no foreground-loss failure')
+})
+
+for (const [label, background] of [['without the flag', undefined], ['with it off', false]]) {
+  test(`a search ${label} still stops when the tab is not in front`, { skip: SKIP }, async () => {
+    // The default is unchanged: backgrounding is opt-in, per run.
+    const { env, calls, send } = backgroundEnv(background)
+    assert.equal((await send()).ok, true)
+    await until(() => pointerOf(env) === null)
+
+    const failed = calls.find(c => /\/run\/fail$/.test(c.url))
+    assert.ok(failed, 'a foreground run must not proceed hidden')
+    assert.match(JSON.parse(failed.init.body).error, /not_foreground/)
+    assert.equal(opensOf(env).length, 0)
+  })
+}
+
+// The tab drops out of the foreground exactly at the task boundary - the
+// moment the first task reports `complete` - so the run itself is never in
+// doubt and only the advance is under test.
+function batchEnv(background) {
+  const consoleTab = { id: 8, windowId: 2, url: consoleSender.url, active: true }
+  let env
+  const { router, calls } = makeFetchRouter(url => {
+    if (/\/run\/complete$/.test(url) && env) env.tabState.active = false
+    const match = url.match(/\/search-plan\/(\d+)$/)
+    return match ? jsonResponse(defaultTask({ id: Number(match[1]), run_status: 'pending' })) : undefined
+  })
+  env = loadBackground({ fetchImpl: router, respond: budgetResponder, consoleTab })
+  const send = () => env.send({ type: 'jobagent:console-command', action: 'start-batch',
+    taskIds: [5, 6], candidateCap: 1, background }, consoleSender)
+  return { env, calls, send }
+}
+
+test('a backgrounded batch advances to its next task with the tab behind other windows', { skip: SKIP }, async () => {
+  // What broke on 2026-09-04: the run itself continued in the background, but
+  // the advance went through the strict start-time foreground check, so an
+  // approved 16-task batch stopped dead after task one. The human approved the
+  // list and the tab when they started; the tab is the one task one just used.
+  const { env, calls, send } = batchEnv(true)
+  assert.equal((await send()).ok, true)
+  await until(() => ['completed', 'stopped'].includes(env.storageData[BATCH_KEY]?.state))
+
+  assert.equal(env.storageData[BATCH_KEY].state, 'completed', env.storageData[BATCH_KEY].lastError)
+  assert.equal(calls.filter(c => c.url.endsWith('/run/start')).length, 2, 'both tasks ran')
+  assert.equal(env.tabState.active, false, 'and the tab really was not in front')
+  assert.equal(env.tabsCreateCalls.length, 0, 'no second tab')
+})
+
+test('a foreground batch still stops at the boundary when the tab is not in front', { skip: SKIP }, async () => {
+  const { env, calls, send } = batchEnv(false)
+  assert.equal((await send()).ok, true)
+  await until(() => ['completed', 'stopped'].includes(env.storageData[BATCH_KEY]?.state))
+
+  assert.equal(env.storageData[BATCH_KEY].state, 'stopped')
+  assert.equal(calls.filter(c => c.url.endsWith('/run/start')).length, 1, 'the next task never started')
+})
+
+test('a backgrounded search skips the foreground-only salary OCR instead of dying on it', { skip: SKIP }, async () => {
+  // What actually stopped a real background run on 2026-09-04, 24s in: the
+  // local salary OCR is strictly foreground (authorized 2026-08-28), and a
+  // backgrounded run has no foreground to give it. Attempting it raised a
+  // reason the runner treats as fatal, so ONE candidate with an unreadable
+  // salary ended the whole run. The capture must not even be attempted.
+  const consoleTab = { id: 8, windowId: 2, url: consoleSender.url, active: true }
+  const { router, calls } = makeFetchRouter(url => {
+    const match = url.match(/\/search-plan\/(\d+)$/)
+    return match ? jsonResponse(defaultTask({ id: Number(match[1]), run_status: 'pending' })) : undefined
+  })
+  let detectCalls = 0
+  const env = loadBackground({
+    fetchImpl: router, consoleTab,
+    respond: (msg, count) => {
+      if (msg.type === 'jobagent:detect') {
+        detectCalls += 1
+        if (detectCalls === 1) env.tabState.active = false // the user switched away
+      }
+      if (msg.type === 'jobagent:capture-detail') {
+        return Promise.resolve({ ok: true, result: { status: 'ok', candidate: candidate('budget',
+          { source_url: msg.canonicalUrl, description: 'Complete JD', salary_text: '' }) } })
+      }
+      return budgetResponder(msg, count)
+    },
+  })
+  assert.equal((await env.send({ ...consoleStart, background: true }, consoleSender)).ok, true)
+  await until(() => pointerOf(env) === null)
+
+  assert.ok(!calls.some(c => /\/run\/fail$/.test(c.url)), 'a missing salary is not a run failure')
+  assert.equal(env.captureCalls.length, 0, 'no screenshot is taken while nobody is watching')
+  const imports = calls.filter(c => /\/jobs\/import$/.test(c.url))
+  assert.equal(imports.length, 3, 'the jobs are still imported, just without a salary')
+  // The reason is recorded rather than silently dropped - the salary backfill
+  // is how these get filled in later.
+  for (const call of imports) {
+    const warnings = JSON.parse(call.init.body).candidate.warnings || []
+    assert.ok(warnings.some(w => w.includes('background_search')), warnings.join('|'))
+  }
+})
+
+// One card whose detail pane never comes up must not cost the other seven.
+// A backgrounded tab renders lazily-populated content late or not at all, so
+// this stopped being a rare case the moment background search existed.
+function paneEnv({ neverLoad, background }) {
+  const consoleTab = { id: 8, windowId: 2, url: consoleSender.url, active: true }
+  const { router, calls } = makeFetchRouter(url => {
+    const match = url.match(/\/search-plan\/(\d+)$/)
+    return match ? jsonResponse(defaultTask({ id: Number(match[1]), run_status: 'pending' })) : undefined
+  })
+  let captures = 0
+  const env = loadBackground({
+    fetchImpl: router, consoleTab,
+    respond: (msg, count) => {
+      if (msg.type === 'jobagent:capture-detail') {
+        captures += 1
+        // Every attempt for the first candidate reports "pane not up yet".
+        if (neverLoad === 'all' || captures <= 10) {
+          return Promise.resolve({ ok: true, result: { status: 'not_loaded', candidate: null } })
+        }
+      }
+      return budgetResponder(msg, count)
+    },
+  })
+  const send = () => env.send({ ...consoleStart, background }, consoleSender)
+  return { env, calls, send }
+}
+
+test('a candidate whose detail pane never comes up is skipped, not fatal', { skip: SKIP }, async () => {
+  const { env, calls, send } = paneEnv({ background: false })
+  assert.equal((await send()).ok, true)
+  await until(() => pointerOf(env) === null)
+
+  assert.ok(!calls.some(c => /\/run\/fail$/.test(c.url)), 'one unrendered pane is not a run failure')
+  assert.equal(calls.filter(c => /\/jobs\/import$/.test(c.url)).length, 3,
+    'the requested new jobs are still collected, the unrendered one just costs an open')
+  const skipped = calls.filter(c => /\/run\/state$/.test(c.url))
+    .map(c => JSON.parse(c.init.body))
+    .filter(body => body.last_action === 'skipped_capture_timeout')
+  assert.equal(skipped.length, 1, 'and the skip is recorded, not silent')
+})
+
+test('a run where no pane ever comes up says so instead of reporting a quiet zero', { skip: SKIP }, async () => {
+  const { env, calls, send } = paneEnv({ neverLoad: 'all', background: true })
+  assert.equal((await send()).ok, true)
+  await until(() => pointerOf(env) === null)
+
+  assert.equal(calls.filter(c => /\/jobs\/import$/.test(c.url)).length, 0)
+  const states = calls.filter(c => /\/run\/state$/.test(c.url)).map(c => JSON.parse(c.init.body))
+  assert.ok(states.some(body => body.last_action === 'skipped_capture_timeout'),
+    'the reason reaches the backend for the console to explain')
+  assert.ok(!calls.some(c => /\/run\/fail$/.test(c.url)))
+})
+
+test('a card the library already holds is skipped before a slot is spent', { skip: SKIP }, async () => {
+  // The budget is candidate *opens*, so the only place this can be saved is
+  // before the click. The card fields travel with the URL because BOSS re-lists
+  // the same posting under a new job id, which the URL alone cannot catch.
+  let asked = null
+  const { router, calls } = makeFetchRouter((url, init) => {
+    if (/\/api\/extension\/jobs\/known$/.test(url)) {
+      asked = JSON.parse(init.body)
+      // The first two rendered cards are already stored.
+      return jsonResponse({ known: asked.urls.slice(0, 2) })
+    }
+    const match = url.match(/\/search-plan\/(\d+)$/)
+    return match ? jsonResponse(defaultTask({ id: Number(match[1]), run_status: 'pending' })) : undefined
+  })
+  const consoleTab = { id: 8, windowId: 2, url: consoleSender.url, active: true }
+  const env = loadBackground({ fetchImpl: router, respond: budgetResponder, consoleTab })
+  assert.equal((await env.send(consoleStart, consoleSender)).ok, true)
+  await until(() => pointerOf(env) === null)
+
+  assert.ok(asked, 'the runner asked before opening anything')
+  assert.deepEqual(Object.keys(asked.cards[0]).sort(),
+    ['city', 'company', 'experience_text', 'salary_text', 'title', 'url'])
+  assert.equal(asked.cards.length, asked.urls.length)
+  // Three opened, and none of them a card the library already had.
+  const opened = opensOf(env)
+  assert.equal(opened.length, 3)
+  assert.ok(!opened.some(call => call.message.index === 0 || call.message.index === 1),
+    'a stored posting never costs a candidate slot')
+  assert.equal(calls.filter(c => /\/jobs\/import$/.test(c.url)).length, 3)
+})
+
+test('a run that died on a denied prepare does not poison the tab for the next one', { skip: SKIP }, async () => {
+  // What happened live on 2026-09-05: one run's prepare was denied (its
+  // session had been stopped underneath it), and the prepare lock - released
+  // only "once a stop is confirmed", which the runner's own termination path
+  // never did - stayed held. The next two runs died in 70ms with
+  // `prepare_in_flight`, and only restarting the worker cleared it. To the
+  // user that is a console button that has simply stopped working.
+  let denyPrepare = true
+  const consoleTab = { id: 8, windowId: 2, url: consoleSender.url, active: true }
+  const { router, calls } = makeFetchRouter(url => {
+    if (/\/navigate\/prepare$/.test(url) && denyPrepare) {
+      return errorResponse(409, '会话未在进行中，无法导航。')
+    }
+    const match = url.match(/\/search-plan\/(\d+)$/)
+    return match ? jsonResponse(defaultTask({ id: Number(match[1]), run_status: 'pending' })) : undefined
+  })
+  const env = loadBackground({ fetchImpl: router, respond: budgetResponder, consoleTab })
+
+  assert.equal((await env.send(consoleStart, consoleSender)).ok, true)
+  await until(() => pointerOf(env) === null)
+  assert.ok(calls.some(c => /\/run\/fail$/.test(c.url)), 'the first run does fail')
+
+  // The same tab, a second explicit start. Nothing is left holding the lock.
+  denyPrepare = false
+  // The user clicks back into the console, which is what refocuses it - the
+  // first run had activated the BOSS tab.
+  Object.assign(consoleTab, { active: true })
+  env.tabState.active = false
+  const before = calls.length
+  const again = await env.send({ ...consoleStart, taskId: 6 }, consoleSender)
+  assert.equal(again.ok, true, again.error)
+  await until(() => pointerOf(env) === null)
+  const second = calls.slice(before)
+  assert.ok(!second.some(c => /\/run\/fail$/.test(c.url)),
+    JSON.stringify(second.filter(c => /run\/fail/.test(c.url)).map(c => c.init && c.init.body)))
+  assert.equal(second.filter(c => /\/jobs\/import$/.test(c.url)).length, 3)
+})
+
+test('a card whose title the strategy excludes never costs an open', { skip: SKIP }, async () => {
+  // The same discipline as the early-career skip: rejected from the card, and
+  // only on the title, because the card carries no JD. Measured on the library
+  // this was added against - 21 stored jobs had an excluded word in the title,
+  // and the model judged 20 of them `skip` and none `apply`.
+  const page = searchPage([
+    candidate('desk', { title: '桌面运维工程师' }),
+    candidate('real', { title: '云平台工程师' }),
+  ])
+  const { router, calls } = makeFetchRouter(url => {
+    const match = url.match(/\/search-plan\/(\d+)$/)
+    return match ? jsonResponse(defaultTask({
+      id: Number(match[1]),
+      run_status: 'pending',
+      excluded_title_keywords: ['桌面运维', '销售'],
+    })) : undefined
+  })
+  const env = loadBackground({
+    fetchImpl: router, respond: msg => {
+      if (msg.type === 'jobagent:detect') return Promise.resolve({ ok: true, result: page })
+      if (msg.type === 'jobagent:scroll-step') return Promise.resolve({ ok: true, result: { ok: true } })
+      if (msg.type === 'jobagent:next-page') {
+        return Promise.resolve({ ok: true, result: { ok: false, error: 'no_control' } })
+      }
+      return budgetResponder(msg)
+    },
+  })
+  await env.send({ type: 'jobagent:runner-start', taskId: 5, candidateCap: 20 })
+  await settle()
+
+  const opened = opensOf(env)
+  assert.equal(opened.length, 1, 'only the one card the strategy does not exclude')
+  assert.equal(opened[0].message.index, 1)
+  const states = calls.filter(c => /\/run\/state$/.test(c.url)).map(c => JSON.parse(c.init.body))
+  assert.ok(states.some(body => body.last_action === 'skipped_excluded_title'))
+})
+
+test('a backgrounded search never relaxes the check an application uses', { skip: SKIP }, async () => {
+  // The authorization covers search only. The relaxation lives in one helper
+  // the search runner calls; the salary capture and M6 call the strict check
+  // directly, so it cannot leak into them by editing a shared default.
+  const worker = fs.readFileSync(BACKGROUND_PATH, 'utf8')
+  assert.equal((worker.match(/!backgroundSearchRun/g) || []).length, 2,
+    'one helper, one stabilize guard')
+  assert.match(worker, /verifyRunnerTab\(tabId, true\)/,
+    'the application path pins the foreground check')
+
+  const between = (from, to) => {
+    const a = worker.indexOf(from)
+    const b = worker.indexOf(to, a)
+    assert.ok(a >= 0 && b > a, `${from} .. ${to}`)
+    return worker.slice(a, b)
+  }
+  for (const [label, body] of [
+    ['salary backfill', between('async function runSalaryBackfillLoop', 'async function startSalaryBackfill')],
+    ['application', between('async function executeM6Application', 'async function consoleCommand')],
+  ]) {
+    assert.ok(!body.includes('verifySearchTab'), `${label} keeps the strict check`)
+    assert.ok(body.includes('verifyRunnerTab('), `${label} still checks the tab`)
+    // ...and neither repairs a page it cannot reach - both fail closed.
+    assert.ok(!body.includes('askRunnerTab('), `${label} does not self-heal the content script`)
+  }
 })

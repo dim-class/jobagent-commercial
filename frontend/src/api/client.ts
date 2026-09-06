@@ -96,6 +96,9 @@ import type {
   UnattributedResponse,
   ResumeUploadResponse,
   ConsoleAttentionOut,
+  ReadinessOut,
+  AiSettingsOut,
+  AiSettingsIn,
   OrchestrationEventCreatePayload,
   OrchestrationEventListResponse,
   OrchestrationEventOut,
@@ -248,10 +251,12 @@ export const api = {
     request<{ created: number; skipped: number; total: number }>('/api/tasks/search-plan/generate', {
       method: 'POST', body: JSON.stringify({ cities: [city], keywords: [keyword] }),
     }),
-  prepareResumeSearch: (cities: string[], targetCount: number, filterUrls: string[] = []) =>
+  prepareResumeSearch: (cities: string[], targetCount: number, filterUrls: string[] = [],
+    salaryCodes: string[] = []) =>
     request<QuickSearchPrepareResponse>('/api/tasks/search-plan/quick-prepare', {
       method: 'POST',
-      body: JSON.stringify({ cities, target_count: targetCount, filter_urls: filterUrls }),
+      body: JSON.stringify({ cities, target_count: targetCount, filter_urls: filterUrls,
+        salary_codes: salaryCodes }),
     }),
   // Free: reading the plan never calls a model.
   getDirectionPlan: (signal?: AbortSignal) =>
@@ -854,6 +859,15 @@ export const api = {
     }),
   listTaskCandidates: (taskId: number) =>
     request<TaskCandidateListResponse>(`/api/tasks/${taskId}/candidates`),
+  //: Free: counts and configuration, no model call, nothing written.
+  getReadiness: (signal?: AbortSignal) =>
+    request<ReadinessOut>('/api/console/readiness', { signal }),
+  //: Never returns the key - only whether one is set and what it ends with.
+  getAiSettings: () => request<AiSettingsOut>('/api/console/ai-settings'),
+  saveAiSettings: (payload: AiSettingsIn) =>
+    request<AiSettingsOut>('/api/console/ai-settings', {
+      method: 'PUT', body: JSON.stringify(payload),
+    }),
   getConsoleAttention: () => request<ConsoleAttentionOut>('/api/console/attention'),
   listTaskEvents: (taskId: number) =>
     request<OrchestrationEventListResponse>(`/api/tasks/${taskId}/events`),

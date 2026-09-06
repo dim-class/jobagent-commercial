@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 
 import { ApiError, api, type JobFilters } from '@/api/client'
 import { nextJobSelection } from '@/pages/jobSelection'
@@ -92,6 +92,7 @@ const STATUS_LABEL: Record<JobStatus, string> = {
 
 export default function JobsPage() {
   const navigate = useNavigate()
+  const location = useLocation()
 
   const [data, setData] = useState<JobListResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -361,6 +362,17 @@ export default function JobsPage() {
    * they are exactly the rows a full page drops. Selecting "the unanalysed ones
    * I can currently see" reported 0 while 18 existed.
    */
+  //: `/jobs?analyzed=false` - the console links here when a search has left
+  //: jobs nobody has looked at yet. Landing on the unfiltered list and asking
+  //: the user to find the right control is how that prompt gets ignored.
+  const landedUnanalyzed = useRef(false)
+  useEffect(() => {
+    if (landedUnanalyzed.current) return
+    if (new URLSearchParams(location.search).get('analyzed') !== 'false') return
+    landedUnanalyzed.current = true
+    selectUnanalyzed()
+  }, [location.search])
+
   function selectUnanalyzed() {
     setBatchPlan(null)
     setSelectedJobIds(new Set())

@@ -293,9 +293,16 @@
 
   /**
    * On popup open: recover a running session only if the local pointer, the
-   * backend, and the current active tab all agree. Any mismatch - browser
-   * restart, a closed/changed tab, or a backend session with no matching
-   * local pointer - fails closed: stop it, never resume it silently.
+   * backend, and the current active tab all agree.
+   *
+   * A mismatch fails closed - but only for a session this popup owns. A
+   * session started from the local console has no pointer here, and stopping
+   * it was a live bug: the console tells the user to click the toolbar icon
+   * once (it is how salary OCR gets its `activeTab` grant), and that click
+   * killed the run they had just started - `stale_tab` 0.6s after the session
+   * was created, then "会话未在进行中" on its next navigation. Never stop what
+   * this entry point did not start; the worker owns that session and its own
+   * `resolveSessionForTab` already refuses to touch another owner's.
    */
   async function recoverOrReset() {
     const pointer = await loadPointer()
@@ -312,9 +319,17 @@
       return
     }
 
+    if (!pointer) {
+      // Someone else's session - the console runner's, in practice. Report it
+      // and leave it strictly alone: no stop, no adopt, no pointer written.
+      renderIdle()
+      setSessionStatus('另一个入口（本地控制台）正在运行一个会话，此处不做任何操作。', 'info')
+      return
+    }
+
     const tab = await activeTab()
     const origin = tab && tab.url ? originOf(tab.url) : null
-    const tabMatches = !!pointer && !!tab && pointer.tabId === tab.id && origin === active.tab_origin
+    const tabMatches = !!tab && pointer.tabId === tab.id && origin === active.tab_origin
 
     currentSessionId = active.id
     if (!tabMatches) {

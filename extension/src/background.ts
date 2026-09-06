@@ -96,11 +96,14 @@ async function fetchJson<T>(path: string, init?: { method?: string; body?: unkno
  * unreachable backend returns an empty set, so the run behaves exactly as it
  * did before rather than skipping everything.
  */
-async function knownCandidateUrls(urls: string[]): Promise<Set<string>> {
-  if (!urls.length) return new Set()
+async function knownCandidateUrls(
+  cards: { url: string; company: string | null; title: string | null; salary_text: string | null
+    experience_text: string | null; city: string | null }[],
+): Promise<Set<string>> {
+  if (!cards.length) return new Set()
   try {
     const result = await fetchJson<{ known?: string[] }>('/api/extension/jobs/known', {
-      method: 'POST', body: { urls },
+      method: 'POST', body: { urls: cards.map(card => card.url), cards },
     })
     return new Set(result.known ?? [])
   } catch {
@@ -423,6 +426,11 @@ interface BatchPointer {
   state: BatchState
   tabId: number | null
   lastError: string | null
+  //: Whether the user chose to let this batch run without the tab in front
+  //: (authorized 2026-09-04, search only). Carried on the pointer so advancing
+  //: to the next task keeps the choice - and so a resume after a worker
+  //: restart does not silently become a foreground run, or the reverse.
+  background?: boolean
   updatedAt: string
 }
 
@@ -674,10 +682,36 @@ const RUNNER_REQUIRED_ORIGIN = 'https://www.zhipin.com'
 //: scroll rounds per SearchTask... Consecutive no-new rounds is
 //: configurable and bounded (default 3)"). Never read from a config file or
 //: a caller-supplied value higher than these.
-const RUNNER_MAX_SCROLL_ROUNDS = 5
-const RUNNER_MAX_CANDIDATES = 20
+//: Raised from 5 to 30 (user authorized 2026-09-05). The old 5 was written
+//: when a scroll round moved one viewport; a round now reaches the end of the
+//: list, which is where BOSS loads its next batch, so rounds finally buy depth
+//: instead of falling behind a list that keeps growing. Opens stay capped at
+//: 20 per task, so deeper scrolling costs scrolling time and nothing else, and
+//: the consecutive-no-new threshold (3) still ends a direction that has really
+//: run dry - this is a ceiling, not a target.
+const RUNNER_MAX_SCROLL_ROUNDS = 30
+//: Opened details per task. Raised from 20 to 60 (user authorized
+//: 2026-09-05): three directions in one run stopped at 20 while still turning
+//: up new cards (`no_new_rounds` 0), having spent only 3 of their 30 scroll
+//: rounds - the budget, not the list, was what ran out.
+const RUNNER_MAX_CANDIDATES = 60
+
+//: The human's own number - how many NEW jobs a direction should collect.
+//: Its own constant, so that raising what a run may open is always a separate,
+//: deliberate decision from raising what the console may ask for. Equal to the
+//: open ceiling today: a larger target could never be met, and any value at or
+//: below it adds no browsing, because opens are what the ceiling limits.
+const RUNNER_MAX_TARGET = 60
+//: CLAUDE.md M4 section 1a has always allowed "at most 3 search-results pages
+//: visited"; the M4e/M4f amendment then forbade pagination outright, so every
+//: search saw only page one. Measured on 2026-09-05: a BOSS search renders 15
+//: cards, one scroll loads a second 15, and nothing loads after that - every
+//: one of 15 tasks reported exactly 30 observed and two barren scroll rounds.
+//: 30 is one BOSS page. Authorized 2026-09-05 to use the pages the ceiling
+//: already permitted; nothing here raises it.
+const RUNNER_MAX_PAGES = 3
 function validCandidateCap(value: unknown): value is number {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= RUNNER_MAX_CANDIDATES
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= RUNNER_MAX_TARGET
 }
 
 function validRunnerBudget(pointer: RunnerPointer): boolean {
@@ -685,7 +719,9 @@ function validRunnerBudget(pointer: RunnerPointer): boolean {
     Number.isInteger(pointer.scrollsUsed) && pointer.scrollsUsed >= 0 &&
     pointer.scrollsUsed <= RUNNER_MAX_SCROLL_ROUNDS &&
     Number.isInteger(pointer.candidatesAttempted) && pointer.candidatesAttempted >= 0 &&
-    pointer.candidatesAttempted <= pointer.candidateCap &&
+    //: Attempts are bounded by the immutable ceiling, not by `candidateCap` -
+    //: which now counts new jobs collected, not details opened.
+    pointer.candidatesAttempted <= RUNNER_MAX_CANDIDATES &&
     Number.isInteger(pointer.candidatesProcessed) && pointer.candidatesProcessed >= 0 &&
     pointer.candidatesProcessed <= pointer.candidatesAttempted
 }
@@ -698,6 +734,12 @@ const RUNNER_STABILIZE_MAX_ATTEMPTS = 10
 const RUNNER_STABILIZE_INTERVAL_MS = 500
 const RUNNER_CAPTURE_MAX_ATTEMPTS = 10
 const RUNNER_CAPTURE_INTERVAL_MS = 500
+//: A hidden tab renders lazily-populated content late or not at all (Chrome
+//: throttles a backgrounded tab, and stops painting one an opaque window fully
+//: covers). The detail pane is exactly that kind of content, so a backgrounded
+//: run gets a longer bounded wait - never an unbounded one, and never a retry:
+//: this is the same single wait, given more of it.
+const RUNNER_CAPTURE_BACKGROUND_ATTEMPTS = 24
 
 //: The one path a candidate identity may take: BOSS's own detail-page
 //: shape, scheme+host+path only. CLAUDE.md M4f review - "Canonicalize every
@@ -765,6 +807,15 @@ interface RunnerPointer {
   pauseConfirmed: boolean
   cancelRequested: boolean
   scrollsUsed: number
+  //: Results pages visited, 1-based: the first rendered page counts as one,
+  //: exactly like the backend's own `pages_visited`. Bounded by
+  //: `RUNNER_MAX_PAGES`, which no setting may raise.
+  pagesVisited?: number
+  //: The user's per-run "keep searching while I do something else" choice.
+  //: On the pointer rather than only in memory: a worker restart wipes the
+  //: module flag, and a resume must not silently turn a backgrounded run into
+  //: one that pauses the moment the window loses focus.
+  background?: boolean
   // Immutable approval and reservations survive popup/worker reload and explicit resume.
   candidateCap: number
   candidatesAttempted: number
@@ -803,6 +854,11 @@ interface RunnerPointer {
   city: string | null
   keyword: string | null
   earlyCareerPolicy: 'exclude' | 'include' | 'only'
+  //: Title fragments the career strategy excludes. A card carrying one is
+  //: skipped before the click - an opened detail is the scarce resource, and
+  //: the library says these buy nothing: 21 stored jobs had one in the title
+  //: and the model judged 20 `skip`, none `apply`.
+  excludedTitleKeywords?: string[]
   //: ISO timestamp of the pointer's own last durable write - refreshed by
   //: every `persistPatch` call, so the popup/overlay can show genuine
   //: liveness rather than a stale snapshot.
@@ -848,12 +904,14 @@ interface RunnerTaskOut {
   city?: string | null
   keywords?: string | null
   early_career_policy: 'exclude' | 'include' | 'only'
+  excluded_title_keywords?: string[]
 }
 
 interface RunnerStateMessage {
   taskId: number
   phase: RunnerPhase
   scrollsUsed: number
+  pagesVisited?: number
   candidateCap: number
   candidatesAttempted: number
   candidatesProcessed: number
@@ -977,15 +1035,58 @@ function releaseRunnerLoop(runToken: number): void {
 
 type TabCheckFailure = 'tab_lost' | 'wrong_origin' | 'not_foreground'
 
+/** True only while a search run the user chose to background is in progress.
+ *
+ * A module flag rather than a parameter threaded through every step, because
+ * every step reaches the page through `askTab` and nothing else runs beside a
+ * search: `executeM6Application` refuses outright while a runner pointer
+ * exists, and the salary backfill has its own busy guard. Applying and the
+ * salary capture also pass the strict check explicitly, so the flag cannot
+ * reach them even if that ever changed.
+ *
+ * Set when a run starts, cleared when it ends - including on error, or the
+ * next foreground run would silently inherit it. */
+let backgroundSearchRun = false
+
+/** The search runner's page message.
+ *
+ * `askTab` with the one-shot packaged-injection recovery that
+ * `waitForStableSearchPage`'s first DETECT already used. A tab whose
+ * declarative content script never attached - the page that was already open
+ * when an unpacked extension is reloaded - otherwise fails the entire run at
+ * whichever step happens to speak to the page first. On 2026-09-04 that was
+ * the card click, 0.2s into a run: DETECT had repaired itself by injecting,
+ * and the very next message had no recovery of its own.
+ *
+ * It cannot double-register a listener: injection runs only after a send has
+ * actually failed, and re-verifies origin/foreground before and after. M6 and
+ * the salary capture keep `askTab` - an application that cannot reach the page
+ * should fail closed, not repair itself.
+ */
+function askRunnerTab<T>(
+  tabId: number,
+  message: Record<string, unknown>,
+): Promise<{ ok: boolean; result?: T; error?: string }> {
+  return askTab<T>(tabId, message, true)
+}
+
 /**
  * CLAUDE.md M4f review item 2 - "Before every navigation, detect, click,
  * capture, import and scroll, verify the same tab still exists, is
  * active/foreground, and remains exact BOSS origin. Fail/pause closed on
  * loss; never continue hidden." Read-only (`chrome.tabs.get`); never itself
  * changes anything about the tab.
+ *
+ * `requireForeground` is false only for a search run the user has put in the
+ * background (authorized 2026-09-04, search only). The tab must still exist
+ * and still be exactly BOSS - those are what stop it acting on the wrong page,
+ * and they do not weaken when nobody is watching. Applying (M6) and the salary
+ * capture keep the strict check; the default is strict so a new caller has to
+ * ask for the relaxation on purpose.
  */
 async function verifyRunnerTab(
   tabId: number,
+  requireForeground = true,
 ): Promise<{ ok: true } | { ok: false; reason: TabCheckFailure }> {
   let tab: chrome.tabs.Tab
   try {
@@ -995,11 +1096,26 @@ async function verifyRunnerTab(
   }
   if (!tab || !tab.url) return { ok: false, reason: 'tab_lost' }
   if (!isRunnerNavOrigin(tab.url)) return { ok: false, reason: 'wrong_origin' }
+  if (!requireForeground) return { ok: true }
   if (tab.active !== true) return { ok: false, reason: 'not_foreground' }
   try {
     if (tab.windowId === undefined || !(await chrome.windows.get(tab.windowId)).focused) return { ok: false, reason: 'not_foreground' }
   } catch { return { ok: false, reason: 'not_foreground' } }
   return { ok: true }
+}
+
+/** The search runner's own tab check.
+ *
+ * Identical to `verifyRunnerTab`, except that a run the user chose to put in
+ * the background (authorized 2026-09-04, search only) does not require the tab
+ * to be in front. Every other caller - the salary capture, and M6 - calls
+ * `verifyRunnerTab` directly and keeps the strict check, so the relaxation
+ * cannot leak into them by editing a shared default.
+ */
+function verifySearchTab(
+  tabId: number,
+): Promise<{ ok: true } | { ok: false; reason: TabCheckFailure }> {
+  return verifyRunnerTab(tabId, !backgroundSearchRun)
 }
 
 /** Ask the content script in `tabId` something - first re-verifying the tab
@@ -1015,14 +1131,14 @@ async function askTab<T>(
   message: Record<string, unknown>,
   allowPackagedInjection = false,
 ): Promise<{ ok: boolean; result?: T; error?: string }> {
-  const alive = await verifyRunnerTab(tabId)
+  const alive = await verifySearchTab(tabId)
   if (!alive.ok) return { ok: false, error: alive.reason }
   try {
     const response = await chrome.tabs.sendMessage(tabId, message)
     return (response || { ok: false }) as { ok: boolean; result?: T; error?: string }
   } catch {
     if (!allowPackagedInjection) return { ok: false, error: 'content_unavailable' }
-    const beforeInjection = await verifyRunnerTab(tabId)
+    const beforeInjection = await verifySearchTab(tabId)
     if (!beforeInjection.ok) return { ok: false, error: beforeInjection.reason }
     try {
       await chrome.scripting.executeScript({
@@ -1030,7 +1146,7 @@ async function askTab<T>(
         files: ['dist/boss/selectors.js', 'dist/boss/extract.js', 'dist/content.js', 'dist/overlay.js'],
       })
     } catch { return { ok: false, error: 'content_unavailable' } }
-    const afterInjection = await verifyRunnerTab(tabId)
+    const afterInjection = await verifySearchTab(tabId)
     if (!afterInjection.ok) return { ok: false, error: afterInjection.reason }
     try {
       const retry = await chrome.tabs.sendMessage(tabId, message)
@@ -1097,7 +1213,7 @@ function reportState(taskId: number, report: RunnerStateReport): void {
 //: carry `detail.field === capField`; every other prepare/confirm failure
 //: (not-owner, unreachable backend, session not running, wrong origin,
 //: prepare-in-flight, ...) does not, and must be treated as a real error.
-function isCapDenied(result: NavigateResult, capField: 'candidate_cap' | 'scroll_cap'): boolean {
+function isCapDenied(result: NavigateResult, capField: 'candidate_cap' | 'scroll_cap' | 'page_cap'): boolean {
   const detail = result.detail as { field?: string } | undefined
   return detail?.field === capField
 }
@@ -1131,6 +1247,7 @@ function toStateMessage(pointer: RunnerPointer): RunnerStateMessage {
     taskId: pointer.taskId,
     phase: pointer.phase,
     scrollsUsed: pointer.scrollsUsed,
+    pagesVisited: pointer.pagesVisited ?? 1,
     candidateCap: pointer.candidateCap,
     candidatesAttempted: pointer.candidatesAttempted,
     candidatesProcessed: pointer.candidatesProcessed,
@@ -1199,6 +1316,7 @@ async function persistPatch(
       RunnerPointer,
       | 'phase'
       | 'scrollsUsed'
+      | 'pagesVisited'
       | 'candidatesProcessed'
       | 'candidatesAttempted'
       | 'handledUrls'
@@ -1250,6 +1368,7 @@ async function persistAndReport(
       | 'phase'
       | 'currentUrl'
       | 'scrollsUsed'
+      | 'pagesVisited'
       | 'visibleJobs'
       | 'importedJobs'
       | 'currentCandidate'
@@ -1304,7 +1423,7 @@ async function checkpoint(taskId: number, runToken: number): Promise<CheckpointR
   return 'continue'
 }
 
-async function stopRunnerSession(sessionId: number | null): Promise<boolean> {
+async function stopRunnerSession(sessionId: number | null, tabId?: number): Promise<boolean> {
   if (sessionId === null) return true // never created - nothing to stop
   try {
     const active = await fetchActive()
@@ -1314,6 +1433,13 @@ async function stopRunnerSession(sessionId: number | null): Promise<boolean> {
     }
     const pointer = await getGlobalPointer()
     if (pointer?.sessionId === sessionId) await clearGlobalPointer()
+    // The prepare lock is released "once the stop is actually confirmed" -
+    // which `stopForTab` does for the overlay's own stop button, and which
+    // this path forgot. A denied prepare deliberately keeps the lock held, so
+    // a run that ended on one left it held forever: every later run on the
+    // same tab then failed instantly with `prepare_in_flight`, and only
+    // restarting the worker cleared it. This is that confirmed stop.
+    releasePrepareLock(tabId ?? pointer?.tabId)
     return true
   } catch {
     return false
@@ -1368,7 +1494,7 @@ async function endRunner(
     }
   }
 
-  const sessionOk = await stopRunnerSession(fresh.sessionId)
+  const sessionOk = await stopRunnerSession(fresh.sessionId, fresh.tabId)
 
   if (!transitionOk || !sessionOk) {
     await persistPatch(taskId, runToken, {
@@ -1410,8 +1536,10 @@ async function finishBatchTask(
   const nextBatch: BatchPointer = { ...batch, currentIndex: nextIndex, state: 'running',
     lastError: null, updatedAt: new Date().toISOString() }
   await setBatchPointer(nextBatch)
+  // The batch's own choice, carried forward: advancing to the next task must
+  // not quietly change whether the tab has to be in front.
   const started = await startRunner(nextBatch.taskIds[nextIndex], nextBatch.candidateCap,
-    undefined, undefined, undefined, true, finished.tabId)
+    undefined, undefined, undefined, true, finished.tabId, true, nextBatch.background === true)
   if (!started.ok) {
     await setBatchPointer({ ...nextBatch, state: 'stopped',
       lastError: ('next_task_start_failed:' + (started.error || 'unknown')).slice(0, 120),
@@ -1517,12 +1645,18 @@ async function waitForStableSearchPage(
       // Losing a tab is not a user pause: finish the task and release ownership.
       return { ok: false, reason: 'failed', error: 'tab_lost' }
     }
-    if (!tab.active) return { ok: false, reason: 'failed', error: 'not_foreground' }
-    try {
-      if (tab.windowId === undefined || !(await chrome.windows.get(tab.windowId)).focused) {
-        return { ok: false, reason: 'failed', error: 'not_foreground' }
-      }
-    } catch { return { ok: false, reason: 'failed', error: 'not_foreground' } }
+    // A backgrounded search (authorized 2026-09-04, search only) skips the
+    // foreground half only. The tab still has to exist and still be exactly
+    // BOSS below - those are what keep it off the wrong page, and they do not
+    // depend on anyone watching.
+    if (!backgroundSearchRun) {
+      if (!tab.active) return { ok: false, reason: 'failed', error: 'not_foreground' }
+      try {
+        if (tab.windowId === undefined || !(await chrome.windows.get(tab.windowId)).focused) {
+          return { ok: false, reason: 'failed', error: 'not_foreground' }
+        }
+      } catch { return { ok: false, reason: 'failed', error: 'not_foreground' } }
+    }
     if (tab.url && tab.url !== 'about:blank' && !isRunnerNavOrigin(tab.url)) {
       return { ok: false, reason: 'failed', error: 'wrong_origin' }
     }
@@ -1600,9 +1734,15 @@ async function processNewCandidates(
       }
       continue // re-read pause/cancel and the immutable candidate budget
     }
-    if (fresh.candidatesAttempted >= fresh.candidateCap) return { status: 'cap_reached' }
+    // The human's number is a target of *new* jobs, not of attempts: a
+    // posting the library already holds should cost nothing, and until this
+    // changed a direction could spend all eight of its slots re-reading jobs
+    // it already had. Opens are still hard-capped by the immutable ceiling
+    // below, which no setting may raise (CLAUDE.md M4 section 1a).
+    if (fresh.importedJobs >= fresh.candidateCap) return { status: 'cap_reached' }
+    if (fresh.candidatesAttempted >= RUNNER_MAX_CANDIDATES) return { status: 'cap_reached' }
 
-    const detected = await askTab<RunnerDetectResult>(tabId, { type: 'jobagent:detect' })
+    const detected = await askRunnerTab<RunnerDetectResult>(tabId, { type: 'jobagent:detect' })
     if (!detected.ok || !detected.result) return { status: 'error', reason: detected.error || 'detect_failed' }
     if (detected.result.login_required) return { status: 'login_required' }
     if (detected.result.verification) return { status: 'verification' }
@@ -1612,14 +1752,27 @@ async function processNewCandidates(
     const handled = new Set(fresh.handledUrls)
     // Asked once per selection pass, before any slot is spent. Only canonical,
     // query-stripped detail URLs leave the worker, and only to loopback.
+    // The card fields travel with the URL so the backend can also recognise a
+    // re-listing under a new job id - the case that spent 66 of 78 opened
+    // details on one run and imported nothing.
     const alreadyStored = await knownCandidateUrls(
       detected.result.candidates
-        .map((c) => canonicalizeJobDetailUrl(c.source_url))
-        .filter((url): url is string => Boolean(url) && !handled.has(url as string)),
+        .map((c) => ({ card: c, url: canonicalizeJobDetailUrl(c.source_url) }))
+        .filter((row): row is { card: typeof row.card; url: string } =>
+          Boolean(row.url) && !handled.has(row.url as string))
+        .map(({ card, url }) => ({
+          url,
+          company: card.company ?? null,
+          title: card.title ?? null,
+          salary_text: card.salary_text ?? null,
+          experience_text: card.experience_text ?? null,
+          city: card.city ?? null,
+        })),
     )
     let nextIndex = -1
     let targetUrl: string | null = null
     let skippedEarlyCareer = false
+    let skippedExcludedTitle = false
     let skippedKnown = 0
     for (let i = 0; i < detected.result.candidates.length; i++) {
       const c = detected.result.candidates[i]
@@ -1633,6 +1786,17 @@ async function processNewCandidates(
         continue
       }
       const compactTitle = (c.title || '').replace(/\s+/g, '')
+      // The strategy's own excluded roles, matched on the card's title only -
+      // never on a guess about the JD, which the card does not carry.
+      const excludedTitle = (fresh.excludedTitleKeywords ?? []).some(word => {
+        const needle = word.replace(/\s+/g, '').toLowerCase()
+        return needle.length > 0 && compactTitle.toLowerCase().includes(needle)
+      })
+      if (excludedTitle && canonical && !handled.has(canonical)) {
+        handled.add(canonical)
+        skippedExcludedTitle = true
+        continue
+      }
       const earlyCareer = /应届|校招|校园招聘|毕业生|管培生|实习|(?:20)?2[4-9]届/.test(compactTitle)
       // Only the experienced-track policy may safely reject from a title.
       // `only` must still open the detail because the JD can carry the
@@ -1648,13 +1812,19 @@ async function processNewCandidates(
         break
       }
     }
-    if (skippedEarlyCareer || skippedKnown) {
+    if (skippedEarlyCareer || skippedExcludedTitle || skippedKnown) {
       const persisted = await persistPatch(taskId, runToken, {
         handledUrls: Array.from(handled),
         lastError: null,
-        lastAction: skippedEarlyCareer ? 'skipped_early_career_track' : 'skipped_already_stored',
+        lastAction: skippedEarlyCareer
+          ? 'skipped_early_career_track'
+          : skippedExcludedTitle ? 'skipped_excluded_title' : 'skipped_already_stored',
       })
       if (!persisted) return { status: 'stopped' }
+      // Reported, not just stored: `persistPatch` never leaves the worker, and
+      // a run that skipped every card looked from the console like a run that
+      // did nothing.
+      await persistAndReport(taskId, runToken, { lastAction: persisted.lastAction })
     }
     if (nextIndex === -1 || !targetUrl) return { status: 'ok' } // nothing new right now - caller may scroll
 
@@ -1684,7 +1854,7 @@ async function processNewCandidates(
       return { status: 'error', reason: 'candidate_budget_write_failed' }
     }
     if (!reserved || reserved.pauseRequested || reserved.cancelRequested) return { status: 'stopped' }
-    const opened = await askTab<{ ok: boolean; error?: string }>(tabId, {
+    const opened = await askRunnerTab<{ ok: boolean; error?: string }>(tabId, {
       type: 'jobagent:open-candidate',
       index: nextIndex,
     })
@@ -1715,10 +1885,12 @@ async function processNewCandidates(
     // item 5 ("bounded stabilization after ... each card selection").
     let captured: { status: string; candidate?: unknown } | null = null
     let mismatchSeen = false
-    for (let attempt = 0; attempt < RUNNER_CAPTURE_MAX_ATTEMPTS; attempt++) {
+    const captureAttempts = backgroundSearchRun
+      ? RUNNER_CAPTURE_BACKGROUND_ATTEMPTS : RUNNER_CAPTURE_MAX_ATTEMPTS
+    for (let attempt = 0; attempt < captureAttempts; attempt++) {
       const cpInner = await checkpoint(taskId, runToken)
       if (cpInner !== 'continue') return { status: 'stopped' }
-      const cap = await askTab<{ status: string; candidate?: unknown }>(tabId, {
+      const cap = await askRunnerTab<{ status: string; candidate?: unknown }>(tabId, {
         type: 'jobagent:capture-detail',
         canonicalUrl: targetUrl,
         cachedCard: candidate,
@@ -1732,14 +1904,14 @@ async function processNewCandidates(
       // gets to resolve.
       if (cap.result && cap.result.status === 'identity_mismatch') {
         mismatchSeen = true
-        if (attempt < RUNNER_CAPTURE_MAX_ATTEMPTS - 1) await sleepMs(RUNNER_CAPTURE_INTERVAL_MS)
+        if (attempt < captureAttempts - 1) await sleepMs(RUNNER_CAPTURE_INTERVAL_MS)
         continue
       }
       if (cap.result && cap.result.status !== 'not_loaded') {
         captured = cap.result
         break
       }
-      if (attempt < RUNNER_CAPTURE_MAX_ATTEMPTS - 1) await sleepMs(RUNNER_CAPTURE_INTERVAL_MS)
+      if (attempt < captureAttempts - 1) await sleepMs(RUNNER_CAPTURE_INTERVAL_MS)
     }
     if (!captured) {
       if (mismatchSeen) {
@@ -1754,7 +1926,22 @@ async function processNewCandidates(
         })
         continue
       }
-      return { status: 'error', reason: 'capture_timeout' }
+      // The pane never produced a title inside the ceiling. Skip this one
+      // candidate, exactly like an unresolved identity above - it is the same
+      // kind of "this card did not come up", and killing the whole run over it
+      // threw away seven perfectly good candidates for one that would not
+      // render. The reason is recorded, so a run where *nothing* renders (a
+      // fully covered window) still says so instead of quietly reporting zero.
+      handled.add(targetUrl)
+      await persistPatch(taskId, runToken, {
+        handledUrls: Array.from(handled),
+        lastError: 'capture_timeout_skipped:' + targetUrl,
+      })
+      // `lastAction` is the half the backend actually stores (`persistPatch`
+      // alone never leaves the worker), so the console can say why a run came
+      // back with nothing instead of showing a quiet zero.
+      await persistAndReport(taskId, runToken, { lastAction: 'skipped_capture_timeout' })
+      continue
     }
     if (captured.status === 'login_required') return { status: 'login_required' }
     if (captured.status === 'verification') return { status: 'verification' }
@@ -1765,13 +1952,22 @@ async function processNewCandidates(
     let merged = captured.candidate as SalaryCandidate
     const canonicalMerged = canonicalizeJobDetailUrl(merged.source_url)
     if (!canonicalMerged || canonicalMerged !== targetUrl) return { status: 'error', reason: 'invalid_identity' }
-    if (!merged.salary_text) {
+    if (!merged.salary_text && backgroundSearchRun) {
+      // The local salary OCR is strictly foreground (authorized 2026-08-28) and
+      // a backgrounded search has no foreground to offer it. Attempting it threw
+      // `salary_not_foreground`, which this function treats as a hard error - so
+      // one candidate with an unreadable salary ended the entire run, 24s in.
+      // Skip the attempt rather than fail: the salary stays unknown, the reason
+      // is recorded in the intake note like every other OCR miss, and the
+      // salary backfill exists for exactly this.
+      merged = { ...merged, warnings: [...(merged.warnings || []), '本地薪资 OCR 未采用：background_search'] }
+    } else if (!merged.salary_text) {
       try {
         await persistAndReport(taskId, runToken, { lastAction: 'reading_salary_local_ocr' })
         merged = await supplementSalary(tabId, merged, async () => await checkpoint(taskId, runToken) === 'continue')
         // Even a failed/unsupported OCR attempt must not hide a newly appeared challenge.
         if (await checkpoint(taskId, runToken) !== 'continue') return { status: 'stopped' }
-        const freshCapture = await askTab<{ status: string }>(tabId, {
+        const freshCapture = await askRunnerTab<{ status: string }>(tabId, {
           type: 'jobagent:capture-detail', canonicalUrl: targetUrl, cachedCard: candidate,
         })
         if (freshCapture.result?.status === 'login_required') return { status: 'login_required' }
@@ -1789,7 +1985,7 @@ async function processNewCandidates(
 
     // One more tab check immediately before the network write - item 2
     // covers "import" explicitly, not just the DOM steps above.
-    const aliveForImport = await verifyRunnerTab(tabId)
+    const aliveForImport = await verifySearchTab(tabId)
     if (!aliveForImport.ok) return { status: 'error', reason: aliveForImport.reason }
 
     let didImport = false
@@ -1820,7 +2016,7 @@ async function processNewCandidates(
         // immediately before import." Time has passed since the check
         // above (a real network round-trip); the tab may have been closed,
         // backgrounded, or navigated away in the interim.
-        const aliveBeforeImport = await verifyRunnerTab(tabId)
+        const aliveBeforeImport = await verifySearchTab(tabId)
         if (!aliveBeforeImport.ok) return { status: 'error', reason: aliveBeforeImport.reason }
         const imported = (await fetchJson('/api/extension/jobs/import', {
           method: 'POST',
@@ -1890,6 +2086,94 @@ async function processNewCandidates(
   }
 }
 
+/**
+ * One bounded advance to the next BOSS results page.
+ *
+ * Modelled step for step on `runScrollRound`: detect, prepare, act, confirm,
+ * then a bounded stabilization that waits for a card the previous page did not
+ * have. The scroll budget is per page and the backend resets it on a confirmed
+ * `results` navigation, so this resets the local counter in the same place.
+ *
+ * A missing or disabled next-page control is `exhausted` - the last page, a
+ * normal end of the task - never an error. An ambiguous control is still a
+ * hard stop, exactly as `activateNextPage` has always treated it.
+ */
+async function runNextPageRound(
+  taskId: number,
+  runToken: number,
+  tabId: number,
+): Promise<
+  | { status: 'ok' }
+  | { status: 'exhausted' }
+  | { status: 'verification' }
+  | { status: 'login_required' }
+  | { status: 'wrong_page' }
+  | { status: 'stopped' }
+  | { status: 'error'; reason: string }
+> {
+  const fresh = await readCurrent(taskId, runToken)
+  if (!fresh) return { status: 'stopped' }
+  if ((fresh.pagesVisited ?? 1) >= RUNNER_MAX_PAGES) return { status: 'exhausted' }
+
+  const before = await askRunnerTab<RunnerDetectResult>(tabId, { type: 'jobagent:detect' })
+  if (!before.ok || !before.result) return { status: 'error', reason: before.error || 'detect_failed' }
+  if (before.result.login_required) return { status: 'login_required' }
+  if (before.result.verification) return { status: 'verification' }
+  if (before.result.page_type !== 'search') return { status: 'wrong_page' }
+  const beforeUrls = detectedCandidateUrls(before.result)
+
+  const prepared = await navigatePrepareForTab(tabId, 'results', null)
+  if (!prepared.ok) {
+    if (isCapDenied(prepared, 'page_cap')) return { status: 'exhausted' }
+    return { status: 'error', reason: prepared.error || 'prepare_denied' }
+  }
+
+  if (await checkpoint(taskId, runToken) !== 'continue') return { status: 'stopped' }
+  const clicked = await askRunnerTab<{ ok: boolean; error?: string }>(tabId, {
+    type: 'jobagent:next-page',
+  })
+  const reason = clicked.result?.error
+  const succeeded = !!clicked.ok && !!clicked.result?.ok
+  const confirmed = await navigateConfirmForTab(
+    tabId,
+    'results',
+    null,
+    succeeded ? 'success' : 'failed',
+    succeeded ? null : reason || 'unknown',
+  )
+  if (!succeeded) {
+    // BOSS marks the last page by disabling the control, and a search with a
+    // single page has none at all. Both mean "there is no more list", which
+    // is how this task ends normally.
+    if (reason === 'no_control' || reason === 'disabled') return { status: 'exhausted' }
+    return { status: 'error', reason: clicked.error || reason || 'next_page_failed' }
+  }
+  if (!confirmed.ok) return { status: 'error', reason: confirmed.error || 'confirm_failed' }
+
+  for (let attempt = 0; attempt < RUNNER_STABILIZE_MAX_ATTEMPTS; attempt++) {
+    if (await checkpoint(taskId, runToken) !== 'continue') return { status: 'stopped' }
+    const after = await askRunnerTab<RunnerDetectResult>(tabId, { type: 'jobagent:detect' })
+    if (!after.ok || !after.result) return { status: 'error', reason: after.error || 'detect_failed' }
+    if (after.result.login_required) return { status: 'login_required' }
+    if (after.result.verification) return { status: 'verification' }
+    if (after.result.page_type !== 'search') return { status: 'wrong_page' }
+    const appeared = Array.from(detectedCandidateUrls(after.result)).some(url => !beforeUrls.has(url))
+    if (appeared) {
+      if (!await rememberRenderedCandidates(taskId, runToken, after.result)) return { status: 'stopped' }
+      const advanced = await persistAndReport(taskId, runToken, {
+        pagesVisited: (fresh.pagesVisited ?? 1) + 1,
+        scrollsUsed: 0,
+        lastAction: 'next_page',
+      })
+      return advanced ? { status: 'ok' } : { status: 'stopped' }
+    }
+    if (attempt < RUNNER_STABILIZE_MAX_ATTEMPTS - 1) await sleepMs(RUNNER_STABILIZE_INTERVAL_MS)
+  }
+  // The click was confirmed but nothing new rendered. Treat the list as over
+  // rather than guessing: a page that shows the same cards is not a new page.
+  return { status: 'exhausted' }
+}
+
 async function runScrollRound(
   taskId: number,
   runToken: number,
@@ -1903,7 +2187,7 @@ async function runScrollRound(
   | { status: 'cap_reached' }
   | { status: 'error'; reason: string }
 > {
-  const before = await askTab<RunnerDetectResult>(tabId, { type: 'jobagent:detect' })
+  const before = await askRunnerTab<RunnerDetectResult>(tabId, { type: 'jobagent:detect' })
   if (!before.ok || !before.result) return { status: 'error', reason: before.error || 'detect_failed' }
   if (before.result.login_required) return { status: 'login_required' }
   if (before.result.verification) return { status: 'verification' }
@@ -1935,7 +2219,7 @@ async function runScrollRound(
     return { status: 'error', reason: 'scroll_budget_write_failed' }
   }
 
-  const scrolled = await askTab<{ ok: boolean; error?: string }>(tabId, {
+  const scrolled = await askRunnerTab<{ ok: boolean; error?: string }>(tabId, {
     type: 'jobagent:scroll-step',
   })
   const succeeded = !!scrolled.ok && !!scrolled.result?.ok
@@ -1960,7 +2244,7 @@ async function runScrollRound(
   for (let attempt = 0; attempt < RUNNER_STABILIZE_MAX_ATTEMPTS; attempt++) {
     const cp = await checkpoint(taskId, runToken)
     if (cp !== 'continue') return { status: 'stopped' }
-    const after = await askTab<RunnerDetectResult>(tabId, { type: 'jobagent:detect' })
+    const after = await askRunnerTab<RunnerDetectResult>(tabId, { type: 'jobagent:detect' })
     if (!after.ok || !after.result) return { status: 'error', reason: after.error || 'detect_failed' }
     if (after.result.login_required) return { status: 'login_required' }
     if (after.result.verification) return { status: 'verification' }
@@ -2078,7 +2362,8 @@ async function afterPopupHandoff(pointer: RunnerPointer, binding: PopupBinding, 
 async function startRunner(taskId: number, candidateCap: unknown, binding?: PopupBinding,
   matchApproval?: { confirmed: boolean; cap: number; fingerprint: string },
   consoleSender?: chrome.runtime.MessageSender, batchEntry = false,
-  expectedTabId?: number, launch = true): Promise<{ ok: boolean; error?: string }> {
+  expectedTabId?: number, launch = true,
+  background = false): Promise<{ ok: boolean; error?: string }> {
   if (salaryOcrBusy) return { ok: false, error: 'salary_ocr_busy' }
   if (!validCandidateCap(candidateCap)) return { ok: false, error: '候选上限必须是 1–20 的整数，请重新确认。' }
   if (matchApproval && (matchApproval.confirmed !== true || matchApproval.cap !== candidateCap || candidateCap > 3)) {
@@ -2086,6 +2371,9 @@ async function startRunner(taskId: number, candidateCap: unknown, binding?: Popu
   }
   if (batchAdmission && !batchEntry) return { ok: false, error: 'batch_admission_active' }
   if (activeRunToken !== null) return { ok: false, error: 'already_running' }
+  // Set per run, and reset here rather than only on completion: a run that
+  // ended badly must not leave the next one running unwatched.
+  backgroundSearchRun = background
   const runToken = nextRunToken()
   activeRunToken = runToken
   const fail = (error: string): { ok: boolean; error?: string } => {
@@ -2138,15 +2426,32 @@ async function startRunner(taskId: number, candidateCap: unknown, binding?: Popu
     } catch { return fail('控制台启动失败：请确认后端在线，并在正常 Chrome 前台打开控制台。') }
   }
 
-  const resolved = await foregroundStartTab(binding)
-  if (!resolved.ok) return fail(resolved.error)
-  const tab = resolved.tab
+  // A backgrounded batch advancing to its next task is the one start that no
+  // human is present for: the human approved this exact list and this exact
+  // tab when they started the batch, and the tab is the one the task that just
+  // completed was using. Requiring the foreground here would end every
+  // backgrounded batch after its first task - which is exactly what happened
+  // on 2026-09-04. Same trade as `verifySearchTab`: identity yes, "in front"
+  // no. Every human-initiated start (console, popup, resume) keeps the strict
+  // check below.
+  const advancingInBackground = background && expectedTabId !== undefined
+    && !binding && !consoleSender
+  let tab: chrome.tabs.Tab
+  if (advancingInBackground) {
+    const alive = await verifyRunnerTab(expectedTabId!, false)
+    if (!alive.ok) return fail(alive.reason)
+    try { tab = await chrome.tabs.get(expectedTabId!) } catch { return fail('tab_lost') }
+  } else {
+    const resolved = await foregroundStartTab(binding)
+    if (!resolved.ok) return fail(resolved.error)
+    tab = resolved.tab
+  }
   if (consoleTab && tab.id !== consoleTab.id) return fail('console_tab_changed')
   if (expectedTabId !== undefined && tab.id !== expectedTabId) return fail('batch_tab_changed')
   if (tab.id === undefined) return fail('start-v3/tab_id_missing')
   if (!tab.url) return fail('start-v3/tab_url_unavailable')
   if (!isRunnerNavOrigin(tab.url)) return fail('wrong_origin')
-  if (tab.active !== true) return fail('not_foreground')
+  if (!advancingInBackground && tab.active !== true) return fail('not_foreground')
   const tabId = tab.id
 
   let task: RunnerTaskOut
@@ -2185,6 +2490,8 @@ async function startRunner(taskId: number, candidateCap: unknown, binding?: Popu
     pauseConfirmed: false,
     cancelRequested: false,
     scrollsUsed: 0,
+    pagesVisited: 1,
+    background,
     candidateCap,
     candidatesAttempted: 0,
     candidatesProcessed: 0,
@@ -2203,6 +2510,7 @@ async function startRunner(taskId: number, candidateCap: unknown, binding?: Popu
     city: task.city ?? null,
     keyword: task.keywords ?? null,
     earlyCareerPolicy: task.early_career_policy,
+    excludedTitleKeywords: task.excluded_title_keywords ?? [],
     updatedAt: new Date().toISOString(),
     lastError: null,
     pendingTerminal: null,
@@ -2237,7 +2545,7 @@ async function runRunnerLoop(
     return
   }
 
-  const aliveBefore = await verifyRunnerTab(tabId)
+  const aliveBefore = await verifySearchTab(tabId)
   if (!aliveBefore.ok) {
     await endRunner(taskId, runToken, 'failed', aliveBefore.reason)
     return
@@ -2297,8 +2605,12 @@ async function runRunnerLoop(
       method: 'POST',
       body: {
         task_id: taskId,
-        page_cap: 1,
-        candidate_cap: approved.candidateCap,
+        page_cap: RUNNER_MAX_PAGES,
+        //: The session caps *opened* details, which is what the backend
+        //: denies on. The human's own number is the new-jobs target and is
+        //: enforced separately in `processNewCandidates`; the console states
+        //: both, so neither is hidden behind the other.
+        candidate_cap: RUNNER_MAX_CANDIDATES,
         scroll_cap: RUNNER_MAX_SCROLL_ROUNDS,
         tab_origin: RUNNER_REQUIRED_ORIGIN,
       },
@@ -2333,9 +2645,35 @@ async function runRoundsLoop(taskId: number, runToken: number, tabId: number): P
     releaseRunnerLoop(runToken) // review item 7 - every superseded/cleared early exit must release
     return
   }
-  const startRound = start.scrollsUsed
+  let round = start.scrollsUsed
 
-  for (let round = startRound; round <= RUNNER_MAX_SCROLL_ROUNDS; round++) {
+  //: Resolves one "this page is finished" moment: advance if there is another
+  //: page, otherwise end the task normally. Returns true when the loop should
+  //: keep going on a fresh page.
+  const nextPage = async (): Promise<'continue' | 'done' | 'returned'> => {
+    const outcome = await runNextPageRound(taskId, runToken, tabId)
+    if (outcome.status === 'ok') {
+      round = 0
+      return 'continue'
+    }
+    if (outcome.status === 'exhausted') {
+      await endRunner(taskId, runToken, 'completed')
+      return 'returned'
+    }
+    if (outcome.status === 'login_required' || outcome.status === 'verification') {
+      await pauseForHumanGate(taskId, runToken, outcome.status)
+      return 'returned'
+    }
+    if (outcome.status === 'stopped') {
+      await haltForStop(taskId, runToken)
+      return 'returned'
+    }
+    await endRunner(taskId, runToken, 'failed',
+      outcome.status === 'wrong_page' ? 'wrong_page' : outcome.reason)
+    return 'returned'
+  }
+
+  while (round <= RUNNER_MAX_SCROLL_ROUNDS) {
     const cp = await checkpoint(taskId, runToken)
     if (cp === 'superseded') {
       releaseRunnerLoop(runToken)
@@ -2346,7 +2684,7 @@ async function runRoundsLoop(taskId: number, runToken: number, tabId: number): P
       return
     }
 
-    const aliveTop = await verifyRunnerTab(tabId)
+    const aliveTop = await verifySearchTab(tabId)
     if (!aliveTop.ok) {
       await endRunner(taskId, runToken, 'failed', aliveTop.reason)
       return
@@ -2379,7 +2717,13 @@ async function runRoundsLoop(taskId: number, runToken: number, tabId: number): P
       return
     }
 
-    if (round >= RUNNER_MAX_SCROLL_ROUNDS) break // no more scroll rounds left to spend
+    if (round >= RUNNER_MAX_SCROLL_ROUNDS) {
+      // The scroll budget is per page, so a spent one ends the page, not the
+      // task - if BOSS has another page, that is where the next jobs are.
+      const step = await nextPage()
+      if (step === 'returned') return
+      continue
+    }
 
     const cp2 = await checkpoint(taskId, runToken)
     if (cp2 === 'superseded') {
@@ -2391,7 +2735,7 @@ async function runRoundsLoop(taskId: number, runToken: number, tabId: number): P
       return
     }
 
-    const aliveScroll = await verifyRunnerTab(tabId)
+    const aliveScroll = await verifySearchTab(tabId)
     if (!aliveScroll.ok) {
       await endRunner(taskId, runToken, 'failed', aliveScroll.reason)
       return
@@ -2416,10 +2760,11 @@ async function runRoundsLoop(taskId: number, runToken: number, tabId: number): P
       return
     }
     if (scrollOutcome.status === 'cap_reached') {
-      // The session's own scroll_cap denied it - a normal, successful end
-      // of this run, never a failure or a pausable halt.
-      await endRunner(taskId, runToken, 'completed')
-      return
+      // The session's own scroll_cap denied it - this page is done. Never a
+      // failure or a pausable halt; either the next page, or a normal end.
+      const step = await nextPage()
+      if (step === 'returned') return
+      continue
     }
     if (scrollOutcome.status === 'error') {
       await endRunner(taskId, runToken, 'failed', scrollOutcome.reason)
@@ -2466,6 +2811,16 @@ async function runRoundsLoop(taskId: number, runToken: number, tabId: number): P
       duplicateCount: roundRecorded.duplicate_count ?? beforeScrollWrite.duplicateCount,
       noNewRounds: roundRecorded.no_new_rounds ?? beforeScrollWrite.noNewRounds,
     })
+    // Two consecutive barren rounds mean this page has stopped growing -
+    // measured behaviour, not a guess: every task on 2026-09-05 reported
+    // exactly 30 cards and then nothing. Move on while the task-level
+    // no-new threshold (3) still has room, because once *it* fires the task
+    // is completed and nothing may reset it.
+    if ((roundRecorded.no_new_rounds ?? 0) >= 2 && roundRecorded.run_status !== 'completed') {
+      const step = await nextPage()
+      if (step === 'returned') return
+      continue
+    }
     if (roundRecorded.run_status === 'completed') {
       // The backend's own consecutive-no-new-round threshold already ended
       // this run at the task level (`record_round`) - `skipTransition`
@@ -2476,6 +2831,7 @@ async function runRoundsLoop(taskId: number, runToken: number, tabId: number): P
       await endRunner(taskId, runToken, 'completed', undefined, { skipTransition: true })
       return
     }
+    round += 1
   }
 
   await endRunner(taskId, runToken, 'completed')
@@ -2609,6 +2965,9 @@ async function resumeRunner(binding?: PopupBinding, consoleTaskId?: number): Pro
     lastError: null,
     updatedAt: new Date().toISOString(),
   }
+  // Restore what the run was started as. `false` for every older pointer, so
+  // an unmarked run resumes strictly foreground.
+  backgroundSearchRun = updated.background === true
   await setRunnerPointer(updated)
   await patchBatchForTask(updated.taskId, { state: 'running', lastError: null })
   broadcastRunnerState(updated)
@@ -2673,6 +3032,7 @@ async function startBatch(
   taskIds: unknown,
   candidateCap: unknown,
   sender: chrome.runtime.MessageSender,
+  background = false,
 ): Promise<{ ok: boolean; error?: string }> {
   if (!validBatchTaskIds(taskIds)) return { ok: false, error: '批次必须包含 1–16 个不重复的待处理任务。' }
   if (!validCandidateCap(candidateCap)) return { ok: false, error: '候选上限必须是 1–20 的整数。' }
@@ -2697,9 +3057,12 @@ async function startBatch(
       validatedTasks.push(task)
     }
     const batch: BatchPointer = { taskIds: [...taskIds], candidateCap, currentIndex: 0,
-      state: 'running', tabId: null, lastError: null, updatedAt: new Date().toISOString() }
+      state: 'running', tabId: null, lastError: null, background,
+      updatedAt: new Date().toISOString() }
     await setBatchPointer(batch)
-    const started = await startRunner(taskIds[0], candidateCap, undefined, undefined, sender, true, undefined, false)
+    const started = await startRunner(
+      taskIds[0], candidateCap, undefined, undefined, sender, true, undefined, false, background,
+    )
     if (!started.ok) {
       await setBatchPointer({ ...batch, state: 'stopped',
         lastError: ('first_task_start_failed:' + (started.error || 'unknown')).slice(0, 120),
@@ -2759,6 +3122,7 @@ async function resumeBatch(
     }
     pendingSearchUrl = task.search_url
   }
+  backgroundSearchRun = pointer.background === true || batch.background === true
   const updated: RunnerPointer = { ...pointer, runToken: newToken, phase: pendingSearchUrl ? 'navigating' : 'processing',
     pauseRequested: false, pauseConfirmed: false, lastAction: 'batch_resumed_after_worker_restart',
     pausedReason: null, lastError: null, updatedAt: new Date().toISOString() }
@@ -3114,7 +3478,10 @@ async function executeM6Application(
       method: 'POST', body: observed,
     })
 
-    const alive = await verifyRunnerTab(tabId)
+    // Applying is never backgrounded: `true` is passed explicitly so this does
+    // not depend on the flag being unset (authorized 2026-09-04 covers search
+    // only).
+    const alive = await verifyRunnerTab(tabId, true)
     if (!alive.ok) {
       await settleM6Outcome(approval, observed, 'failed', `foreground_lost:${alive.reason}`)
       return { ok: false, application: { approvalId, outcome: 'failed', detail: alive.reason }, error: '领取尝试后前台状态变化；未点击且不会重试。' }
@@ -3147,7 +3514,7 @@ async function executeM6Application(
       for (let attempt = 0; attempt < M6_COMPOSER_ATTEMPTS; attempt++) {
         // Re-checked every time round: losing the foreground mid-wait must
         // stop this, not be noticed only at the end.
-        const alive = await verifyRunnerTab(tabId)
+        const alive = await verifyRunnerTab(tabId, true)
         if (!alive.ok) {
           status = 'foreground_lost'
           break
@@ -3246,9 +3613,39 @@ async function readSearchFilters(source: chrome.tabs.Tab): Promise<unknown> {
   return { ok: true, filterUrl: `${REQUIRED_ORIGIN}/web/geek/jobs?${kept.join('&')}` }
 }
 
+/** Read BOSS's own salary bands off the tab the human already has open.
+ *
+ * The same shape as `readSearchFilters`: one explicit console click, one
+ * read, no navigation and no clicking on the page. It never runs while a task
+ * is running, so it cannot interleave with a run's own page reads.
+ */
+async function readSalaryFilter(
+  source: chrome.tabs.Tab,
+): Promise<{ ok: boolean; error?: string; options?: { label: string; code: string }[] }> {
+  if (activeRunToken !== null || salaryOcrBusy) {
+    return { ok: false, error: '请先暂停正在运行的任务，再读取薪资档位。' }
+  }
+  if (source.windowId === undefined) return { ok: false, error: '找不到当前 Chrome 窗口。' }
+  const tab = await reusableBossTab(source.windowId)
+  if (!tab?.id || !tab.url || !isRunnerNavOrigin(tab.url)) {
+    return { ok: false, error: '请在同一 Chrome 窗口打开 BOSS 的职位搜索页。' }
+  }
+  const response = await askTab<{ options?: { label: string; code: string }[]
+    labels_without_code?: number; reason?: string | null }>(
+    tab.id, { type: 'jobagent:read-salary-filter' }, true)
+  if (!response.ok || !response.result) return { ok: false, error: '页面未就绪，请刷新 BOSS 搜索页后重试。' }
+  const options = response.result.options ?? []
+  if (!options.length) {
+    return { ok: false, error: response.result.reason === 'not_a_search_page'
+      ? '当前标签页不是 BOSS 职位搜索结果页。'
+      : '没有读到薪资档位。请在该页面点开「薪资待遇」菜单，再点一次本按钮。' }
+  }
+  return { ok: true, options }
+}
+
 async function consoleCommand(message: unknown, sender: chrome.runtime.MessageSender): Promise<unknown> {
   const data = message as { action?: string; taskId?: number; taskIds?: unknown; candidateCap?: unknown;
-    runId?: number; approvalId?: number; jobId?: number }
+    runId?: number; approvalId?: number; jobId?: number; background?: boolean }
   const foregroundAction = ['start', 'resume', 'start-batch', 'resume-batch',
     'start-salary-backfill', 'resume-salary-backfill', 'execute-application'].includes(data.action || '')
   const source = await consoleSourceTab(sender, foregroundAction)
@@ -3264,7 +3661,20 @@ async function consoleCommand(message: unknown, sender: chrome.runtime.MessageSe
       // like the old build is very hard to tell apart from a broken new one.
       capabilities: ['console-search-v1', 'console-batch-v1', 'salary-backfill-v1',
         'human-confirmed-apply-v1', 'skip-stored-candidates-v1',
-        'read-search-filters-v1'], runner: pointer ? {
+        'read-search-filters-v1', 'read-salary-filter-v1', 'background-search-v1',
+        'card-signature-dedup-v1'],
+      //: What this build actually enforces. Reported so the console can say
+      //: "the extension in your browser is an older build" instead of letting
+      //: a refusal surface as a number the page never mentioned - three
+      //: separate ceiling changes on 2026-09-05 each looked, from the page,
+      //: like the start button doing nothing.
+      limits: {
+        target: RUNNER_MAX_TARGET,
+        opens: RUNNER_MAX_CANDIDATES,
+        scrolls: RUNNER_MAX_SCROLL_ROUNDS,
+        pages: RUNNER_MAX_PAGES,
+      },
+      runner: pointer ? {
       taskId: pointer.taskId, phase: pointer.phase, paused: pointer.pauseRequested,
       paid: pointer.autoMatch === true, candidateCap: pointer.candidateCap,
     } : null, batch: batch ? {
@@ -3299,7 +3709,7 @@ async function consoleCommand(message: unknown, sender: chrome.runtime.MessageSe
       updatedAt: new Date().toISOString() } : null)
     return { ok: true }
   }
-  if (data.action === 'start-batch') return startBatch(data.taskIds, data.candidateCap, sender)
+  if (data.action === 'start-batch') return startBatch(data.taskIds, data.candidateCap, sender, data.background === true)
   if (data.action === 'pause-batch' || data.action === 'cancel-batch') {
     const batch = await getBatchPointer()
     const pointer = await getRunnerPointer()
@@ -3309,9 +3719,11 @@ async function consoleCommand(message: unknown, sender: chrome.runtime.MessageSe
     }
     return data.action === 'pause-batch' ? requestRunnerPause() : requestRunnerCancel()
   }
+  if (data.action === 'read-salary-filter') return readSalaryFilter(source)
   if (data.action === 'resume-batch') return resumeBatch(source)
   if (!Number.isSafeInteger(data.taskId) || data.taskId! <= 0) return { ok: false, error: 'bad_task_id' }
-  if (data.action === 'start') return startRunner(data.taskId!, data.candidateCap, undefined, undefined, sender)
+  if (data.action === 'start') return startRunner(data.taskId!, data.candidateCap, undefined, undefined,
+    sender, false, undefined, true, data.background === true)
   const pointer = await getRunnerPointer()
   if (!pointer || pointer.taskId !== data.taskId) return { ok: false, error: '本扩展没有该任务的运行记录，请刷新状态；不会操作其他任务。' }
   if (data.action === 'pause') return requestRunnerPause()

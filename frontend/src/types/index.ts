@@ -2284,6 +2284,7 @@ export interface SearchPlanOptions {
   supported_cities: string[]
   max_selected_cities: number
   max_batch_tasks: number
+  max_directions: number
 }
 export interface SalaryBackfillPlanItem {
   job_id: number
@@ -2341,4 +2342,44 @@ export interface AppliedBackfillPlan {
 export interface AppliedBackfillResult {
   recorded: number[]
   skipped: { job_id: number; error: string }[]
+}
+
+
+/** One prerequisite of a working installation. */
+export interface ReadinessCheck {
+  key: string
+  label: string
+  ok: boolean
+  detail: string
+  /** Empty when the check is informational rather than a blocker. */
+  fix: string
+  /** Whether an unmet check stops a search outright. The API key does not:
+   *  collection works without it, only AI analysis needs it. */
+  blocking: boolean
+}
+
+export interface ReadinessOut {
+  ready: boolean
+  version: string
+  checks: ReadinessCheck[]
+}
+
+
+/** What the app may know about the AI credentials. Never the key itself. */
+export interface AiSettingsOut {
+  configured: boolean
+  /** The last four characters, enough to tell two keys apart. */
+  hint: string
+  base_url: string
+  model_fast: string
+  model_smart: string
+  env_path: string
+}
+
+/** Absent fields are left unchanged. */
+export interface AiSettingsIn {
+  api_key?: string
+  base_url?: string
+  model_fast?: string
+  model_smart?: string
 }

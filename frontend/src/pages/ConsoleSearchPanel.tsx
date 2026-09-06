@@ -2,10 +2,40 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ApiError, api } from '@/api/client'
 import { Alert, Card, Modal } from '@/components/ui'
+import { startFullSalaryBackfill } from '@/pages/salaryBackfill'
 import { assessConsoleConnection, ConsoleConnectionError, consoleExtension,
   DEFAULT_BATCH_CANDIDATE_CAP, MAX_CONSOLE_BATCH_TASKS, selectBoundedPendingTasks } from '@/pages/consoleExtension'
 import type { ConsoleAction, ConsoleReply } from '@/pages/consoleExtension'
-import type { DirectionAnalysisPlan, DirectionChoice, SearchKeywordAnalytics, SearchPlanOptions, SearchPlanTask } from '@/types'
+import type { DirectionAnalysisPlan, DirectionChoice, ReadinessOut, SearchKeywordAnalytics, SearchPlanOptions, SearchPlanTask } from '@/types'
+
+//: A run that stops says why in one code. Until now that code was only
+//: visible behind 「显示细节」, so a stopped run looked like nothing happening
+//: at all - which is exactly how it was reported.
+const STOP_HINTS: Record<string, string> = {
+  not_foreground: '上一次运行是因为 BOSS 标签页离开前台才停的。勾选「后台搜索」再开始，切走就不会中断。',
+  content_unavailable: '页面没有响应扩展（多见于刚重新加载扩展之后）。刷新一下那个 BOSS 标签页再开始。',
+  tab_lost: 'BOSS 标签页被关掉了。重新打开一个已登录的 BOSS 页面再开始。',
+  wrong_origin: 'BOSS 标签页被导航到了别的网站，运行已停止。',
+  login_required: 'BOSS 要求登录。请在标签页里登录后再开始；扩展不会替你登录。',
+  verification: 'BOSS 出现了验证或风控页面。请自己处理完再开始；扩展不会绕过。',
+  capture_timeout: '详情面板没有在限定次数内加载出来。',
+  capture_timeout_skipped: '有岗位的详情面板一直没渲染出来，已跳过。后台标签页被别的窗口完全盖住时，Chrome 会停止渲染它 —— 把 BOSS 窗口留一条边露在外面（不必是当前窗口），就能一边搜一边干别的。',
+  salary_not_foreground: '读取薪资需要 BOSS 标签页在前台，而运行时你切走了。勾选「后台搜索」后会直接跳过薪资 OCR（薪资留空，之后用薪资补全），不会再因此中断。',
+  salary_tab_changed: '读取薪资时标签页状态变了，运行已停止。勾选「后台搜索」会跳过这一步。',
+}
+
+function stopHint(error: string | null | undefined): string | null {
+  if (!error) return null
+  //: A batch that cannot start its next task reports
+  //: `next_task_start_failed:start-v3/<reason>` - the same foreground family,
+  //: worth the same advice.
+  if (/start-v3\/|next_task_start_failed/.test(error)) {
+    return '批次停在了任务之间：下一个任务启动时 BOSS 标签页不在前台。勾选「后台搜索」再开始，整批都不会因为你切走而中断。'
+  }
+  const key = Object.keys(STOP_HINTS).find(code => error === code || error.startsWith(code + ':')
+    || error.endsWith(':' + code))
+  return key ? STOP_HINTS[key] : `上一次运行以「${error}」停止。`
+}
 
 function taskStatusLabel(task: SearchPlanTask): string {
   if (task.state === 'paused_login_required' || task.paused_reason === 'login_required') return '需要登录 BOSS'
@@ -16,6 +46,40 @@ function taskStatusLabel(task: SearchPlanTask): string {
 /** A pasted block is split on the newline character itself; `trim()` on
  *  each line removes the CR that a Windows clipboard leaves behind. */
 const SEGMENTS_KEY = 'jobagent.search.segments'
+const BANDS_KEY = 'jobagent.search.salaryBands'
+const AUTO_FILL_KEY = 'jobagent.search.autoFillSalary'
+const TARGET_KEY = 'jobagent.search.targetCount'
+const BACKGROUND_KEY = 'jobagent.search.background'
+const CHOSEN_BANDS_KEY = 'jobagent.search.salaryBandsChosen'
+
+export interface SalaryBand { label: string; code: string }
+
+/** Every access guarded: a private window or blocked site data throws rather
+ *  than returning empty, and an unusable store must not stop the page. */
+function loadBands(): SalaryBand[] {
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(BANDS_KEY) || '[]')
+    if (!Array.isArray(raw)) return []
+    return raw.filter((row: unknown): row is SalaryBand =>
+      Boolean(row) && typeof (row as SalaryBand).label === 'string'
+      && typeof (row as SalaryBand).code === 'string')
+  } catch { return [] }
+}
+
+function saveBands(bands: SalaryBand[]): void {
+  try { window.localStorage.setItem(BANDS_KEY, JSON.stringify(bands)) } catch { /* ignore */ }
+}
+
+function loadChosenBands(): string[] {
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(CHOSEN_BANDS_KEY) || '[]')
+    return Array.isArray(raw) ? raw.filter((v: unknown) => typeof v === 'string') : []
+  } catch { return [] }
+}
+
+function saveChosenBands(codes: string[]): void {
+  try { window.localStorage.setItem(CHOSEN_BANDS_KEY, JSON.stringify(codes)) } catch { /* ignore */ }
+}
 
 /** Remember the search segments between visits.
  *
@@ -56,7 +120,16 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
   const [hasRoles, setHasRoles] = useState(false)
   const [setupLoaded, setSetupLoaded] = useState(false)
   const [cap, setCap] = useState(3)
-  const [targetCount, setTargetCount] = useState(8)
+  //: Remembered per browser, so a number typed once stays typed. Defaults to
+  //: the opened-detail ceiling: asking for fewer only makes a direction stop
+  //: earlier, and the ceiling is what limits the work either way.
+  const [targetCount, setTargetCount] = useState(() => {
+    try {
+      const stored = Number(window.localStorage.getItem(TARGET_KEY))
+      if (Number.isInteger(stored) && stored >= 1 && stored <= 60) return stored
+    } catch { /* private window or blocked site data */ }
+    return 60
+  })
   const [batchSize, setBatchSize] = useState(2)
   const [batchCap, setBatchCap] = useState(DEFAULT_BATCH_CANDIDATE_CAP)
   const [tasks, setTasks] = useState<SearchPlanTask[]>([])
@@ -68,6 +141,59 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
   const [chosenNotes, setChosenNotes] = useState<string[]>([])
   //: The AI's read of the résumé. Loaded on open because reading is free; the
   //: analysis itself only runs on an explicit click.
+  //: Let the search keep going while the BOSS tab sits behind other
+  //: windows. Authorized for search only - applying stays foreground and
+  //: per-job confirmed. Off unless chosen, every run.
+  //: BOSS's own salary bands, read once off a page the user had open. Kept
+  //: in this browser like the segment box - it is one machine's convenience,
+  //: and `career_strategy.yaml` is never written automatically.
+  const [salaryBands, setSalaryBands] = useState<SalaryBand[]>(() => loadBands())
+  const [chosenBands, setChosenBands] = useState<string[]>(() => loadChosenBands())
+  const [bandBusy, setBandBusy] = useState(false)
+  //: Reading the bands is a pure DOM read on a tab the human already has open,
+  //: so there is no reason to make them press a button for it. Tried once per
+  //: page load, only while nothing is running, and only when none are stored.
+  //: Silent on failure - BOSS may keep the options out of the DOM until the
+  //: menu is opened, and that is what the button is still there for.
+  const bandsProbed = useRef(false)
+  //: How many stored jobs still have no salary. A search cannot read most of
+  //: them - BOSS renders the salary in a private-use font in the results list
+  //: and in the pane beside it, while the standalone detail page shows it
+  //: plainly - so the backfill is a second pass by design, not a bug. What was
+  //: wrong is that its prompt lived further down the console, where a run that
+  //: had just finished did not point at it.
+  const [missingSalaries, setMissingSalaries] = useState<number | null>(null)
+  //: Collection outran analysis: 178 jobs sat unanalysed after one day of
+  //: searching, which makes them invisible - nobody knows which are worth
+  //: applying to. Counting is free and calls no model; spending still happens
+  //: only in the jobs page, behind its own plan-then-confirm gate showing the
+  //: exact number of calls.
+  const [unanalysed, setUnanalysed] = useState<number | null>(null)
+  //: Every "the button does nothing" this project produced for a new pair of
+  //: hands was one unmet prerequisite that the page never named.
+  const [readiness, setReadiness] = useState<ReadinessOut | null>(null)
+  const [salaryBusy, setSalaryBusy] = useState(false)
+  const [salaryNote, setSalaryNote] = useState('')
+  //: BOSS renders the salary in a private-use font everywhere a search can
+  //: see it, so a newly collected job almost always arrives without one and
+  //: the backfill is a second pass by design. Having to remember that pass
+  //: after every single search is the part that was not by design. Authorized
+  //: 2026-09-05 to chain it automatically; the checkbox turns it back off, and
+  //: every stop condition of the backfill itself is unchanged.
+  const [autoFillSalary, setAutoFillSalary] = useState(() => {
+    try { return window.localStorage.getItem(AUTO_FILL_KEY) !== 'off' } catch { return true }
+  })
+  //: One chain per finished batch. Without this the effect below would restart
+  //: the backfill on every status refresh while the count stays above zero.
+  const autoFilled = useRef(false)
+  //: Let the search keep going while the BOSS tab sits behind other windows.
+  //: Authorized for search only - applying stays foreground and per-job
+  //: confirmed. Off until chosen once, then remembered: a run is hours long
+  //: now, and a choice that silently reset itself failed a run ten seconds in
+  //: with `not_foreground` while the option sat collapsed out of sight.
+  const [runInBackground, setRunInBackground] = useState(() => {
+    try { return window.localStorage.getItem(BACKGROUND_KEY) === 'on' } catch { return false }
+  })
   const [filterBusy, setFilterBusy] = useState(false)
   const [filterNote, setFilterNote] = useState('')
   const [aiPlan, setAiPlan] = useState<DirectionAnalysisPlan | null>(null)
@@ -207,6 +333,89 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
    * the step that kept getting skipped. Read-only: the extension reports one
    * tab's URL parameters and touches nothing.
    */
+  const loadReadiness = useCallback(async () => {
+    try { setReadiness(await api.getReadiness()) } catch { setReadiness(null) }
+  }, [])
+
+  const loadUnanalysed = useCallback(async () => {
+    try {
+      setUnanalysed((await api.listJobs({ analyzed: false, limit: 1 })).total)
+    } catch {
+      setUnanalysed(null)
+    }
+  }, [])
+
+  const loadMissingSalaries = useCallback(async () => {
+    try {
+      setMissingSalaries((await api.getSalaryBackfillPlan()).salary_missing)
+    } catch {
+      setMissingSalaries(null)
+    }
+  }, [])
+
+  async function fillSalaries(automatic = false) {
+    if (salaryBusy) return
+    setSalaryBusy(true); setSalaryNote('')
+    try {
+      const result = await startFullSalaryBackfill()
+      setSalaryNote(automatic ? '搜索完成，已自动开始补全薪资。' + result.message : result.message)
+      await loadMissingSalaries()
+    } catch (err) {
+      setSalaryNote(err instanceof ApiError ? err.message : '启动薪资补全失败。')
+    } finally { setSalaryBusy(false) }
+  }
+
+  useEffect(() => {
+    if (bandsProbed.current || salaryBands.length || bandBusy) return
+    if (!connection?.capabilities?.includes('read-salary-filter-v1')) return
+    if (connection.runner || connection.batch?.state === 'running') return
+    bandsProbed.current = true
+    void (async () => {
+      try {
+        const reply = await consoleExtension('read-salary-filter')
+        const bands = (reply.options ?? []).filter(row => row.label !== '不限')
+        if (reply.ok && bands.length) { setSalaryBands(bands); saveBands(bands) }
+      } catch { /* silent: the button is the explicit path */ }
+    })()
+  }, [connection, salaryBands.length, bandBusy])
+
+  useEffect(() => {
+    if (!autoFillSalary || salaryBusy || autoFilled.current) return
+    const running = connection?.batch?.state === 'running' || connection?.batch?.state === 'paused'
+    if (connection?.runner || running) { autoFilled.current = false; return }
+    if (connection?.batch?.state !== 'completed' || !missingSalaries) return
+    autoFilled.current = true
+    void fillSalaries(true)
+  }, [autoFillSalary, salaryBusy, connection, missingSalaries])
+
+  async function readSalaryBands() {
+    if (bandBusy) return
+    setBandBusy(true); setFilterNote('')
+    try {
+      const reply = await consoleExtension('read-salary-filter')
+      if (!reply.ok || !reply.options?.length) {
+        setFilterNote(reply.error || '没有读到薪资档位。')
+        return
+      }
+      // 不限 is a real BOSS option and never a useful segment - a segment that
+      // filters nothing is the unfiltered search again.
+      const bands = reply.options.filter(row => row.label !== '不限')
+      setSalaryBands(bands)
+      saveBands(bands)
+      setFilterNote(`读到 ${bands.length} 个薪资档位。请核对下面的档位与代码是否和 BOSS 页面一致，再勾选要拆分的档位。`)
+    } catch (err) {
+      setFilterNote(err instanceof Error ? err.message : '读取失败')
+    } finally { setBandBusy(false) }
+  }
+
+  function toggleBand(code: string) {
+    setChosenBands(current => {
+      const next = current.includes(code) ? current.filter(v => v !== code) : [...current, code]
+      saveChosenBands(next)
+      return next
+    })
+  }
+
   async function readFiltersFromBoss() {
     if (filterBusy) return
     setFilterBusy(true); setFilterNote('')
@@ -257,10 +466,13 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     alive.current = true
     void loadSetup()
     void refresh()
+    void loadMissingSalaries()
+    void loadUnanalysed()
+    void loadReadiness()
     const visible = () => { if (document.visibilityState === 'visible') void refresh() }
     document.addEventListener('visibilitychange', visible)
     return () => { alive.current = false; refreshSequence.current++; document.removeEventListener('visibilitychange', visible) }
-  }, [loadSetup, refresh])
+  }, [loadSetup, refresh, loadMissingSalaries, loadUnanalysed, loadReadiness])
 
   async function prepare(event: React.FormEvent) {
     event.preventDefault()
@@ -280,8 +492,16 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
   async function prepareQuick(event: React.FormEvent) {
     event.preventDefault()
     if (admission.current || !cities.length) return
-    if (!Number.isInteger(targetCount) || targetCount < 1 || targetCount > 20) {
-      setError('岗位数量必须是 1–20 的整数。')
+    if (!Number.isInteger(targetCount) || targetCount < 1 || targetCount > 60) {
+      setError('岗位数量必须是 1–60 的整数。')
+      return
+    }
+    // The loaded extension is the one that enforces this, and a build older
+    // than the page refuses the number without ever naming it.
+    const workerTarget = connection?.limits?.target
+    if (workerTarget !== undefined && targetCount > workerTarget) {
+      setError(`浏览器里的扩展是旧版本，每个方向最多只接受 ${workerTarget} 个。`
+        + '请在 chrome://extensions 重新加载扩展，或把数量调到该上限以内。')
       return
     }
     if (!connection?.capabilities?.includes('console-batch-v1')) {
@@ -290,7 +510,8 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     }
     admission.current = true; setBusy(true); setError(''); setMessage('')
     try {
-      const prepared = await api.prepareResumeSearch(cities, targetCount, filterLines)
+      const prepared = await api.prepareResumeSearch(
+        cities, targetCount, filterLines, activeBandCodes)
       const nextTasks = prepared.tasks
       if (!nextTasks.length) throw new Error('没有生成可执行的搜索任务。')
       const nextIds = new Set(nextTasks.map(row => row.id))
@@ -322,8 +543,8 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     if ((action === 'start' || action === 'resume') && (!backendReady || !connection || checking)) return
     // Call the bridge immediately in the trusted click turn: no async preparation
     // before browser handoff, and never include a paid match approval.
-    if (action === 'start' && (!Number.isInteger(cap) || cap < 1 || cap > 20)) {
-      setError('候选上限必须是 1–20 的整数。'); return
+    if (action === 'start' && (!Number.isInteger(cap) || cap < 1 || cap > 60)) {
+      setError('候选上限必须是 1–60 的整数。'); return
     }
     if (action === 'start' || action === 'resume') {
       if (!approved) {
@@ -340,9 +561,16 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     }
     admission.current = true; setBusy(true); setError(''); setMessage('')
     try {
-      const result = await consoleExtension(action, task.id, cap)
+      // Only a start carries the choice. A resume restores whatever the run
+      // was started as, from the run's own pointer.
+      const result = await consoleExtension(
+        action, task.id, cap, undefined, undefined, undefined, undefined,
+        action === 'start' ? runInBackground : undefined,
+      )
       if (!result.ok) throw new Error(result.error || '未确认执行，请刷新状态。')
-      setMessage('请求已接收。BOSS 页顶部显示执行进度；返回控制台会刷新后端状态。切换离开 BOSS 会停止后续浏览器动作。')
+      setMessage(runInBackground && action === 'start'
+        ? '请求已接收（后台搜索）。BOSS 标签页被挡住也会继续；关闭它或离开 BOSS 仍会停止。进度回到本页查看。'
+        : '请求已接收。BOSS 页顶部显示执行进度；返回控制台会刷新后端状态。切换离开 BOSS 会停止后续浏览器动作。')
       await refresh()
     } catch (err) { setError(err instanceof Error ? err.message : '请求失败') }
     finally { admission.current = false; setBusy(false) }
@@ -354,8 +582,8 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     if (!connection.capabilities?.includes('console-batch-v1')) {
       setError('当前扩展版本不支持有界批次，请更新扩展后刷新连接。'); return
     }
-    if (!Number.isInteger(batchCap) || batchCap < 1 || batchCap > 20) {
-      setError('批次候选上限必须是 1–20 的整数。'); return
+    if (!Number.isInteger(batchCap) || batchCap < 1 || batchCap > 60) {
+      setError('批次候选上限必须是 1–60 的整数。'); return
     }
     let pending: SearchPlanTask[]
     try { pending = selectBoundedPendingTasks(tasks, batchSize) }
@@ -388,7 +616,10 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     }
     admission.current = true; setBusy(true); setError(''); setMessage('')
     try {
-      const result = await consoleExtension(action, undefined, approvedBatchCap, taskIds)
+      const result = await consoleExtension(
+        action, undefined, approvedBatchCap, taskIds, undefined, undefined, undefined,
+        action === 'start-batch' ? runInBackground : undefined,
+      )
       if (!result.ok) throw new Error(result.error || '批次操作未确认，请刷新状态。')
       setMessage(action === 'start-batch'
         ? '综合搜索已接收。扩展一次只运行一个搜索单元；任何失败或验证都会停止后续搜索。'
@@ -399,9 +630,15 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
   }
 
   const owned = connection?.runner?.taskId === selected
+  // A chosen code that is no longer among the read bands is dropped rather
+  // than sent: it would be a code with no label behind it.
+  const activeBandCodes = salaryBands
+    .filter(band => chosenBands.includes(band.code))
+    .map(band => band.code)
   const batchActive = connection?.batch?.state === 'running' || connection?.batch?.state === 'paused'
   const setupReady = setupLoaded && hasResume && hasRoles && cities.length > 0
-  return <Card title="搜索适合我的岗位" sub="选择城市和数量；JobAgent 会综合当前简历与职业方向，覆盖多个相关岗位方向。">
+  //: No title: the page header directly above already carries it.
+  return <Card>
     <div className="row mb-1">
       <span className={`badge ${backendReady && connection ? 'badge-good' : 'badge-neutral'}`}>
         {backendReady && connection ? '已准备好' : '连接未就绪'}
@@ -411,30 +648,143 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       </span>
     </div>
 
+    {readiness && !readiness.ready ? (
+      <Alert tone="warn">
+        <strong>还差几项才能开始</strong>
+        <ul className="bullet-list mt-1">
+          {readiness.checks.filter(check => !check.ok).map(check => (
+            <li key={check.key}>
+              {check.label}：{check.detail}
+              {check.fix ? <span className="faint">　—　{check.fix}</span> : null}
+            </li>
+          ))}
+        </ul>
+      </Alert>
+    ) : null}
+
     {setupLoaded && !setupReady ? <Alert tone="warn">
       一键搜索需要当前简历、至少一个受支持城市和至少一个岗位方向。
       <Link to="/setup">完成个人设置</Link>
     </Alert> : null}
 
     <form onSubmit={prepareQuick} className="form-grid">
-      <fieldset className="choice-group"><legend>意向城市（可多选）</legend>
-        <div className="row">{searchOptions?.supported_cities.map(option =>
-          <label key={option} className="check-label"><input type="checkbox" checked={cities.includes(option)}
-            onChange={e => setCities(current => {
-              if (!e.target.checked) return current.filter(value => value !== option)
+      {/* Toggle chips rather than a checkbox grid: four cities is a choice,
+          not a form. `aria-pressed` carries the state for assistive tech and
+          drives the accent styling that already exists in app.css. */}
+      <fieldset className="choice-group"><legend>意向城市</legend>
+        <div className="btn-row">{searchOptions?.supported_cities.map(option =>
+          <button
+            key={option}
+            type="button"
+            className="btn-sm"
+            aria-pressed={cities.includes(option)}
+            onClick={() => setCities(current => {
+              if (current.includes(option)) return current.filter(value => value !== option)
               if (current.length >= (searchOptions?.max_selected_cities ?? 4)) {
                 setError(`最多选择 ${searchOptions?.max_selected_cities ?? 4} 个城市。`)
                 return current
               }
               setError('')
               return [...current, option]
-            })} />{option}</label>)}</div>
+            })}
+          >{option}</button>)}</div>
       </fieldset>
-      <label>每个方向希望搜索的岗位数（1–20）<input type="number" min={1} max={20} value={targetCount}
-        onChange={e => setTargetCount(Number(e.target.value))} /></label>
-      <button className="btn btn-primary" disabled={busy || checking || !backendReady || !connection
+      <div className="field-inline">
+        <label htmlFor="target-count">每个方向收集</label>
+        <input id="target-count" type="number" min={1} max={60} value={targetCount}
+          onChange={e => {
+            const next = Number(e.target.value)
+            setTargetCount(next)
+            try { window.localStorage.setItem(TARGET_KEY, String(next)) } catch { /* ignore */ }
+          }} />
+        <span>个新岗位</span>
+        <span className="small faint">库里已有的会跳过，不占名额；每个方向最多打开 60 个详情。</span>
+      </div>
+
+      {/* Both of these are remembered and both default to on, so the page
+          does not need to ask again every time. Open the row to change them. */}
+      <details>
+      <summary className="small">
+        搜索选项：{runInBackground
+          ? '后台搜索'
+          : <strong>前台搜索（切走会立即停止）</strong>} ·{' '}
+        {autoFillSalary ? '结束后自动补薪资' : '不自动补薪资'}
+        {activeBandCodes.length ? ` · 按 ${activeBandCodes.length} 个薪资档分段` : ''}
+      </summary>
+      <div className="checkbox-row mt-1">
+        <input
+          id="run-background"
+          type="checkbox"
+          checked={runInBackground}
+          onChange={e => {
+            setRunInBackground(e.target.checked)
+            try { window.localStorage.setItem(BACKGROUND_KEY, e.target.checked ? 'on' : 'off') } catch { /* ignore */ }
+          }}
+        />
+        <label htmlFor="run-background">
+          后台搜索：BOSS 标签页被其他窗口挡住时继续搜索，你可以同时做别的
+        </label>
+      </div>
+      <p className="small faint indent">
+        只影响搜索，投递仍需前台确认。登录、验证码、风控照样立即停止，但你不会当场看见——回本页查看。
+      </p>
+      <div className="checkbox-row">
+        <input
+          id="auto-fill-salary"
+          type="checkbox"
+          checked={autoFillSalary}
+          onChange={e => {
+            setAutoFillSalary(e.target.checked)
+            try { window.localStorage.setItem(AUTO_FILL_KEY, e.target.checked ? 'on' : 'off') } catch { /* ignore */ }
+          }}
+        />
+        <label htmlFor="auto-fill-salary">搜索结束后自动补全薪资</label>
+      </div>
+      <p className="small faint indent">
+        BOSS 的列表和详情面板里薪资是特殊字体，读不到；补全会去岗位详情页取。
+      </p>
+      {salaryBands.length && !activeBandCodes.length ? (
+        <div className="row">
+          <span className="small">
+            读到 {salaryBands.length} 个薪资档位。按薪资分段搜索可以让 BOSS 换出不同的列表——
+            可触及岗位翻几倍，代价是一次能跑的岗位方向变少。
+          </span>
+          <button type="button" className="btn-sm" onClick={() => {
+            const codes = salaryBands.map(band => band.code)
+            setChosenBands(codes)
+            saveChosenBands(codes)
+          }}>按薪资分段搜索</button>
+        </div>
+      ) : null}
+      {activeBandCodes.length ? (
+        <p className="small faint">
+          已按 {activeBandCodes.length} 个薪资档分段搜索（每段各有完整名额）。
+          <button type="button" className="btn-ghost btn-sm" onClick={() => {
+            setChosenBands([])
+            saveChosenBands([])
+          }}>取消分段</button>
+        </p>
+      ) : null}
+      {searchOptions && cities.length ? (
+        <p className="small faint">
+          本次将创建{' '}
+          <strong>
+            {Math.min(searchOptions.max_batch_tasks,
+              Math.max(1, Math.floor(searchOptions.max_batch_tasks
+                / (cities.length * Math.max(1, activeBandCodes.length))))
+              * cities.length * Math.max(1, activeBandCodes.length))}
+          </strong>{' '}
+          个搜索单元（上限 {searchOptions.max_batch_tasks}）：{cities.length} 城市 ×{' '}
+          最多 {Math.min(searchOptions.max_directions,
+            Math.max(1, Math.floor(searchOptions.max_batch_tasks
+              / (cities.length * Math.max(1, activeBandCodes.length)))))} 个方向
+          {activeBandCodes.length ? ` × ${activeBandCodes.length} 个薪资档` : ''}。
+        </p>
+      ) : null}
+      </details>
+      <button className="btn btn-primary btn-lg" disabled={busy || checking || !backendReady || !connection
         || !setupReady || !!connection.runner || batchActive}>
-        {busy ? '正在准备…' : '一键搜索适合我的岗位'}
+        {busy ? '正在准备…' : '开始搜索'}
       </button>
     </form>
 
@@ -443,16 +793,48 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       <div className="small faint">
         {portfolioCities.join('、')} · {portfolioDirections.length} 个岗位方向 · {portfolioTasks.length} 个有限搜索单元
       </div>
-      <div className="mt-1">
-        整体进度：{portfolioCompleted}/{portfolioTasks.length} · 看到岗位卡片 {portfolioObserved} 张 · 新入库 {portfolioImported} 个
+      <div className="grid grid-stats mt-1">
+        <div className="stat">
+          <span className="stat-label">进度</span>
+          <span className="stat-value">{portfolioCompleted}<span className="stat-hint"> / {portfolioTasks.length}</span></span>
+        </div>
+        <div className="stat">
+          <span className="stat-label">看到岗位卡片</span>
+          <span className="stat-value">{portfolioObserved}</span>
+        </div>
+        <div className="stat">
+          <span className="stat-label">新入库</span>
+          <span className="stat-value">{portfolioImported}</span>
+        </div>
       </div>
       {/* "已发现 960 · 已入库 65" invited exactly the wrong reading: that 895
           jobs were lost. Cards seen and jobs imported are different quantities
           measured at different stages, so the line now says which is which. */}
       {portfolioObserved > portfolioImported ? (
         <div className="small faint">
-          两者不该相等：每个方向最多只打开 {portfolioTasks[0]?.max_candidates ?? 20} 个岗位详情，
-          且同一岗位在不同方向、不同轮次里会重复出现——已在库中的不会重复入库。
+          两者不该相等：一张卡片只有在库里没有时才会被打开，
+          每个方向最多打开 60 个详情、最多滚动 30 轮；
+          同一岗位在不同方向、不同轮次里会重复出现——已在库中的不会重复入库。
+        </div>
+      ) : null}
+      {missingSalaries && !connection?.runner && !batchActive ? (
+        <div className="row mt-1">
+          <span className="small">
+            {missingSalaries} 个岗位还没有薪资{autoFillSalary ? '（搜索结束后会自动补全）' : ''}。
+          </span>
+          <button type="button" className="btn-primary btn-sm" disabled={salaryBusy}
+            onClick={() => void fillSalaries()}>
+            {salaryBusy ? '正在启动…' : '补全薪资'}
+          </button>
+        </div>
+      ) : null}
+      {salaryNote ? <p className="small faint">{salaryNote}</p> : null}
+      {unanalysed && !connection?.runner && !batchActive ? (
+        <div className="row mt-1">
+          <span className="small">
+            {unanalysed} 个岗位还没做 AI 分析——在分析之前，你看不出哪些值得投。
+          </span>
+          <Link className="btn-sm btn-primary" to="/jobs?analyzed=false">去分析</Link>
         </div>
       ) : null}
       {portfolioTasks.some(row => row.state === 'paused_login_required' || row.paused_reason === 'login_required')
@@ -467,7 +849,7 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
           onClick={() => void batchCommand('cancel-batch')}>取消</button>
         <Link className="btn btn-secondary" to="/jobs">查看岗位库</Link>
       </div>
-    </div> : <p className="small faint mt-1">只需选择城市和数量；系统会从当前简历关联的职业策略中选取最多 8 个相关方向，组合成一次综合搜索。</p>}
+    </div> : null}
 
 
     {connection?.capabilities && !connection.capabilities.includes('skip-stored-candidates-v1') ? (
@@ -516,6 +898,8 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
         )}
         {aiError ? <p className="small mt-1">{aiError}</p> : null}
         {aiPlan.directions.length ? (
+          <details>
+          <summary className="small">按方向看简历支撑度</summary>
           <table className="mt-1">
             <thead><tr><th>方向</th><th>简历支撑度</th><th>依据</th></tr></thead>
             <tbody>
@@ -531,59 +915,11 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
               ))}
             </tbody>
           </table>
+          </details>
         ) : null}
       </div>
     ) : null}
 
-    <div className="field mt-1">
-      <label htmlFor="filter-urls">搜索分段（可选，每行一个 BOSS 搜索链接）</label>
-      <textarea
-        id="filter-urls"
-        rows={3}
-        value={filterUrls}
-        placeholder={'https://www.zhipin.com/web/geek/jobs?city=101010100&salary=406&query=...'}
-        onChange={e => {
-          setFilterUrls(e.target.value)
-          saveSegments(e.target.value)
-        }}
-      />
-      <p className="small faint">
-        BOSS 的结果按相关度排序且没有「最新发布」，所以同一个关键词每次都命中同一批岗位。
-        在你自己的浏览器里点好筛选（薪资、区域…），把地址栏粘进来，
-        每行会成为一个独立的搜索分段，各自拥有完整的候选名额。
-        只读取筛选参数；城市与岗位方向仍由上面的选择和简历排序决定。
-      </p>
-      <div className="row mt-1">
-        <button
-          type="button"
-          className="btn-sm"
-          disabled={filterBusy || !connection?.capabilities?.includes('read-search-filters-v1')}
-          onClick={() => void readFiltersFromBoss()}
-        >
-          {filterBusy ? '读取中…' : '读取当前 BOSS 标签页的筛选条件'}
-        </button>
-        {portfolioTasks[0]?.search_url ? (
-          <a href={portfolioTasks[0].search_url} target="_blank" rel="noreferrer" className="small">
-            打开 BOSS 搜索页 ↗
-          </a>
-        ) : null}
-        <span className="small faint">
-          在 BOSS 上点好「工作经验」「薪资待遇」等筛选，回来点左边的按钮即可 —— 不用复制粘贴。
-        </span>
-      </div>
-      {filterNote ? <p className="small faint">{filterNote}</p> : null}
-      {connection?.capabilities && !connection.capabilities.includes('read-search-filters-v1') ? (
-        <p className="small faint">浏览器里的扩展还是旧版本，读取按钮不可用；重新加载扩展后可用。</p>
-      ) : null}
-
-      {filterLines.length ? (
-        <p className="small faint">
-          {filterLines.length} 个分段 · 岗位方向会相应减少，总搜索单元数不变（上限 16）。
-          已记住，下次打开仍然生效；清空这个框即可停用。
-          {segmentSummary ? <><br />识别到的筛选：{segmentSummary}</> : null}
-        </p>
-      ) : null}
-    </div>
 
     {chosen.length ? (
       <div className="card-block mt-1">
@@ -629,6 +965,99 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     </button>
 
     {showAdvanced ? <div className="card-block mt-1">
+      <section aria-label="薪资分段">
+    <details className="mt-1">
+    <summary className="small">按粘贴的筛选链接分段（可选）</summary>
+    <div className="field mt-1">
+      <label htmlFor="filter-urls">每行一个 BOSS 搜索链接</label>
+      <textarea
+        id="filter-urls"
+        rows={3}
+        value={filterUrls}
+        placeholder={'https://www.zhipin.com/web/geek/jobs?city=101010100&salary=406&query=...'}
+        onChange={e => {
+          setFilterUrls(e.target.value)
+          saveSegments(e.target.value)
+        }}
+      />
+      <p className="small faint">
+        同一个关键词每次命中同一批岗位，换筛选才会换结果。每行一个分段，各有完整名额；
+        只读取筛选参数，城市和方向仍由上面决定。
+      </p>
+      <div className="row mt-1">
+        <button
+          type="button"
+          className="btn-sm"
+          disabled={filterBusy || !connection?.capabilities?.includes('read-search-filters-v1')}
+          onClick={() => void readFiltersFromBoss()}
+        >
+          {filterBusy ? '读取中…' : '读取当前 BOSS 标签页的筛选条件'}
+        </button>
+        {portfolioTasks[0]?.search_url ? (
+          <a href={portfolioTasks[0].search_url} target="_blank" rel="noreferrer" className="small">
+            打开 BOSS 搜索页 ↗
+          </a>
+        ) : null}
+        <span className="small faint">在 BOSS 上点好筛选，回来点这里，不用复制粘贴。</span>
+      </div>
+      {filterNote ? <p className="small faint">{filterNote}</p> : null}
+      {connection?.capabilities && !connection.capabilities.includes('read-search-filters-v1') ? (
+        <p className="small faint">浏览器里的扩展还是旧版本，读取按钮不可用；重新加载扩展后可用。</p>
+      ) : null}
+
+      {filterLines.length ? (
+        <p className="small faint">
+          {filterLines.length} 个分段 · 岗位方向会相应减少，总搜索单元数不变（上限 16）。
+          已记住，下次打开仍然生效；清空这个框即可停用。
+          {segmentSummary ? <><br />识别到的筛选：{segmentSummary}</> : null}
+        </p>
+      ) : null}
+    </div>
+    </details>
+      <details className="mt-1">
+        <summary className="small">薪资分段（可选：把一个方向拆成几段，各自有独立名额）</summary>
+      <div className="field mt-1">
+        <div className="row">
+          <button
+            type="button"
+            className="btn-sm"
+            disabled={bandBusy || !connection?.capabilities?.includes('read-salary-filter-v1')}
+            onClick={() => void readSalaryBands()}
+          >
+            {bandBusy ? '读取中…' : salaryBands.length ? '重新读取薪资档位' : '从 BOSS 页面读取薪资档位'}
+          </button>
+          <span className="small faint">
+            在你打开的 BOSS 搜索页点开「薪资待遇」菜单，再点这里。只读取，不点击、不改动页面。
+          </span>
+        </div>
+        {salaryBands.length ? (
+          <div className="chip-list mt-1">
+            {salaryBands.map(band => (
+              <label key={band.code} className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={chosenBands.includes(band.code)}
+                  onChange={() => toggleBand(band.code)}
+                />
+                <span>{band.label} <span className="faint mono">salary={band.code}</span></span>
+              </label>
+            ))}
+          </div>
+        ) : null}
+        {activeBandCodes.length ? (
+          <p className="small faint">
+            已选 {activeBandCodes.length} 段；一次最多 16 个搜索单元，所以分段会占用方向数——
+            {cities.length} 城 × {activeBandCodes.length} 段 最多剩{' '}
+            {Math.max(1, Math.floor(16 / Math.max(1, cities.length * activeBandCodes.length)))} 个方向。
+          </p>
+        ) : (
+          <p className="small faint">
+            档位和代码都来自 BOSS 页面本身，这里不猜——用之前请核对一眼。
+          </p>
+        )}
+      </div>
+      </details>
+      </section>
       <section aria-label="连接诊断">
         <p>本机服务：{backendDetail}。任务接口：{planDetail}。</p>
         <p>扩展诊断：{bridgeDetail}</p>
@@ -661,7 +1090,7 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       }}><option value="">请选择</option>{tasks.map(row => <option key={row.id} value={row.id}>
         #{row.id} · {row.city} · {row.keywords} · {row.state}
       </option>)}</select></label>
-      <label>单任务候选上限（1–20）<input type="number" min={1} max={20} value={cap}
+      <label>单任务候选上限（1–60）<input type="number" min={1} max={60} value={cap}
         disabled={busy} onChange={e => setCap(Number(e.target.value))} /></label>
 
       <section aria-label="有界搜索批次" className="mt-1">
@@ -669,7 +1098,7 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
         <p className="small faint">内部逐个运行最多 {MAX_CONSOLE_BATCH_TASKS} 个待执行搜索单元。</p>
         <label>搜索单元数（1–{MAX_CONSOLE_BATCH_TASKS}）<input type="number" min={1} max={MAX_CONSOLE_BATCH_TASKS} value={batchSize}
           disabled={busy || batchActive} onChange={e => setBatchSize(Number(e.target.value))} /></label>
-        <label>每个任务候选上限（1–20）<input type="number" min={1} max={20} value={batchCap}
+        <label>每个任务候选上限（1–60）<input type="number" min={1} max={60} value={batchCap}
           disabled={busy || batchActive} onChange={e => setBatchCap(Number(e.target.value))} /></label>
         <div className="actions">
           <button className="btn btn-primary" disabled={busy || checking || !backendReady || !connection
@@ -723,6 +1152,20 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       <p>无定时后台启动、无 AI 匹配费用，不投递、不收藏、不发消息。</p>
     </Modal>}
     {error && <p role="alert">{error}</p>}{message && <p role="status">{message}</p>}
+    {(() => {
+      // The most recent stopped run in this plan - a failure the user has not
+      // been shown is indistinguishable from "nothing happened".
+      const stopped = [...portfolioTasks, ...(task ? [task] : [])]
+        .filter(row => row.last_error && (row.state === 'failed'
+          || row.last_action === 'skipped_capture_timeout'))
+        .sort((a, b) => (a.updated_at || '').localeCompare(b.updated_at || ''))
+        .pop()
+      // A batch that stopped between tasks leaves its reason on the batch, not
+      // on any task - and that is precisely the "it just stopped" case.
+      const batchStopped = connection?.batch?.state === 'stopped' ? connection.batch.lastError : null
+      const hint = stopHint(batchStopped) || stopHint(stopped?.last_error)
+      return hint ? <Alert tone="warn">{hint}</Alert> : null
+    })()}
     {showAdvanced && task ? <div className="small faint mt-1">
       任务 #{task.id} · 滚动 {task.scroll_round}/5 · 已渲染 {task.visible_jobs} · 新增 {task.new_jobs} ·
       重复 {task.duplicate_jobs} · 连续无新增 {task.no_new_rounds}<br />

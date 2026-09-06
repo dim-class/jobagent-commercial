@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 
+import pytest
+
 from app.models import Job, JobAnalysis, JobSearchTask, JobStatus, TaskCandidate, Verdict
 from app.services import search_direction_ranking as sdr
 
@@ -152,3 +154,103 @@ def test_the_comprehensive_search_uses_the_ranking_and_reports_why(
     assert set(used) == {task["keywords"] for task in body["tasks"]}
     assert "基础设施" not in used or used[-1] == "基础设施"
     assert body["direction_notes"], "and why"
+
+
+# ---------------------------------------------------------------------------
+# A keyword BOSS returns nothing for
+# ---------------------------------------------------------------------------
+
+
+def _completed_search(db, keyword: str, observed: int):
+    from app.models import JobSearchTask
+    from app.models.enums import SearchTaskRunStatus, TaskMode
+
+    db.add(
+        JobSearchTask(
+            name=f"北京 · {keyword}",
+            keywords=keyword,
+            city="北京",
+            is_search_plan=True,
+            mode=TaskMode.manual_review_only,
+            run_status=SearchTaskRunStatus.completed,
+            observed_count=observed,
+        )
+    )
+    db.commit()
+
+
+def test_a_keyword_that_never_rendered_a_card_is_penalised(db, active_resume):
+    """Five of sixteen search units spent finding nothing, twice over.
+
+    This is not "these jobs are a poor match" - that is a judgement the ranking
+    already makes. It is "BOSS returns no results for this string", which the
+    search itself established, and repeating it costs a whole unit.
+
+    Asserted as a score *delta* for the same keyword: comparing two different
+    keywords would pass on the Chinese bonus alone and prove nothing about the
+    penalty.
+    """
+    strategy = {"preferred_roles": ["DevOps Engineer"], "must_have_skills": []}
+
+    before = sdr.rank(db, resume=active_resume, strategy=strategy).directions[0]
+    for _ in range(2):
+        _completed_search(db, "DevOps Engineer", 0)
+    after = sdr.rank(db, resume=active_resume, strategy=strategy).directions[0]
+
+    # A real drop, not "score minus the constant", which would hold even if the
+    # constant were 0 and the penalty therefore did nothing.
+    assert after.score < before.score
+    assert after.score == pytest.approx(before.score - sdr._BARREN_PENALTY)
+    assert any("一张卡片都没返回" in reason for reason in after.reasons)
+    assert not any("一张卡片都没返回" in reason for reason in before.reasons)
+
+
+def test_a_barren_keyword_ends_up_behind_one_that_returns_cards(db, active_resume):
+    strategy = {"preferred_roles": ["云计算工程师", "DevOps Engineer"], "must_have_skills": []}
+    for _ in range(2):
+        _completed_search(db, "DevOps Engineer", 0)
+        _completed_search(db, "云计算工程师", 30)
+
+    keywords = [d.keyword for d in sdr.rank(db, resume=active_resume, strategy=strategy).directions]
+    assert keywords.index("云计算工程师") < keywords.index("DevOps Engineer")
+
+
+def test_one_barren_run_is_not_enough_to_condemn_a_keyword(db, active_resume):
+    """A single run can end early for its own reasons - a lost tab, a pause."""
+    strategy = {"preferred_roles": ["云计算工程师", "DevOps Engineer"], "must_have_skills": []}
+    _completed_search(db, "DevOps Engineer", 0)
+
+    ranking = sdr.rank(db, resume=active_resume, strategy=strategy)
+    barren = next(d for d in ranking.directions if d.keyword == "DevOps Engineer")
+    assert not any("一张卡片都没返回" in reason for reason in barren.reasons)
+
+
+def test_a_barren_keyword_is_dropped_from_the_plan_not_just_ranked_last(db, active_resume):
+    """Four dead keywords are a quarter of a sixteen-unit run.
+
+    Demotion alone was not enough: the candidate list is short enough that a
+    demoted keyword still gets picked, and a unit spent on a keyword BOSS
+    returns nothing for is a unit that collects nothing.
+    """
+    strategy = {
+        "preferred_roles": ["云计算工程师", "DevOps Engineer", "云平台工程师"],
+        "must_have_skills": [],
+    }
+    for _ in range(2):
+        _completed_search(db, "DevOps Engineer", 0)
+
+    ranking = sdr.rank(db, resume=active_resume, strategy=strategy)
+    assert "DevOps Engineer" in [d.keyword for d in ranking.directions], "still reported"
+    assert next(d for d in ranking.directions if d.keyword == "DevOps Engineer").barren
+    # ...but never handed to the planner.
+    assert "DevOps Engineer" not in ranking.top(10)
+    assert set(ranking.top(10)) == {"云计算工程师", "云平台工程师"}
+
+
+def test_dropping_never_leaves_the_planner_with_nothing(db, active_resume):
+    """If every direction is barren, an ordered plan still beats no plan."""
+    strategy = {"preferred_roles": ["DevOps Engineer"], "must_have_skills": []}
+    for _ in range(2):
+        _completed_search(db, "DevOps Engineer", 0)
+
+    assert sdr.rank(db, resume=active_resume, strategy=strategy).top(10) == ["DevOps Engineer"]

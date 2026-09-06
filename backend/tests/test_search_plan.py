@@ -151,7 +151,9 @@ def test_quick_search_expands_one_city_across_several_role_directions(db, active
     tasks, _, _ranking = search_plan.prepare_resume_searches(db, cities=["杭州"], target_count=20)
 
     keywords = [task.keywords for task in tasks]
-    assert len(tasks) == search_plan.MAX_SEARCH_DIRECTIONS
+    # Every direction the strategy has, up to the cap - the point of the test
+    # is that one city no longer searches a slice of a multi-role strategy.
+    assert len(tasks) == 13 <= search_plan.MAX_SEARCH_DIRECTIONS
     assert len(set(keywords)) == len(keywords), "no city x keyword pair repeats"
     assert all(task.city == "杭州" for task in tasks)
     # The lead is no longer a hardcoded role: it is whichever direction the
@@ -168,7 +170,12 @@ def test_quick_search_expands_one_city_across_several_role_directions(db, active
 
 @pytest.mark.parametrize(
     "cities, expected_tasks",
-    [(["北京"], 8), (["北京", "上海"], 16), (["北京", "上海", "广州"], 15),
+    # One city fills the whole 16-unit batch since the direction cap rose to
+    # 16 (authorized 2026-09-05); more cities divide the same ceiling, which
+    # is the invariant this actually guards.
+    # One city is bounded by the directions the fixture strategy actually has
+    # (13), not by the cap - which is the honest behaviour: min(cap, available).
+    [(["北京"], 13), (["北京", "上海"], 16), (["北京", "上海", "广州"], 15),
      (["北京", "上海", "广州", "杭州"], 16)],
 )
 def test_quick_search_never_exceeds_the_comprehensive_batch_ceiling(
@@ -187,7 +194,7 @@ def test_quick_search_directions_remain_bounded_even_with_many_configured_roles(
         "early_career_policy": "exclude",
     })
     tasks, _, _ranking = search_plan.prepare_resume_searches(db, cities=["北京"], target_count=8)
-    assert len(tasks) == search_plan.MAX_SEARCH_DIRECTIONS == 8
+    assert len(tasks) == search_plan.MAX_SEARCH_DIRECTIONS == 16
 
 
 def test_resume_keywords_are_deterministic_chinese_first_and_deduplicated():
@@ -218,7 +225,7 @@ def test_prepare_resume_searches_validates_all_cities_before_writing(db, active_
     assert db.query(JobSearchTask).filter(JobSearchTask.notes == search_plan.QUICK_SEARCH_NOTE).count() == 0
 
 
-@pytest.mark.parametrize("target_count", [0, 21, True, 1.5])
+@pytest.mark.parametrize("target_count", [0, 61, True, 1.5])
 def test_prepare_resume_search_rejects_an_invalid_target_count(db, active_resume, target_count):
     with pytest.raises(ValidationError):
         search_plan.prepare_resume_search(db, city="北京", target_count=target_count)

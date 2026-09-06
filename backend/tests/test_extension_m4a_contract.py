@@ -466,3 +466,43 @@ def test_the_built_m4a_bundle_also_has_none_of_it(needle, dist_code):
     cannot pass while a build step (or a stray `any`-cast workaround)
     reintroduces something forbidden."""
     assert needle not in dist_code, f"built M4a bundle must not contain {needle}"
+
+
+# ---------------------------------------------------------------------------
+# The popup never stops a session it did not start
+# ---------------------------------------------------------------------------
+
+
+NEXT_FUNCTION = chr(10) + "  function "
+
+
+def _recover_body(code: str) -> str:
+    """`recoverOrReset`'s body, up to the next function declaration."""
+    start = code.index("recoverOrReset")
+    rest = code[start:]
+    end = rest.find(NEXT_FUNCTION, 1)
+    return rest if end == -1 else rest[:end]
+
+
+def test_the_popup_leaves_another_entry_points_session_alone(session_source):
+    """A console-started run has no pointer here, and is not this popup's to end.
+
+    Live on 2026-09-05 it was: the console tells the user to click the toolbar
+    icon once (that is how salary OCR gets its `activeTab` grant), the popup
+    opened, saw a running session with no pointer of its own, and stopped it as
+    `stale_tab` 0.6s after it was created. The run then failed on its next
+    navigation with 会话未在进行中.
+    """
+    body = _recover_body(session_source)
+    guard = body.index("if (!pointer)")
+    stop = body.index("stopSession('stale_tab')")
+    assert guard < stop, "the no-pointer early return must come first"
+
+
+def test_the_built_popup_bundle_carries_the_same_guard():
+    if not SESSION_JS.exists():
+        import pytest
+
+        pytest.skip("extension/dist not built")
+    body = _recover_body(_strip_comments(_read(SESSION_JS)))
+    assert body.index("if (!pointer)") < body.index("stopSession('stale_tab')")

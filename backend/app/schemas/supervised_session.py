@@ -64,10 +64,22 @@ StopReason = Literal[
 
 
 class SessionCreate(BaseModel):
+    """The approved caps for one session.
+
+    These bounds must stay equal to the ceilings in
+    ``services/supervised_sessions.py`` - they are repeated here, rather than
+    imported, only because that service imports this module. A mismatch is not
+    a harmless duplicate: Pydantic rejects the request before the service is
+    ever reached, and the run fails with the generic 「请求参数不合法」 that says
+    nothing about which number was wrong. That is exactly what happened on
+    2026-09-05 when the scroll ceiling rose to 30 and this bound stayed at 5,
+    so `test_schema_bounds_match_the_service_ceilings` now pins the pair.
+    """
+
     task_id: int
     page_cap: int = Field(ge=1, le=3)
-    candidate_cap: int = Field(ge=1, le=20)
-    scroll_cap: int = Field(ge=0, le=5)
+    candidate_cap: int = Field(ge=1, le=60)
+    scroll_cap: int = Field(ge=0, le=30)
     #: Must equal exactly "https://www.zhipin.com" - re-checked server-side,
     #: never trusted just because the client sent it.
     tab_origin: str = Field(max_length=64)

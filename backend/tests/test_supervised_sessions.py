@@ -127,8 +127,8 @@ def test_a_cap_above_its_ceiling_is_rejected_and_writes_nothing(db):
 
     for kwargs in (
         {"page_cap": 4, "candidate_cap": 1, "scroll_cap": 0},
-        {"page_cap": 1, "candidate_cap": 21, "scroll_cap": 0},
-        {"page_cap": 1, "candidate_cap": 1, "scroll_cap": 6},
+        {"page_cap": 1, "candidate_cap": 61, "scroll_cap": 0},
+        {"page_cap": 1, "candidate_cap": 1, "scroll_cap": 31},
     ):
         try:
             supervised_sessions.create_session(db, task_id=task.id, tab_origin=VALID_ORIGIN, **kwargs)
@@ -822,3 +822,23 @@ def test_navigate_makes_no_openai_call_and_never_touches_job(client, db, monkeyp
     assert db.query(Job).count() == jobs_before
     assert db.get(Job, job.id).status == JobStatus.new
 
+
+
+def test_schema_bounds_match_the_service_ceilings():
+    """The request schema and the service must agree on every cap.
+
+    They are two copies of the same number (the service imports the schema, so
+    the schema cannot import the service). When they drifted, the run failed
+    with a generic 「请求参数不合法」 that named no field - the cap was raised in
+    one place and silently enforced at the old value in the other.
+    """
+    from app.schemas.supervised_session import SessionCreate
+
+    bounds = {
+        name: (field.metadata[0].ge, field.metadata[1].le)
+        for name, field in SessionCreate.model_fields.items()
+        if name in {"page_cap", "candidate_cap", "scroll_cap"}
+    }
+    assert bounds["page_cap"][1] == supervised_sessions.MAX_PAGE_CAP
+    assert bounds["candidate_cap"][1] == supervised_sessions.MAX_CANDIDATE_CAP
+    assert bounds["scroll_cap"][1] == supervised_sessions.MAX_SCROLL_CAP

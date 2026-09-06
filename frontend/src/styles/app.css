@@ -307,6 +307,29 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
 }
 .filters .field { margin-bottom: 0; }
 
+/* A browser's default fieldset border was the heaviest thing on the page,
+   framing four chips that already read as a group. */
+.choice-group { border: none; margin: 0; padding: 0; }
+.choice-group legend {
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+/* The one action a page exists for should not look like every other button. */
+.btn-lg { padding: 11px 22px; font-size: 15px; font-weight: 600; }
+
+/* A number that reads as a sentence: "每个方向收集 [8] 个新岗位". */
+.field-inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.field-inline label { margin: 0; font-size: 13px; font-weight: 500; color: var(--text); }
+.field-inline input { width: 72px; text-align: center; }
+.field-inline > span { font-size: 13px; }
+
+/* A caveat belongs under the control it qualifies, not flush with the form. */
+.indent { margin-left: 22px; }
+
 .checkbox-row { display: flex; align-items: center; gap: 8px; }
 .checkbox-row input { width: auto; }
 .checkbox-row label { margin: 0; }

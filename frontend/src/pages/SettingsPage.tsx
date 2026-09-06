@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { ApiError, api } from '@/api/client'
 import { Alert, Card, Loading } from '@/components/ui'
-import type { AppSettings, BatchAnalyzeResponse } from '@/types'
+import type { AiSettingsOut, AppSettings, BatchAnalyzeResponse } from '@/types'
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings | null>(null)
@@ -10,11 +10,26 @@ export default function SettingsPage() {
   const [batchRunning, setBatchRunning] = useState(false)
   const [batchResult, setBatchResult] = useState<BatchAnalyzeResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
+  //: The key is typed here and goes straight to the backend, which writes it
+  //: to `.env`. It is never read back: the field starts empty every time and
+  //: the page only ever learns whether one is set and its last four chars.
+  const [ai, setAi] = useState<AiSettingsOut | null>(null)
+  const [apiKey, setApiKey] = useState('')
+  const [baseUrl, setBaseUrl] = useState('')
+  const [modelFast, setModelFast] = useState('')
+  const [modelSmart, setModelSmart] = useState('')
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiNote, setAiNote] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
       setSettings(await api.settings())
+      const current = await api.getAiSettings()
+      setAi(current)
+      setBaseUrl(current.base_url)
+      setModelFast(current.model_fast)
+      setModelSmart(current.model_smart)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '加载设置失败')
     } finally {
@@ -39,6 +54,26 @@ export default function SettingsPage() {
     }
   }
 
+  async function saveAi() {
+    if (aiBusy) return
+    setAiBusy(true); setAiNote(''); setError(null)
+    try {
+      const saved = await api.saveAiSettings({
+        // An empty box means "leave it alone", never "erase it" - otherwise
+        // saving a model name would silently wipe the key.
+        ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
+        base_url: baseUrl.trim(),
+        model_fast: modelFast.trim(),
+        model_smart: modelSmart.trim(),
+      })
+      setAi(saved)
+      setApiKey('')
+      setAiNote('已保存，立即生效，不需要重启后端。')
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : '保存失败')
+    } finally { setAiBusy(false) }
+  }
+
   if (loading && !settings) return <Loading text="正在加载设置…" />
   if (!settings) return <Alert tone="error">{error ?? '无法加载设置。'}</Alert>
 
@@ -57,6 +92,48 @@ export default function SettingsPage() {
       </header>
 
       {error ? <Alert tone="error" onDismiss={() => setError(null)}>{error}</Alert> : null}
+
+      <Card title="AI 接口" sub="填你自己的 Key。保存后立即生效，不用重启">
+        <p className="small faint">
+          支持任何 <strong>OpenAI 兼容</strong>的接口：留空就是 OpenAI 官方；
+          DeepSeek、Moonshot、通义等填各自的接口地址即可。
+          Key 只写进后端的 <span className="mono">{ai?.env_path ?? 'backend/.env'}</span>，
+          不进数据库、不进日志、不会被任何接口返回。
+        </p>
+        <div className="field">
+          <label htmlFor="ai-key">API Key</label>
+          <input
+            id="ai-key"
+            type="password"
+            autoComplete="off"
+            value={apiKey}
+            placeholder={ai?.configured ? `已配置（${ai.hint}），留空则不修改` : '尚未配置'}
+            onChange={e => setApiKey(e.target.value)}
+          />
+          <p className="field-hint">留空表示保持不变。这里永远不会显示已保存的 Key。</p>
+        </div>
+        <div className="field-row">
+          <div className="field">
+            <label htmlFor="ai-base">接口地址</label>
+            <input id="ai-base" value={baseUrl} placeholder="留空 = OpenAI 官方"
+              onChange={e => setBaseUrl(e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="ai-fast">常规模型</label>
+            <input id="ai-fast" value={modelFast} onChange={e => setModelFast(e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="ai-smart">高质量模型</label>
+            <input id="ai-smart" value={modelSmart} onChange={e => setModelSmart(e.target.value)} />
+          </div>
+        </div>
+        <div className="row">
+          <button type="button" className="btn-primary" disabled={aiBusy} onClick={() => void saveAi()}>
+            {aiBusy ? '保存中…' : '保存'}
+          </button>
+          {aiNote ? <span className="small faint">{aiNote}</span> : null}
+        </div>
+      </Card>
 
       {!settings.openai_configured ? (
         <Alert tone="warn">

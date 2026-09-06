@@ -392,4 +392,22 @@ var BossSelectors = {
    */
   DIAGNOSTIC_COMPANY_ROOT: ['.job-boss-info', '.job-detail-company'] as string[],
 
+  /**
+   * The results-page filter bar's salary menu.
+   *
+   * Anchored on BOSS's own visible label and on the shape of a salary band,
+   * never on a class: no fixture of this bar has ever been captured, and a
+   * guessed class here would silently read the wrong menu. What it reads is
+   * shown to the human with both label and code before anything uses it, so a
+   * wrong anchor is visible rather than quietly wrong.
+   */
+  FILTER_SALARY_LABEL: ['薪资待遇', '薪资'] as string[],
+
+  /** A salary band as BOSS writes it. `不限` is a real option and is kept -
+   *  it is simply never a useful segment, so the console does not offer it. */
+  FILTER_SALARY_BAND_RE: /^(不限|\d{1,3}K?以下|\d{1,3}-\d{1,3}K|\d{1,3}K以上)$/,
+
+  /** Where an option keeps its code: BOSS's own query parameter first. */
+  FILTER_CODE_HREF_RE: /[?&]salary=(\d{1,12})(?:&|$)/,
+
 }

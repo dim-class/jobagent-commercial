@@ -80,7 +80,7 @@
             `更新于(updated_at) ${task.updated_at}`,
         ];
         if (runner) {
-            parts.push(`滚动 ${runner.scrollsUsed}/5`, `已用候选名额 ${runner.candidatesAttempted ?? '未知'}/${runner.candidateCap ?? '未知'}`, `已处理候选 ${runner.candidatesProcessed}`);
+            parts.push(`滚动 ${runner.scrollsUsed}/30`, `已用候选名额 ${runner.candidatesAttempted ?? '未知'}/${runner.candidateCap ?? '未知'}`, `已处理候选 ${runner.candidatesProcessed}`);
             if (runner.lastError)
                 parts.push(`浏览器侧错误：${runner.lastError}`);
             if (runner.pendingTerminal)

@@ -921,17 +921,56 @@ var BossExtract = (function () {
    * first of several silently picked via a bare `querySelector`. No match
    * at all is not ambiguity; it falls through to the page/viewport itself.
    */
+  /** The element that actually scrolls, starting from the results list.
+   *
+   * `.job-list-box` is where the cards live, but it is not necessarily the
+   * element with the scrollbar - and `scrollBy` on a container that does not
+   * scroll is a silent no-op: no error, no movement, no lazy load. That is
+   * what kept eleven of sixteen directions pinned to BOSS's first 15 cards on
+   * 2026-09-05 while two others reached 60. The two that worked were the ones
+   * that opened many details: clicking a card low in the list makes the
+   * browser scroll it into view, which loaded the next batch by accident.
+   *
+   * Walks up a bounded number of ancestors for the first one that both is
+   * scrollable by style and has somewhere to scroll, and falls back to the
+   * document. Read-only; it moves nothing itself.
+   */
+  function scrollableFor(doc: Document, start: Element | null): Element {
+    const view = doc.defaultView
+    let node: Element | null = start
+    for (let up = 0; up < 6 && node; up += 1) {
+      const overflow = view ? view.getComputedStyle(node).overflowY : ''
+      const scrolls = overflow === 'auto' || overflow === 'scroll' || overflow === 'overlay'
+      if (scrolls && node.scrollHeight > node.clientHeight + 4) return node
+      node = node.parentElement
+    }
+    return doc.scrollingElement || doc.documentElement
+  }
+
   function scrollResultsContainer(doc: Document): ScrollResult {
     const found = pickAll(doc, BossSelectors.SCROLL_CONTAINER)
     if (found.nodes.length > 1) return { ok: false, error: 'container_ambiguous' }
 
-    const container = found.nodes[0] || doc.scrollingElement || doc.documentElement
+    const container = scrollableFor(doc, found.nodes[0] || null)
     const view = doc.defaultView
     const step = (container && container.clientHeight) || (view ? view.innerHeight : 0)
     if (!container || !step || typeof container.scrollBy !== 'function') {
       return { ok: false, error: 'not_scrollable' }
     }
-    container.scrollBy({ top: step, left: 0 })
+    // Reach the BOTTOM, not one screen further down. BOSS loads the next batch
+    // when the list's end comes into view, and a fixed one-viewport step falls
+    // behind the moment the list grows: the first scroll reached the end of 15
+    // cards and pulled in 15 more, and every scroll after that landed in the
+    // middle of a list whose end had moved away. Measured on 2026-09-05:
+    // every task, every city, every keyword reported exactly 30 observed cards
+    // and then nothing - which read like a BOSS limit and was ours. A human
+    // dragging the scrollbar down does what this line now does.
+    //
+    // Still exactly one `scrollBy` call site (a contract test pins the count),
+    // still one scroll per approved round, still no `scrollTo`/`scrollIntoView`
+    // anywhere: only the distance changed.
+    const remaining = container.scrollHeight - container.scrollTop - container.clientHeight
+    container.scrollBy({ top: Math.max(step, remaining), left: 0 })
     return { ok: true }
   }
 
@@ -1753,6 +1792,97 @@ var BossExtract = (function () {
     return result
   }
 
+
+  // ---------------------------------------------------------------------
+  // The results-page salary filter, read (never clicked)
+  // ---------------------------------------------------------------------
+
+  /**
+   * BOSS's own salary bands and the codes behind them.
+   *
+   * Why read them at all: a repeated search of one keyword returns the same
+   * top-of-list, so the only way to reach postings underneath is to narrow the
+   * query - and BOSS's filter codes are opaque (`salary=406`). This project
+   * refuses to ship a guessed table of them (`boss_search_filters.py` says so
+   * at length), which left the human pasting one filtered URL per band by
+   * hand. So: read the bands BOSS itself renders, with their codes, and let
+   * the human confirm what was read.
+   *
+   * Strictly read-only. It opens no menu, clicks nothing and changes nothing -
+   * if the options are not in the DOM the human opens the menu themselves and
+   * presses the button again. A band with no code is reported as a band with
+   * no code, never paired with a neighbour's.
+   */
+  function readSalaryFilterOptions(doc: Document): {
+    options: { label: string; code: string }[]
+    labels_without_code: number
+    reason: string | null
+  } {
+    const empty = (reason: string) => ({ options: [], labels_without_code: 0, reason })
+    if (detectPageType(doc, doc.location?.href || '') !== 'search') return empty('not_a_search_page')
+
+    // The menu's root: the smallest subtree that both carries the label and
+    // contains several bands. Walking up from the label rather than down from
+    // a guessed container is what keeps this off the wrong menu.
+    let root: Element | null = null
+    for (const label of BossSelectors.FILTER_SALARY_LABEL) {
+      const anchors = Array.from(doc.querySelectorAll('*')).filter(
+        (el) => (el.textContent || '').trim().startsWith(label) && el.children.length <= 3,
+      )
+      for (const anchor of anchors) {
+        let node: Element | null = anchor
+        for (let up = 0; up < 5 && node; up += 1) {
+          if (bandsIn(node).length >= 3) { root = node; break }
+          node = node.parentElement
+        }
+        if (root) break
+      }
+      if (root) break
+    }
+    if (!root) return empty('menu_not_found')
+
+    const options: { label: string; code: string }[] = []
+    let labelsWithoutCode = 0
+    const seen = new Set<string>()
+    for (const el of bandsIn(root)) {
+      const text = (el.textContent || '').trim()
+      if (seen.has(text)) continue
+      seen.add(text)
+      const code = codeOf(el)
+      if (code) options.push({ label: text, code })
+      else labelsWithoutCode += 1
+      if (options.length >= 30) break
+    }
+    return {
+      options,
+      labels_without_code: labelsWithoutCode,
+      reason: options.length >= 2 ? null : 'codes_not_found',
+    }
+  }
+
+  /** Leaf elements under `root` whose whole text is one salary band. */
+  function bandsIn(root: Element): Element[] {
+    return Array.from(root.querySelectorAll('*')).filter(
+      (el) => el.children.length === 0
+        && BossSelectors.FILTER_SALARY_BAND_RE.test((el.textContent || '').trim()),
+    )
+  }
+
+  /** The option's own code: BOSS's query parameter first, then a numeric
+   *  attribute on the option or its immediate parent. Never a sibling's. */
+  function codeOf(el: Element): string | null {
+    for (const node of [el, el.parentElement].filter(Boolean) as Element[]) {
+      const href = node.getAttribute('href') || ''
+      const match = BossSelectors.FILTER_CODE_HREF_RE.exec(href)
+      if (match) return match[1]
+      for (const attr of Array.from(node.attributes)) {
+        if (attr.name === 'href' || !/^(data-|value$)/.test(attr.name)) continue
+        if (/^\d{1,12}$/.test(attr.value)) return attr.value
+      }
+    }
+    return null
+  }
+
   return {
     detect,
     detectPageType,
@@ -1774,6 +1904,7 @@ var BossExtract = (function () {
     postingClosed,
     greetingDiagnostic,
     sendConfirmedGreeting,
+    readSalaryFilterOptions,
     MAX_DESCRIPTION_CHARS,
     MAX_CARDS,
     MAX_DIAGNOSTIC_NODES,

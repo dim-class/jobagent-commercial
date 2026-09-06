@@ -103,3 +103,29 @@ def describe(filters: dict[str, str]) -> str:
     if not filters:
         return "无附加筛选"
     return "、".join(f"{key}={value}" for key, value in sorted(filters.items()))
+
+
+def salary_segments(codes: list[str]) -> list[dict[str, str]]:
+    """One segment per BOSS salary code, validated exactly like a pasted URL.
+
+    The codes come from BOSS's own filter menu, read off a page the human had
+    open - this module still holds no table of them and still cannot say what
+    `406` means. What changed is only where the code comes from: the site
+    itself rather than the user's clipboard. The value is checked against the
+    same pattern a pasted URL's is, because it ends up in a URL the extension
+    will navigate to.
+    """
+    segments: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for code in codes:
+        value = (code or "").strip()
+        if not value or value in seen:
+            continue
+        if not _VALUE.match(value):
+            raise ValidationError(
+                "薪资档位取值无法识别，已停止处理，未创建搜索计划。",
+                detail={"parameter": "salary"},
+            )
+        seen.add(value)
+        segments.append({"salary": value})
+    return segments

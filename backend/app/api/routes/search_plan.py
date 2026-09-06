@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.api.routes.extension import require_loopback
 from app.core.errors import NotFoundError
+from app.core.career_strategy import load_strategy
 from app.db.session import get_db
 from app.models import JobSearchTask
 from app.schemas.search_plan import (
@@ -62,6 +63,21 @@ from app.services import (
 router = APIRouter(prefix="/api/tasks", tags=["search-plan"])
 
 
+def _excluded_title_keywords() -> list[str]:
+    """Strategy title fragments a card can be rejected on without opening it.
+
+    Read here rather than stored on the task: the strategy is the user's to
+    edit, and a task created last week should honour today's exclusions. Never
+    written back - `career_strategy.yaml` is never auto-edited.
+    """
+
+    try:
+        values = load_strategy().get("excluded_keywords") or []
+    except Exception:  # a missing/broken strategy must not break the task list
+        return []
+    return [str(value).strip() for value in values if str(value).strip()][:64]
+
+
 def _task_out(task: JobSearchTask) -> SearchPlanTaskOut:
     search_url = (
         boss_search_url.build_search_url(
@@ -78,6 +94,7 @@ def _task_out(task: JobSearchTask) -> SearchPlanTaskOut:
         city_id=task.city_id,
         keywords=task.keywords,
         early_career_policy=task.early_career_policy,
+        excluded_title_keywords=_excluded_title_keywords(),
         search_url=search_url,
         run_status=task.run_status.value if task.run_status else None,
         run_started_at=task.run_started_at,
@@ -112,6 +129,7 @@ def search_plan_options(request: Request) -> SearchPlanOptionsResponse:
         supported_cities=list(BOSS_CITY_IDS),
         max_selected_cities=search_plan.MAX_SELECTED_CITIES,
         max_batch_tasks=search_plan.MAX_BATCH_TASKS,
+        max_directions=search_plan.MAX_SEARCH_DIRECTIONS,
     )
 
 
@@ -137,6 +155,7 @@ def quick_prepare(
     # Filters are parsed before anything is created: an unreadable URL must
     # fail the whole request rather than leave a half-segmented batch behind.
     filter_sets = [boss_search_filters.parse_filters(url) for url in payload.filter_urls]
+    filter_sets += boss_search_filters.salary_segments(payload.salary_codes)
     tasks, resume_name, ranking = search_plan.prepare_resume_searches(
         db,
         cities=payload.cities,

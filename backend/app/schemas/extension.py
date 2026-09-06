@@ -46,10 +46,29 @@ class PreviewRequest(BaseModel):
     task_id: int | None = Field(default=None, gt=0)
 
 
+class KnownJobCard(BaseModel):
+    """A rendered search card, as the runner already has it in hand.
+
+    Only what a card shows - never a description, never a page body. It is sent
+    so the backend can answer "we already have this posting" for a re-listing
+    whose ``external_id`` is new, which the URL alone cannot detect.
+    """
+
+    url: str
+    company: str | None = None
+    title: str | None = None
+    salary_text: str | None = None
+    experience_text: str | None = None
+    city: str | None = None
+
+
 class KnownJobsRequest(BaseModel):
     """Canonical detail URLs the runner is about to consider opening."""
 
     urls: list[str] = Field(default_factory=list, max_length=200)
+    #: Optional, and matched only when every field below agrees. Absent for an
+    #: older extension build, which then behaves exactly as before.
+    cards: list[KnownJobCard] = Field(default_factory=list, max_length=200)
 
 
 class KnownJobsResponse(BaseModel):

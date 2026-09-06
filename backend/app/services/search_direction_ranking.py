@@ -38,9 +38,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Resume
+from app.models import JobSearchTask, Resume
+from app.models.enums import SearchTaskRunStatus
 from app.schemas.direction import ResumeDirectionAnalysis
 from app.services import search_keyword_analytics as keyword_analytics
 from app.services.statistics import Confidence
@@ -62,6 +64,15 @@ _CHINESE_BONUS = 0.15
 #: A direction whose every surfaced job was rejected is not worth searching
 #: again while that remains the only thing we know about it.
 _PROVEN_EMPTY_PENALTY = 1.0
+
+#: A direction whose completed searches have never rendered a single card is
+#: not a weak direction - it is a keyword BOSS returns nothing for, and every
+#: run spends one of sixteen units discovering that again. Five of sixteen
+#: units did exactly that on 2026-09-05. Large enough to sink such a keyword
+#: below every direction that has ever shown a card, and it needs at least two
+#: completed runs to say so, because one run can end early for its own reasons.
+_BARREN_PENALTY = 10.0
+_BARREN_MIN_RUNS = 2
 
 
 def _is_chinese(text: str) -> bool:
@@ -102,6 +113,10 @@ class DirectionScore:
     recommended: int = 0
     confidence: Confidence = Confidence.insufficient
     reasons: list[str] = field(default_factory=list)
+    #: Repeatedly searched and never rendered a card - BOSS returns nothing for
+    #: this string. Dropped from the plan, not merely ranked last, and reported
+    #: so the console can say why it is gone.
+    barren: bool = False
 
     @property
     def has_evidence(self) -> bool:
@@ -118,7 +133,19 @@ class DirectionRanking:
     notes: list[str] = field(default_factory=list)
 
     def top(self, limit: int) -> list[str]:
-        return [d.keyword for d in self.directions[:limit]]
+        """The directions to actually search, best first.
+
+        A keyword BOSS has repeatedly returned nothing for is dropped rather
+        than merely ranked last: with sixteen units to spend, four dead ones
+        are a quarter of the run. Fourteen searches that return jobs beat
+        sixteen where four return none. Demotion alone was not enough - the
+        list of candidates is short enough that a demoted keyword still gets
+        picked. If that would leave nothing at all, the demotion order stands
+        and the caller gets a plan rather than an empty one.
+        """
+
+        alive = [d for d in self.directions if not d.barren]
+        return [d.keyword for d in (alive or self.directions)[:limit]]
 
 
 def _resume_vocabulary(resume: Resume | None, strategy: dict) -> set[str]:
@@ -194,6 +221,7 @@ def rank(
     vocabulary = _resume_vocabulary(resume, strategy)
     analytics = keyword_analytics.compute(db)
     cohorts = {c.keyword: c for c in analytics.cohorts}
+    barren = _barren_keywords(db)
 
     scored: list[DirectionScore] = []
     for role in dict.fromkeys([*roles, *suggested_roles]):
@@ -227,6 +255,11 @@ def rank(
         else:
             reasons.append("英文方向在 BOSS 上命中较少")
 
+        runs = barren.get(role)
+        if runs:
+            score -= _BARREN_PENALTY
+            reasons.append(f"过去 {runs} 次搜索一张卡片都没返回，已停止使用")
+
         cohort = cohorts.get(role)
         rate = jobs = recommended = None
         confidence = Confidence.insufficient
@@ -255,6 +288,7 @@ def rank(
                 recommended=recommended or 0,
                 confidence=confidence,
                 reasons=reasons,
+                barren=bool(runs),
             )
         )
 
@@ -267,6 +301,34 @@ def rank(
     ranking = DirectionRanking(directions=scored, needs_more_evidence=evidenced < 2)
     ranking.notes = _build_notes(ranking, evidenced)
     return ranking
+
+
+def _barren_keywords(db: Session) -> dict[str, int]:
+    """Keywords whose completed searches have never rendered a card.
+
+    Deterministic, from the user's own run history - no model call. A keyword
+    BOSS returns nothing for is not the same as a keyword that returns poor
+    matches: the second is a judgement, the first is a fact the search itself
+    already established, twice.
+    """
+
+    rows = db.execute(
+        select(
+            JobSearchTask.keywords,
+            func.count(JobSearchTask.id),
+            func.coalesce(func.sum(JobSearchTask.observed_count), 0),
+        )
+        .where(
+            JobSearchTask.run_status == SearchTaskRunStatus.completed,
+            JobSearchTask.keywords.is_not(None),
+        )
+        .group_by(JobSearchTask.keywords)
+    ).all()
+    return {
+        keyword: runs
+        for keyword, runs, observed in rows
+        if observed == 0 and runs >= _BARREN_MIN_RUNS
+    }
 
 
 def _build_notes(ranking: DirectionRanking, evidenced: int) -> list[str]:

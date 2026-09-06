@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from agents import Agent, AsyncOpenAI, OpenAIResponsesModel, RunConfig, Runner
+from agents import Agent, OpenAIResponsesModel, RunConfig, Runner
 
 from app.agents.direction_prompts import (
     RESUME_EXCERPT_CHARS,
@@ -19,6 +19,7 @@ from app.agents.direction_prompts import (
     build_user_prompt,
 )
 from app.agents.job_match_agent import require_openai
+from app.agents.openai_client import build_client
 from app.core.config import Settings
 from app.core.errors import UpstreamError
 from app.core.logging import get_logger, log_event
@@ -32,7 +33,7 @@ AGENT_NAME = "ResumeDirectionAgent"
 
 def build_agent(model_name: str, settings: Settings | None = None) -> Agent:
     cfg = require_openai(settings)
-    client = AsyncOpenAI(api_key=cfg.openai_api_key, timeout=cfg.openai_timeout_seconds)
+    client = build_client(cfg)
     return Agent(
         name=AGENT_NAME,
         instructions=SYSTEM_PROMPT,

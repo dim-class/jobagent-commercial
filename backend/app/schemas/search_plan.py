@@ -18,12 +18,22 @@ class SearchPlanGenerateRequest(BaseModel):
 
 class QuickSearchPrepareRequest(BaseModel):
     cities: list[str] = Field(min_length=1, max_length=4)
-    target_count: int = Field(ge=1, le=20, strict=True)
+    #: How many NEW jobs each direction should collect before it stops early.
+    #: Bounded by the opened-detail ceiling (60) rather than by a number of its
+    #: own: asking for more than a run may open would be a target it could
+    #: never reach, and anything at or below it adds no browsing at all - the
+    #: ceiling is what limits the work either way.
+    target_count: int = Field(ge=1, le=60, strict=True)
     #: BOSS search-page URLs the human built in their own browser. Only the
     #: whitelisted filter parameters are read; `city` and `query` are ignored,
     #: because those come from the cities chosen here and from the résumé
     #: ranking. Each URL becomes one segment, multiplying the plan.
     filter_urls: list[str] = Field(default_factory=list, max_length=8)
+    #: BOSS's own salary codes, read off the filter menu on a page the human
+    #: had open (never a table this project guessed). Each code becomes one
+    #: segment, exactly like a pasted URL - this is the same mechanism with
+    #: the copy-paste removed, not a second one.
+    salary_codes: list[str] = Field(default_factory=list, max_length=8)
 
 
 class MatchApprovalRequest(BaseModel):
@@ -83,6 +93,13 @@ class SearchPlanTaskOut(BaseModel):
     city_id: str | None = None
     keywords: str | None = None
     early_career_policy: str
+    #: Title fragments the career strategy excludes outright. Sent so the
+    #: runner can skip such a card *before* opening it, exactly as it already
+    #: does for an early-career title - an opened detail is the scarce thing.
+    #: Measured on the library this was added against: 21 stored jobs had one
+    #: of these in the title, and the AI judged 20 of them `skip` and none
+    #: `apply`, so the opens they cost bought nothing.
+    excluded_title_keywords: list[str] = Field(default_factory=list)
     #: The exact, deterministic, same-origin BOSS search URL for this task's
     #: (city_id, keyword) - ``services.boss_search_url.build_search_url`` -
     #: so the extension never re-implements city/keyword -> URL logic
@@ -185,6 +202,11 @@ class SearchPlanOptionsResponse(BaseModel):
     supported_cities: list[str]
     max_selected_cities: int
     max_batch_tasks: int
+    #: So the console can state, before a run, how many search units this plan
+    #: will actually create. A backend that was not restarted after this number
+    #: changed used to be invisible: the page said 16 while the process still
+    #: meant 8.
+    max_directions: int
 
 
 class FailRunRequest(BaseModel):

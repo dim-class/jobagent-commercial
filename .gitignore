@@ -68,3 +68,8 @@ docs/orchestration/.claude-worker.lock
 
 # --- read-only open-source reference checkouts ---
 references/boss-projects/
+
+# --- packaged release output ---
+# `scripts/build-release.ps1` writes a ~100 MB exe and zip here. The recipe is
+# tracked; its output is not.
+dist-release/

@@ -3291,11 +3291,12 @@ async function executeM6Application(approvalId, source) {
                     // went - path only, never the query, which carries session tokens.
                     status = `greeting_unavailable:${await tabAreaOf(tabId)}`;
                 }
-                // `no_composer` is the only status that proves the page is the right
-                // one and simply has not rendered yet, so it is the only one worth
-                // waiting out. Anything else is final - a wrong page included: this
-                // never waits for a navigation to land somewhere it may not type.
-                if (status !== 'no_composer')
+                // Two statuses mean "the page is not ready yet", and only those are
+                // worth waiting out: the composer has not rendered, or the content
+                // script did not answer at all because BOSS is mid-navigation to the
+                // conversation it just opened. Everything else is final - a wrong or
+                // ambiguous job included, which is refused rather than waited on.
+                if (status !== 'no_composer' && !status.startsWith('greeting_unavailable:'))
                     break;
                 if (attempt < M6_COMPOSER_ATTEMPTS - 1) {
                     await new Promise((resolve) => setTimeout(resolve, M6_COMPOSER_RETRY_MS));

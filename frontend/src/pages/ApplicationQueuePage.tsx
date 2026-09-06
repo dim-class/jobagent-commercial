@@ -65,10 +65,15 @@ const M6_PREFLIGHT_REASON: Record<string, string> = {
  * that already exists.
  */
 const M6_GREETING_REASON: Record<string, string> = {
-  left_job_page:
-    'BOSS 点击后把整个标签页跳到了聊天页，招呼语没有发出去。'
-    + '为避免发错人，JobAgent 只在岗位详情页里打字——请在 BOSS 的这个对话里自己补一条。',
+  left_job_page: '点击后页面既不是岗位详情页也不是聊天页，招呼语没有发出去，请到 BOSS 手动补一条。',
   wrong_job: '点击后页面变成了另一个岗位，招呼语没有发出去，请到 BOSS 手动补一条。',
+  chat_wrong_job:
+    'BOSS 跳到聊天页后打开的是另一个岗位的对话，为避免发错人没有发送。'
+    + '请在 BOSS 里找到这个岗位的对话自己补一条。',
+  chat_job_ambiguous:
+    '聊天页上出现了多个岗位链接，无法确定这条对话属于哪个岗位，没有发送。请到 BOSS 手动补一条。',
+  chat_job_unknown:
+    '聊天页上读不到这条对话对应的岗位，无法确认发给谁，没有发送。请到 BOSS 手动补一条。',
   input_not_empty: 'BOSS 自己已经发了一条招呼语，所以没有再发第二条。',
   no_composer: '没等到输入框出现，招呼语没有发出去，请到 BOSS 手动补一条。',
   ambiguous_composer: '页面上有多个输入框，无法确定发给谁，没有发送。',

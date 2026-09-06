@@ -960,6 +960,103 @@ async def test_the_search_split_pane_is_not_an_application_surface(preflight):
 GREETING = "您好，我有近2年云基础设施经验，希望进一步沟通。"
 
 
+CHAT_URL = "https://www.zhipin.com/web/geek/chat?t=1757165367"
+
+
+@pytest.fixture
+async def chat_greeting(browser_page, extension_bundle):
+    """One real send attempt against the authored chat-page fixture.
+
+    BOSS sometimes answers 立即沟通 by navigating the whole tab here instead of
+    opening its in-page panel (observed 2026-09-06, four times in a row). The
+    user authorized sending in that conversation the same day, on the
+    condition that the open conversation is verified to be the approved job
+    first - the composer here belongs to whichever conversation BOSS selected.
+    """
+
+    async def _send(*, prepare: str = "", expected: str = "aaa111bbb222~") -> dict:
+        await _load_fixture(
+            browser_page, extension_bundle, "boss_chat_conversation.html", url=CHAT_URL
+        )
+        await browser_page.evaluate(
+            "() => { window.__sent = 0;"
+            "  document.querySelectorAll('.btn-send').forEach("
+            "    (b) => b.addEventListener('click', () => { window.__sent += 1 })) }"
+        )
+        if prepare:
+            await browser_page.evaluate(prepare)
+        status = await browser_page.evaluate(
+            "([text, id]) => BossExtract.sendConfirmedGreeting("
+            "  document, text, document.location.href, id).status",
+            [GREETING, expected],
+        )
+        return {
+            "status": status,
+            "clicks": await browser_page.evaluate("() => window.__sent"),
+            "typed": await browser_page.evaluate(
+                "() => document.querySelector('.chat-input').value"
+            ),
+        }
+
+    return _send
+
+
+@pytest.mark.asyncio
+async def test_the_conversation_boss_opened_for_this_job_accepts_the_greeting(chat_greeting):
+    result = await chat_greeting()
+    assert result["status"] == "sent"
+    assert result["clicks"] == 1, "exactly one send, as on the detail page"
+    assert result["typed"] == GREETING
+
+
+@pytest.mark.asyncio
+async def test_a_conversation_about_another_job_is_refused(chat_greeting):
+    """The whole reason the check exists: BOSS picks which conversation is
+    open, and the wrong one is a message to a real person."""
+    result = await chat_greeting(expected="zzz999~")
+    assert result["status"] == "chat_wrong_job"
+    assert result["clicks"] == 0
+    assert result["typed"] == "", "nothing is typed, not even before the send"
+
+
+@pytest.mark.asyncio
+async def test_a_page_referencing_two_jobs_is_refused_rather_than_guessed(chat_greeting):
+    """No fixture was ever captured from this page, so the reader refuses
+    anything it cannot read unambiguously instead of picking the likeliest."""
+    result = await chat_greeting(
+        prepare="""() => {
+          const a = document.createElement('a')
+          a.href = '/job_detail/other999~.html'
+          document.body.appendChild(a)
+        }"""
+    )
+    assert result["status"] == "chat_job_ambiguous"
+    assert result["clicks"] == 0
+    assert result["typed"] == ""
+
+
+@pytest.mark.asyncio
+async def test_a_conversation_with_no_job_link_is_refused(chat_greeting):
+    result = await chat_greeting(
+        prepare="() => document.querySelectorAll('a[href*=\"/job_detail/\"]')"
+                ".forEach((a) => a.remove())"
+    )
+    assert result["status"] == "chat_job_unknown"
+    assert result["clicks"] == 0
+    assert result["typed"] == ""
+
+
+@pytest.mark.asyncio
+async def test_a_conversation_boss_already_greeted_in_is_left_alone(chat_greeting):
+    """Unchanged from the detail page: a non-empty box means BOSS said
+    something itself, and a second message is not part of one application."""
+    result = await chat_greeting(
+        prepare="() => { document.querySelector('.chat-input').value = '您好' }"
+    )
+    assert result["status"] == "input_not_empty"
+    assert result["clicks"] == 0
+
+
 @pytest.mark.asyncio
 async def test_the_greeting_is_refused_once_the_tab_has_left_the_job_page(
     browser_page, extension_bundle
@@ -996,7 +1093,9 @@ async def test_the_greeting_is_refused_once_the_tab_has_left_the_job_page(
         }""",
         GREETING,
     )
-    assert outcome["chat"] == "left_job_page", "the chat page is not this job's page"
+    # The chat page is not rejected outright any more - it is checked. This
+    # detail-page fixture links to no posting at all, so it reads as unknown.
+    assert outcome["chat"] == "chat_job_unknown"
     assert outcome["other"] == "wrong_job", "another job's page is not this job's page"
     assert outcome["missing"] == "wrong_job", "no bound id means no send"
     assert outcome["clicks"] == 0, "nothing was sent"

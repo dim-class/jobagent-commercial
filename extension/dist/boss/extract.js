@@ -1430,28 +1430,84 @@ var BossExtract = (function () {
      * 立即沟通, so this is its own authorized action (2026-09-03) rather than
      * "the other half" of one.
      */
+    /** The conversation page BOSS navigates to when it does not open its
+     *  in-page panel. Path only - the query carries session tokens. */
+    function isChatPage(currentUrl) {
+        try {
+            const url = new URL(currentUrl);
+            return url.origin === 'https://www.zhipin.com'
+                && url.pathname.startsWith('/web/geek/chat');
+        }
+        catch {
+            return false;
+        }
+    }
+    /**
+     * Which job the open conversation is about, read from the page's own
+     * `/job_detail/<id>.html` links.
+     *
+     * An id, not a company/title text comparison: the id is what the approval
+     * binds, and text would have to be normalized to compare, which is guessing
+     * on a page no fixture was ever captured from. The rule is deliberately
+     * blunt - the page must reference exactly ONE job, and it must be this one.
+     * Two would mean the header is not the only thing linking to a posting, and
+     * on a page whose composer sends to a real person, "probably that one" is
+     * not an answer.
+     */
+    function chatConversationJob(doc) {
+        const ids = new Set();
+        const anchors = Array.from(doc.querySelectorAll('a[href*="/job_detail/"]'));
+        for (const node of anchors) {
+            const href = node.getAttribute('href') || '';
+            const absolute = href.startsWith('http') ? href : `https://www.zhipin.com${href}`;
+            const id = externalIdOf(cleanUrl(absolute));
+            if (id)
+                ids.add(id);
+        }
+        if (!ids.size)
+            return { status: 'chat_job_unknown' };
+        if (ids.size > 1)
+            return { status: 'chat_job_ambiguous' };
+        return { status: 'ok', externalId: Array.from(ids)[0] };
+    }
     /**
      * Types and sends the one human-confirmed greeting - and only into the
      * approved job's own detail page.
      *
-     * The page check is not paranoia about a page that cannot move. Observed
-     * on 2026-09-06: BOSS answered 立即沟通 by navigating the whole tab to
-     * `/web/geek/chat` instead of opening its usual in-page panel, on four
-     * consecutive applications. There the composer resolves perfectly well -
-     * it just belongs to whichever conversation BOSS happened to select, which
-     * is a message to a real person and not necessarily the right one. Nothing
-     * is typed unless the page is still the job this approval names.
+     * Observed on 2026-09-06: BOSS answered 立即沟通 by navigating the whole
+     * tab to `/web/geek/chat` instead of opening its usual in-page panel, on
+     * four consecutive applications. There the composer resolves perfectly well
+     * - it just belongs to whichever conversation BOSS happened to select,
+     * which is a message to a real person and not necessarily the right one.
+     *
+     * So the greeting goes to one of exactly two places, and both are checked
+     * the same way, against the approval's own `external_id`: the job's detail
+     * page, or the conversation BOSS itself opened for that job (user
+     * authorized 2026-09-06). Anywhere else, and anything ambiguous, is
+     * refused before a character is typed.
      */
     function sendConfirmedGreeting(doc, greeting, currentUrl, expectedExternalId) {
         const body = (greeting || '').trim();
         if (!body)
             return { status: 'empty_greeting' };
+        if (!expectedExternalId)
+            return { status: 'wrong_job' };
         const observedUrl = cleanUrl(currentUrl);
         const observedId = observedUrl ? externalIdOf(observedUrl) : null;
-        if (!observedId)
+        if (observedId) {
+            if (observedId !== expectedExternalId)
+                return { status: 'wrong_job' };
+        }
+        else if (isChatPage(currentUrl)) {
+            const owner = chatConversationJob(doc);
+            if (owner.status !== 'ok')
+                return { status: owner.status };
+            if (owner.externalId !== expectedExternalId)
+                return { status: 'chat_wrong_job' };
+        }
+        else {
             return { status: 'left_job_page' };
-        if (!expectedExternalId || observedId !== expectedExternalId)
-            return { status: 'wrong_job' };
+        }
         const composer = greetingComposer(doc);
         if (composer.status !== 'ok' || !composer.input || !composer.send) {
             return { status: composer.status };

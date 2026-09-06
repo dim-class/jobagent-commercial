@@ -1,0 +1,41 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>BOSS chat (authored fixture)</title>
+<!--
+  AUTHORED, NOT CAPTURED. No save of BOSS's /web/geek/chat page exists, and no
+  automated test may visit zhipin.com to make one. This pins the reader's
+  logic - "the page must reference exactly one job, and it must be this one" -
+  which is deliberately blunt precisely because the real DOM is unknown.
+  Whether it matches the live page stays a manual claim the user makes in
+  their own Chrome.
+-->
+<style>
+  .chat-header { padding: 8px }
+  .chat-panel { padding: 8px }
+  .chat-input { width: 320px; height: 60px }
+  .btn-send { display: inline-block; width: 60px; height: 24px }
+  .conv-list li { list-style: none; padding: 4px }
+</style>
+
+<div class="chat-header">
+  <span class="boss-name">余锡琨</span>
+  <span class="company">云纷</span>
+  <span class="boss-title">安全架构师</span>
+  <div class="job-row">
+    <span class="job-title">云运维工程师</span>
+    <span class="salary">10-14K</span>
+    <span class="city">上海</span>
+    <a class="view-job" href="/job_detail/aaa111bbb222~.html?lid=trackme">查看职位</a>
+  </div>
+</div>
+
+<!-- The conversation list: recruiters and message previews, no job links. -->
+<ul class="conv-list">
+  <li role="listitem"><span>盛女士</span><span>浩鲸科技</span><span>[送达]您好……</span></li>
+  <li role="listitem"><span>陈星星</span><span>嘉环科技</span><span>[送达]您好……</span></li>
+</ul>
+
+<div class="chat-panel">
+  <textarea class="chat-input" placeholder="按Enter键发送，按Ctrl+Enter键换行"></textarea>
+  <span class="btn-send">发送</span>
+</div>

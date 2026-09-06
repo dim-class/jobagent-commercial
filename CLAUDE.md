@@ -1483,27 +1483,47 @@ Rules specific to it:
   `clicked_greeting_skipped:<reason>`);
 - **exactly one send.** No follow-up, no second attempt, no polling for the
   composer beyond one bounded wait;
-- **the greeting is typed on the job's own detail page, and nowhere else**
-  (2026-09-06). BOSS normally answers 立即沟通 with an in-page panel, but on
+- **the greeting goes to one of exactly two places, and both are checked
+  against the approval's own `external_id`** (chat page authorized
+  2026-09-06). BOSS normally answers 立即沟通 with an in-page panel, but on
   four consecutive applications it navigated the whole tab to
   `/web/geek/chat` instead. The composer resolves there perfectly well - it
   just belongs to whichever conversation BOSS happened to select, and typing
   into it is a message to a real person who may not be the one this approval
-  names. `sendConfirmedGreeting` now takes the approval's `external_id` and
-  refuses (`left_job_page` / `wrong_job`) before anything is typed. Nothing
-  waits for a navigation to land: only `no_composer` - the right page, not
-  yet rendered - is worth the bounded retry.
+  names.
 
-  Extending M6 to type on the chat page BOSS navigates to would need its own
-  explicit authorization, and would need to verify the open conversation's
-  header names the approved job first. Until then those applications go out
-  greeting-less and say so.
+  So `sendConfirmedGreeting` takes the approval's `external_id`, and:
+
+  - on `/job_detail/<id>.html` the URL's own id must match (`wrong_job`);
+  - on `/web/geek/chat` the page must reference **exactly one**
+    `/job_detail/<id>.html` link, and it must be this job
+    (`chat_wrong_job` / `chat_job_ambiguous` / `chat_job_unknown`);
+  - anywhere else, nothing is typed at all (`left_job_page`).
+
+  An id rather than a company/title text comparison, because the id is what
+  the approval binds and text would need normalizing to compare - guessing,
+  on a page no fixture was ever captured from. The one-link rule is
+  deliberately blunt for the same reason: on a page whose composer sends to a
+  real person, "probably that one" is not an answer. `boss_chat_conversation.html`
+  is **authored, not captured**, exactly like the salary-filter fixtures; it
+  pins the reader's logic, and whether it matches the live page stays a
+  manual claim the user makes in their own Chrome.
+
+  Two statuses mean "not ready yet" and are the only ones the bounded retry
+  waits out: `no_composer`, and a content script that did not answer at all
+  because BOSS is mid-navigation. A wrong or ambiguous job is refused, never
+  waited on.
 
   The queue used to report only the click, so all four read
   「已执行一次立即沟通」 and the user found out an hour later by looking at
   BOSS. `explainM6Greeting` names the outcome in the same feedback line: a
   greeting that did not go is a thirty-second fix in a conversation that
   already exists, but only if someone is told.
+
+  Still exactly one message. This reads no conversation list, opens and
+  activates no chat tab, selects no conversation and reads no message
+  history - the suspended M7 scan stays suspended, and nothing here
+  re-enables any part of it.
 
 Everything else about M6 is unchanged: one job per confirmation, the acceptance
 checkbox, one attempt per confirmation, no batch, no background, no automatic

@@ -39,6 +39,13 @@ def main() -> None:
     os.environ.setdefault("DATABASE_URL", f"sqlite:///{base / 'data' / 'jobagent.db'}")
     os.environ.setdefault("JOBAGENT_DATA_DIR", str(base / "data"))
     os.environ.setdefault("JOBAGENT_SERVE_FRONTEND", "true")
+    # The packaged build ships with the per-job application gate visible
+    # (user asked 2026-09-06). The flag only *exposes* the feature - it is
+    # never evidence that any job was approved: every application still needs
+    # its own confirmation screen showing that exact job, and there is no
+    # batch, no schedule and no automatic retry. `setdefault`, so a recipient
+    # who sets HUMAN_CONFIRMED_APPLY_ENABLED=false in data/.env wins.
+    os.environ.setdefault("HUMAN_CONFIRMED_APPLY_ENABLED", "true")
     os.environ.setdefault("JOBAGENT_FRONTEND_DIR", str(base / "frontend-dist"))
     data = base / "data"
     data.mkdir(parents=True, exist_ok=True)

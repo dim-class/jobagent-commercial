@@ -1592,6 +1592,14 @@ extension instead of retyped by hand.
 
 There is no global auto-apply mode. If the implementation needs an entry-point
 flag it is `HUMAN_CONFIRMED_APPLY_ENABLED`, and it **only exposes the feature**.
+
+The code default is `False` and stays that way. The packaged build sets it to
+`true` as a *default env value* in `backend/launcher.py` (user asked
+2026-09-06), which a recipient overrides in `data/.env`. That changes what is
+visible in one distribution and nothing else: every application still requires
+its own confirmation naming that exact job, there is still no batch, no
+schedule and no automatic retry, and the flag is still never evidence that any
+job was approved.
 It is never, under any circumstance, evidence that a particular job has been
 approved: the per-job confirmation record is the sole authority, and a flag that
 is on with no confirmation authorizes nothing.

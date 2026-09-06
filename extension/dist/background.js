@@ -3310,7 +3310,8 @@ async function executeM6Application(approvalId, source) {
                 // the DOM rather than another guess. Read-only, and best-effort: a
                 // diagnostic that fails must not change the outcome.
                 let shape = '';
-                if (status === 'no_composer' || status === 'no_send_control') {
+                if (status === 'no_composer' || status === 'no_send_control'
+                    || status.startsWith('chat_job_')) {
                     const diag = await askTab(tabId, {
                         type: 'jobagent:m6-greeting-diagnostic',
                     });

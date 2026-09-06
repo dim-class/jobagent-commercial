@@ -1727,8 +1727,49 @@ var BossExtract = (function () {
       `ifr=${frames.length ? Array.from(new Set(frames)).join('+') : '0'}`,
       `snd=${sends.length ? Array.from(new Set(sends)).slice(0, 3).join('+') : 'none'}`,
       `vw=${view ? view.innerWidth : '?'}`,
+      chatHeaderShape(doc),
     ]
-    return parts.join('|').slice(0, 180)
+    return parts.join('|').slice(0, 240)
+  }
+
+  /**
+   * The structural shape of the chat page's job header, for a failure note.
+   *
+   * `/web/geek/chat` was never captured, and the first attempt at reading it
+   * assumed 查看职位 was an anchor to `/job_detail/<id>.html`. It is not:
+   * the live page reported zero such links (2026-09-06). Rather than guess
+   * again, a refusal records what the page actually contains, so the next
+   * selector is written from structure instead of from a screenshot.
+   *
+   * Tag names and the first class only - never text content, which is a
+   * recruiter's name or a message body, and never an href, which carries
+   * session tokens.
+   */
+  function chatHeaderShape(doc: Document): string {
+    const tag = (node: Element | null): string => {
+      if (!node) return '-'
+      const cls = (node.getAttribute('class') || '').split(/\s+/).filter(Boolean)[0] || '-'
+      return `${node.tagName.toLowerCase()}.${cls}`
+    }
+    const links = doc.querySelectorAll('a[href*="/job_detail/"]').length
+    // 查看职位 is the one label the header is known to carry; find it, and
+    // describe the box it lives in rather than the words next to it.
+    const label = Array.from(doc.querySelectorAll('a,span,div,button'))
+      .filter((node) => text(node) === '查看职位')
+      .filter((node) => !node.querySelector('a,span,div,button'))[0] || null
+    const chain: string[] = []
+    let node: Element | null = label
+    for (; node && chain.length < 4; node = node.parentElement) {
+      chain.push(tag(node))
+    }
+    const kids = label && label.parentElement
+      ? Array.from(label.parentElement.children).map(tag).slice(0, 6)
+      : []
+    return [
+      `jdl=${links}`,
+      `see=${chain.length ? chain.join('<') : 'none'}`,
+      `row=${kids.length ? kids.join('+') : 'none'}`,
+    ].join('|')
   }
 
   /** Type the confirmed greeting into an empty composer and send it once.

@@ -139,16 +139,16 @@ them read「您好，我目前从事云基础设施与中间件工程，具备 A
 沟通。」- 90 to 130 characters of flattened résumé, identical opener, and not one
 word about the posting.
 
-What the prompt asks for instead: 45-70 characters, two sentences. The first
-binds what the JD asks for to **one concrete thing from the work history**
-(never two skill names) using the JD's own vocabulary, so the fit is visible
-without the reader connecting anything. The second is a short question the
-recruiter can answer in one line. The question is the part
+What the prompt asks for instead: a self-introduction of at most 125
+characters carrying four things - the experience, the standout strengths, the
+credentials, and what is currently being learned - written the way a person
+types rather than the way a résumé reads. A short question may close it, but
+it is optional and never the point of the message. The question is the part
 that matters:「期待进一步沟通」gives them nothing to reply to, while「这个岗位更偏
 平台建设还是值班运维？」gets answered on the way to the next message. It must ask
 about something the JD says or conspicuously omits - never an invented detail.
 
-The opener rule is written as "start from the job, not from yourself" rather
+The opener still starts from the job rather
 than "vary it", because a single-shot call cannot know what the last greeting
 looked like. Feeding it recent greetings would work and is deliberately not
 done: they are not in `analysis_cache_key`, so the same job would quietly
@@ -159,7 +159,7 @@ Grounding is unchanged and is the one rule that never bends: nothing may
 appear that is not in the résumé. A better register must never buy itself a
 fabricated project.
 
-It took eight versions and about thirty real fast-model calls to get there,
+It took twelve versions and about forty real fast-model calls to get there,
 and the useful part is *why* the middle ones failed:
 
 - **v2/v3 replaced one template with another.** Prescribing "三句话，按这个
@@ -191,12 +191,34 @@ and the useful part is *why* the middle ones failed:
 - **v8 removed the 「也……」 clause.** v7 kept bolting a second experience on and
   overshot its own limit on half the runs. One match, stated once, is both
   shorter and sharper - the same lesson as v5. 45-70 characters, down from 90.
+- **v9 reversed the whole premise, because v2-v8 optimized the wrong thing.**
+  The user, on reading v8: 「还不如第一版好，主要介绍一下自己的经验和突出的特长，
+  资格，学习能力」. They were right. Squeezing the message down to one match plus
+  a question maximised the chance of *a reply* and minimised what the recruiter
+  learned about the candidate - v1 at least showed AWS migration, Linux/AIX,
+  WAS/IHS, Terraform, the SAA certification and self-taught Kubernetes. A
+  greeting that undersells the person to win a reply is not a better greeting.
+  v9 makes the message a **self-introduction** carrying four things - 经验,
+  突出的特长, 资格, 学习能力 - with the question demoted to an optional tail.
+- **v10-v12 were about length, and one of them backfired.** Four content items
+  do not fit in 80-110 characters; v9 ran to ~148. Loosening the cap to 140 in
+  v11 made it *worse* (155-165) - the model spends whatever headroom it is
+  given, so a stated limit works as pressure rather than as a description.
+  v12 restores the tight 125 and lands at 120-141, about v1's length, which is
+  the honest cost of v1's content. What changed is the writing, not the size.
+
+A false alarm worth recording: v9's outputs claim 「AWS SAA Professional/
+Associate」 and 「日语N1」, neither of which is in `parsed_profile_json` - its
+`certifications` holds only 「AWS Certified Solutions Architect」. Both are in
+the résumé's **raw text**, which `build_user_prompt` passes whole as
+`resume_excerpt`. The parser under-extracts; the agent is not fabricating.
+Check the raw text before treating a grounding violation as real.
 
 Grounding never moved through any of it: a warmer register may not buy itself
 one fabricated fact, and a number that is not in the résumé is a fabricated
 fact.
 
-`PROMPT_VERSION` is `v8`, so **only newly analyzed jobs get the new
+`PROMPT_VERSION` is `v12`, so **only newly analyzed jobs get the new
 greeting**. 投递队列's 刷新招呼语 refreshes the listed ones, and it needed no new
 endpoint or service: `analyze-batch/plan` then `analyze-batch` with
 **`force=false`**, because `analysis_cache_key` already contains the prompt

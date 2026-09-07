@@ -1376,6 +1376,29 @@ is what a human dragging the scrollbar does, and rounds buy depth again.
   `MAX_CANDIDATE_CAP` and fails on a bare `candidateCap > 20` anywhere, and the
   console's guards report `bridgeDetail` instead of returning silently.
 
+#### Polling granularity is not a ceiling (2026-09-07)
+
+Measured over one real batch: 108 opened details at **8.0 seconds each**, and
+essentially all of it inside the bounded wait loops. The waits were 10 polls
+500ms apart, so a pane ready at 1.1s was not noticed until 1.5s and every check
+paid up to half a second of dead time.
+
+`RUNNER_STABILIZE_*` and `RUNNER_CAPTURE_*` are now 25 polls 200ms apart, and
+the background capture wait 60 - **identical wall-clock ceilings** (5s, 5s,
+12s). The ceiling in milliseconds is what CLAUDE.md's M4f amendment bounds
+("configuration-owned timeouts and termination counters"); the number of polls
+inside it is not, and raising the ceiling would be a policy change this
+deliberately is not.
+
+Two fixture counts moved with it, because they pinned the attempt count rather
+than the duration. A test that asserts "ten polls" is asserting the wrong
+thing when what matters is that the wait ends.
+
+The bigger cost is not fixable here: **a backgrounded tab renders its detail
+pane late**, which is why `RUNNER_CAPTURE_BACKGROUND_ATTEMPTS` exists at all
+and why a background run is slower per candidate than a visible one. Same root
+cause as the frozen-tab pause below - Chrome is not painting the tab.
+
 #### A backgrounded tab cannot deepen the list (measured 2026-09-06)
 
 The 2026-09-04 background-search authorization traded away the foreground

@@ -1381,7 +1381,7 @@ test('startup content transport timeout reports only a safe fixed code', async (
   await settle()
   const failed = calls.find(c => c.url.endsWith('/run/fail'))
   assert.equal(JSON.parse(failed.init.body).error, 'stabilization_timeout:content_unavailable')
-  assert.equal(detectCallsOf(env).length, 11, 'one injected retry plus the original ten bounded polls')
+  assert.equal(detectCallsOf(env).length, 26, 'one injected retry plus the 25 bounded polls')
   assert.equal(env.scriptingExecuteCalls.length, 1)
   assert.ok(!JSON.stringify(calls).includes('private-fixture-text'))
   assert.equal(pointerOf(env), null)
@@ -1448,8 +1448,9 @@ test('a search page that never stabilizes ends the run failed after exactly the 
   await env.send({ type: 'jobagent:runner-start', taskId: 5, candidateCap: 20 })
   await settle()
 
-  // RUNNER_STABILIZE_MAX_ATTEMPTS = 10 in background.ts.
-  assert.equal(detectCallsOf(env).length, 10)
+  // RUNNER_STABILIZE_MAX_ATTEMPTS in background.ts. The count changed when the
+  // polling got finer (25 x 200ms); the bounded 5s ceiling it enforces did not.
+  assert.equal(detectCallsOf(env).length, 25)
   assert.equal(pointerOf(env), null) // endRunner cleared it - terminal 'failed'
   const failCall = calls.find((c) => /\/run\/fail$/.test(c.url))
   assert.ok(failCall)
@@ -3203,7 +3204,9 @@ function paneEnv({ neverLoad, background }) {
       if (msg.type === 'jobagent:capture-detail') {
         captures += 1
         // Every attempt for the first candidate reports "pane not up yet".
-        if (neverLoad === 'all' || captures <= 10) {
+        // RUNNER_CAPTURE_MAX_ATTEMPTS - the polling got finer (25 x 200ms),
+        // the bounded 5s ceiling it enforces did not move.
+        if (neverLoad === 'all' || captures <= 25) {
           return Promise.resolve({ ok: true, result: { status: 'not_loaded', candidate: null } })
         }
       }

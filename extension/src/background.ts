@@ -730,16 +730,22 @@ const RUNNER_DEFAULT_NO_NEW_ROUND_THRESHOLD = 3
 //: Bounded DOM-stabilization waits - a fixed poll interval and a hard
 //: attempt ceiling, never an unbounded loop. Only this section of the
 //: worker may use `setTimeout`; `overlay.ts`/`content.ts` still never do.
-const RUNNER_STABILIZE_MAX_ATTEMPTS = 10
-const RUNNER_STABILIZE_INTERVAL_MS = 500
-const RUNNER_CAPTURE_MAX_ATTEMPTS = 10
-const RUNNER_CAPTURE_INTERVAL_MS = 500
+// Finer polling, IDENTICAL wall-clock ceilings. 10x500ms and 25x200ms are
+// both 5s, and the ceiling in milliseconds is what the policy bounds - but at
+// 500ms granularity a pane ready at 1.1s was not noticed until 1.5s, and every
+// check paid up to half a second of dead wait. Measured over one real batch:
+// 108 opened details at 8.0s each, all of it inside these loops. Raising the
+// ceiling is a policy change and is deliberately NOT what this does.
+const RUNNER_STABILIZE_MAX_ATTEMPTS = 25
+const RUNNER_STABILIZE_INTERVAL_MS = 200
+const RUNNER_CAPTURE_MAX_ATTEMPTS = 25
+const RUNNER_CAPTURE_INTERVAL_MS = 200
 //: A hidden tab renders lazily-populated content late or not at all (Chrome
 //: throttles a backgrounded tab, and stops painting one an opaque window fully
 //: covers). The detail pane is exactly that kind of content, so a backgrounded
 //: run gets a longer bounded wait - never an unbounded one, and never a retry:
 //: this is the same single wait, given more of it.
-const RUNNER_CAPTURE_BACKGROUND_ATTEMPTS = 24
+const RUNNER_CAPTURE_BACKGROUND_ATTEMPTS = 60
 
 //: The one path a candidate identity may take: BOSS's own detail-page
 //: shape, scheme+host+path only. CLAUDE.md M4f review - "Canonicalize every

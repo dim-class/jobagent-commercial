@@ -52,6 +52,8 @@ const AUTO_FILL_KEY = 'jobagent.search.autoFillSalary'
 const TARGET_KEY = 'jobagent.search.targetCount'
 const BACKGROUND_KEY = 'jobagent.search.background'
 const CHOSEN_BANDS_KEY = 'jobagent.search.salaryBandsChosen'
+const EXP_BANDS_KEY = 'jobagent.search.experienceBands'
+const EXP_CHOSEN_KEY = 'jobagent.search.experienceChosen'
 
 export interface SalaryBand { label: string; code: string }
 
@@ -149,6 +151,15 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
   //: in this browser like the segment box - it is one machine's convenience,
   //: and `career_strategy.yaml` is never written automatically.
   const [salaryBands, setSalaryBands] = useState<SalaryBand[]>(() => loadBands())
+  // BOSS's own 经验 bands, read off the results page the same way the salary
+  // ones are. Unlike salary, exactly one may be chosen: it constrains every
+  // search rather than splitting the run into segments.
+  const [expBands, setExpBands] = useState<SalaryBand[]>(() => {
+    try { return JSON.parse(window.localStorage.getItem(EXP_BANDS_KEY) || '[]') } catch { return [] }
+  })
+  const [expChosen, setExpChosen] = useState<string | null>(() => {
+    try { return window.localStorage.getItem(EXP_CHOSEN_KEY) || null } catch { return null }
+  })
   const [chosenBands, setChosenBands] = useState<string[]>(() => loadChosenBands())
   const [bandBusy, setBandBusy] = useState(false)
   //: Reading the bands is a pure DOM read on a tab the human already has open,
@@ -421,6 +432,13 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
         const reply = await consoleExtension('read-salary-filter')
         const bands = (reply.options ?? []).filter(row => row.label !== '不限')
         if (reply.ok && bands.length) { setSalaryBands(bands); saveBands(bands) }
+        // Same silent, read-only probe for 经验 - one page load, no menu opened.
+        const exp = await consoleExtension('read-experience-filter')
+        const expOptions = (exp.options ?? []).filter(row => row.label !== '不限')
+        if (exp.ok && expOptions.length) {
+          setExpBands(expOptions)
+          try { window.localStorage.setItem(EXP_BANDS_KEY, JSON.stringify(expOptions)) } catch { /* ignore */ }
+        }
       } catch { /* silent: the button is the explicit path */ }
     })()
   }, [connection, salaryBands.length, bandBusy])
@@ -558,7 +576,7 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     admission.current = true; setBusy(true); setError(''); setMessage('')
     try {
       const prepared = await api.prepareResumeSearch(
-        cities, targetCount, filterLines, activeBandCodes)
+        cities, targetCount, filterLines, activeBandCodes, activeExpCode)
       const nextTasks = prepared.tasks
       if (!nextTasks.length) throw new Error('没有生成可执行的搜索任务。')
       const nextIds = new Set(nextTasks.map(row => row.id))
@@ -682,6 +700,10 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
   const activeBandCodes = salaryBands
     .filter(band => chosenBands.includes(band.code))
     .map(band => band.code)
+  // Dropped rather than sent if the band is no longer among those read: it
+  // would be a code with no label behind it.
+  const activeExpCode = expBands.some(b => b.code === expChosen) ? expChosen : null
+  const activeExpLabel = expBands.find(b => b.code === activeExpCode)?.label ?? null
   const batchActive = connection?.batch?.state === 'running' || connection?.batch?.state === 'paused'
   const setupReady = setupLoaded && hasResume && hasRoles && cities.length > 0
   //: No title: the page header directly above already carries it.
@@ -757,6 +779,7 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
           : <strong>前台搜索（切走会立即停止）</strong>} ·{' '}
         {autoFillSalary ? '结束后自动补薪资' : '不自动补薪资'}
         {activeBandCodes.length ? ` · 按 ${activeBandCodes.length} 个薪资档分段` : ''}
+        {activeExpLabel ? ` · 只搜 ${activeExpLabel}` : ''}
       </summary>
       <div className="checkbox-row mt-1">
         <input
@@ -795,6 +818,33 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       <p className="small faint indent">
         BOSS 的列表和详情面板里薪资是特殊字体，读不到；补全会去岗位详情页取。
       </p>
+
+      {expBands.length ? (
+        <div className="field mt-1">
+          <label htmlFor="exp-band">只搜这个经验档</label>
+          <select
+            id="exp-band"
+            value={activeExpCode ?? ''}
+            onChange={e => {
+              const code = e.target.value || null
+              setExpChosen(code)
+              try {
+                if (code) window.localStorage.setItem(EXP_CHOSEN_KEY, code)
+                else window.localStorage.removeItem(EXP_CHOSEN_KEY)
+              } catch { /* ignore */ }
+            }}
+          >
+            <option value="">不限（搜全部经验要求）</option>
+            {expBands.map(band => (
+              <option key={band.code} value={band.code}>{band.label}</option>
+            ))}
+          </select>
+          <p className="small faint">
+            交给 BOSS 去筛，所以整页结果都在这个档里，而不是搜回来再扔掉。
+            它作用在每一次搜索上，不会像薪资分段那样把名额切开。
+          </p>
+        </div>
+      ) : null}
       {salaryBands.length && !activeBandCodes.length ? (
         <div className="row">
           <span className="small">

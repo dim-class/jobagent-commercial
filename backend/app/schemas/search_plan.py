@@ -34,6 +34,9 @@ class QuickSearchPrepareRequest(BaseModel):
     #: segment, exactly like a pasted URL - this is the same mechanism with
     #: the copy-paste removed, not a second one.
     salary_codes: list[str] = Field(default_factory=list, max_length=8)
+    #: One BOSS experience-band code, applied to every search rather than
+    #: creating segments of its own - see `boss_search_filters.with_experience`.
+    experience_code: str | None = Field(default=None, max_length=12)
 
 
 class MatchApprovalRequest(BaseModel):

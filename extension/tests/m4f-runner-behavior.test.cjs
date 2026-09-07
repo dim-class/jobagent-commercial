@@ -501,7 +501,8 @@ test('console status exposes no browser/session secrets or discovery history and
   // hard to distinguish from a broken new one.
   assert.deepEqual(Array.from(reply.capabilities), ['console-search-v1', 'console-batch-v1',
     'salary-backfill-v1', 'human-confirmed-apply-v1', 'skip-stored-candidates-v1',
-    'read-search-filters-v1', 'read-salary-filter-v1', 'background-search-v1',
+    'read-search-filters-v1', 'read-salary-filter-v1', 'read-experience-filter-v1',
+    'background-search-v1',
     'card-signature-dedup-v1'])
   assert.deepEqual(Object.keys(reply).sort(), ['batch', 'capabilities', 'extensionVersion', 'limits', 'ok', 'protocol', 'runner', 'salaryBackfill'])
   // The ceilings this build enforces, so the console can name the mismatch

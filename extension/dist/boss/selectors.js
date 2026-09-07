@@ -382,4 +382,11 @@ var BossSelectors = {
     FILTER_SALARY_BAND_RE: /^(不限|\d{1,3}K?以下|\d{1,3}-\d{1,3}K|\d{1,3}K以上)$/,
     /** Where an option keeps its code: BOSS's own query parameter first. */
     FILTER_CODE_HREF_RE: /[?&]salary=(\d{1,12})(?:&|$)/,
+    /** The 经验 menu, read the same way and under the same rules as 薪资待遇:
+     *  read-only, off a results page the human already has open, and the codes
+     *  are shown with their labels so a person can check one against BOSS's own
+     *  URL before it is used. This file still holds no table of what they mean. */
+    FILTER_EXPERIENCE_LABEL: ['工作经验', '经验'],
+    FILTER_EXPERIENCE_BAND_RE: /^(不限|经验不限|在校\/应届|应届生|应届|1年以内|\d{1,2}-\d{1,2}年|\d{1,2}年以[上内])$/,
+    FILTER_EXPERIENCE_CODE_HREF_RE: /[?&]experience=(\d{1,12})(?:&|$)/,
 };

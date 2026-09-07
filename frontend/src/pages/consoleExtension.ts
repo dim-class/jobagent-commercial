@@ -7,6 +7,8 @@ export type ConsoleAction = 'status' | 'start' | 'pause' | 'resume' | 'cancel'
   | 'read-search-filters'
   //: Read-only: BOSS's own salary bands and codes, off the open results page.
   | 'read-salary-filter'
+  //: The same read, on the 经验 menu.
+  | 'read-experience-filter'
 export interface ConsoleBatchStatus {
   state: 'running' | 'paused' | 'completed' | 'stopped'
   taskIds: number[]
@@ -23,7 +25,7 @@ export interface ConsoleReply {
    *  session tokens. Present only for `read-search-filters`. */
   filterUrl?: string
   /** BOSS's own salary bands, label and code, read off the open results page.
-   *  Present only for `read-salary-filter`. */
+   *  Present only for `read-salary-filter` and `read-experience-filter`. */
   options?: { label: string; code: string }[]
   error?: string
   code?: string

@@ -1693,7 +1693,17 @@ var BossExtract = (function () {
      * presses the button again. A band with no code is reported as a band with
      * no code, never paired with a neighbour's.
      */
+    /** Reads 薪资待遇's bands - kept as its own name because the console, the
+     *  worker and the tests all address it by this one. */
     function readSalaryFilterOptions(doc) {
+        return readFilterOptions(doc, 'salary');
+    }
+    /** The same read, on the 经验 menu. */
+    function readExperienceFilterOptions(doc) {
+        return readFilterOptions(doc, 'experience');
+    }
+    function readFilterOptions(doc, kind) {
+        const spec = FILTER_MENUS[kind];
         const empty = (reason) => ({ options: [], labels_without_code: 0, reason });
         if (detectPageType(doc, doc.location?.href || '') !== 'search')
             return empty('not_a_search_page');
@@ -1701,12 +1711,12 @@ var BossExtract = (function () {
         // contains several bands. Walking up from the label rather than down from
         // a guessed container is what keeps this off the wrong menu.
         let root = null;
-        for (const label of BossSelectors.FILTER_SALARY_LABEL) {
+        for (const label of spec.labels) {
             const anchors = Array.from(doc.querySelectorAll('*')).filter((el) => (el.textContent || '').trim().startsWith(label) && el.children.length <= 3);
             for (const anchor of anchors) {
                 let node = anchor;
                 for (let up = 0; up < 5 && node; up += 1) {
-                    if (bandsIn(node).length >= 3) {
+                    if (bandsIn(node, spec.band).length >= 3) {
                         root = node;
                         break;
                     }
@@ -1723,12 +1733,12 @@ var BossExtract = (function () {
         const options = [];
         let labelsWithoutCode = 0;
         const seen = new Set();
-        for (const el of bandsIn(root)) {
+        for (const el of bandsIn(root, spec.band)) {
             const text = (el.textContent || '').trim();
             if (seen.has(text))
                 continue;
             seen.add(text);
-            const code = codeOf(el);
+            const code = codeOf(el, spec.href);
             if (code)
                 options.push({ label: text, code });
             else
@@ -1742,17 +1752,26 @@ var BossExtract = (function () {
             reason: options.length >= 2 ? null : 'codes_not_found',
         };
     }
-    /** Leaf elements under `root` whose whole text is one salary band. */
-    function bandsIn(root) {
-        return Array.from(root.querySelectorAll('*')).filter((el) => el.children.length === 0
-            && BossSelectors.FILTER_SALARY_BAND_RE.test((el.textContent || '').trim()));
+    const FILTER_MENUS = {
+        salary: {
+            labels: BossSelectors.FILTER_SALARY_LABEL,
+            band: BossSelectors.FILTER_SALARY_BAND_RE,
+            href: BossSelectors.FILTER_CODE_HREF_RE,
+        },
+        experience: {
+            labels: BossSelectors.FILTER_EXPERIENCE_LABEL,
+            band: BossSelectors.FILTER_EXPERIENCE_BAND_RE,
+            href: BossSelectors.FILTER_EXPERIENCE_CODE_HREF_RE,
+        },
+    };
+    function bandsIn(root, band) {
+        return Array.from(root.querySelectorAll('*')).filter((el) => el.children.length === 0 && band.test((el.textContent || '').trim()));
     }
     /** The option's own code: BOSS's query parameter first, then a numeric
      *  attribute on the option or its immediate parent. Never a sibling's. */
-    function codeOf(el) {
+    function codeOf(el, href) {
         for (const node of [el, el.parentElement].filter(Boolean)) {
-            const href = node.getAttribute('href') || '';
-            const match = BossSelectors.FILTER_CODE_HREF_RE.exec(href);
+            const match = href.exec(node.getAttribute('href') || '');
             if (match)
                 return match[1];
             for (const attr of Array.from(node.attributes)) {
@@ -1786,6 +1805,7 @@ var BossExtract = (function () {
         greetingDiagnostic,
         sendConfirmedGreeting,
         readSalaryFilterOptions,
+        readExperienceFilterOptions,
         MAX_DESCRIPTION_CHARS,
         MAX_CARDS,
         MAX_DIAGNOSTIC_NODES,

@@ -57,6 +57,11 @@ var BossContentScript = (function () {
             // options out of the DOM until the menu is open, the human opens it.
             return { ok: true, result: BossExtract.readSalaryFilterOptions(document) };
         }
+        if (request.type === 'jobagent:read-experience-filter') {
+            // Same read, same rules: the 经验 menu on a page the human already has
+            // open. Opens no menu, clicks nothing, changes nothing.
+            return { ok: true, result: BossExtract.readExperienceFilterOptions(document) };
+        }
         if (request.type === DIAGNOSE) {
             // Developer-mode only, explicit-click structural diagnostic. See
             // `boss/extract.ts` - it never sends anything anywhere by itself.

@@ -875,6 +875,32 @@ one. The tests pin the reader's logic; whether it matches the live bar stays a
 manual claim the user makes in their own Chrome - which is exactly why the
 console displays the codes rather than hiding them.
 
+**Searching by experience band (2026-09-07).** Measured on the library it was
+added against: of 742 undecided jobs, 255 asked for 3-5 years and 253 for 5-10
+- **508 of them, 68%, out of reach of a two-year candidate**, against 114 in
+the 1-3 band. That is search budget, analysis money and reading time spent on
+postings that were never going to work.
+
+`experience` was already in `ALLOWED_FILTERS`, so a pasted URL always carried
+it; what was missing was a way to choose one without building the URL by hand.
+The extension now reads BOSS's 经验 menu exactly as it reads 薪资待遇 - the same
+`readFilterOptions`, read-only, off a results page the human already has open,
+opening no menu and clicking nothing, with every band shown beside its code so
+a person can check one against BOSS's own URL. `boss_search_filters.py` still
+holds no table of codes and still cannot say what `103` means.
+
+**It is a constraint, not a segment, and that distinction is the whole design.**
+Salary bands exist to make BOSS return *different* lists, so each band is its
+own search. An experience requirement is a property every result should have,
+so `with_experience()` merges it into each segment instead of multiplying them:
+two salary bands under 1-3 年 is two searches, not four. A filter set that
+already names `experience` keeps its own value - that set came from a URL the
+human built in their own browser, and overwriting their choice would search for
+something other than what they pasted.
+
+Asking BOSS to filter beats skipping cards afterwards: the whole returned page
+is in range, rather than 30 cards of which two thirds get thrown away.
+
 **A card the strategy excludes is skipped before the click (2026-09-05).** The
 same discipline the early-career title filter already followed, for the same
 reason: an opened detail is the scarce resource. `excluded_title_keywords` on

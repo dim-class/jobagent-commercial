@@ -105,6 +105,41 @@ def describe(filters: dict[str, str]) -> str:
     return "、".join(f"{key}={value}" for key, value in sorted(filters.items()))
 
 
+def with_experience(
+    filter_sets: list[dict[str, str]], code: str | None
+) -> list[dict[str, str]]:
+    """Constrain every search to one BOSS experience band.
+
+    Unlike a salary band, this is **not** a segment. Salary bands exist to make
+    BOSS return different lists - each band is its own search. An experience
+    requirement is a property the user wants every result to have, so it is
+    merged into each segment rather than multiplying them: two salary bands
+    under 1-3 年 is two searches, not four.
+
+    A filter set that already names `experience` keeps its own value. That set
+    came from a URL the human built in their own browser, and silently
+    overwriting a choice they made there would search for something other than
+    what they pasted.
+
+    The code is BOSS's own, read off the human's own results page. This module
+    still holds no table of them and still cannot say what any of them mean.
+    """
+    value = (code or "").strip()
+    if not value:
+        return filter_sets
+    if not _VALUE.match(value):
+        raise ValidationError(
+            "经验档位取值无法识别，已停止处理，未创建搜索计划。",
+            detail={"parameter": "experience"},
+        )
+    if not filter_sets:
+        return [{"experience": value}]
+    return [
+        dict(filters) if "experience" in filters else {**filters, "experience": value}
+        for filters in filter_sets
+    ]
+
+
 def salary_segments(codes: list[str]) -> list[dict[str, str]]:
     """One segment per BOSS salary code, validated exactly like a pasted URL.
 

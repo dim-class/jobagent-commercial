@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from app.core.errors import ValidationError
-from app.services.boss_search_filters import describe, parse_filters
+from app.services.boss_search_filters import describe, parse_filters, with_experience
 from app.services.boss_search_url import build_search_url
 
 REAL = (
@@ -101,3 +101,57 @@ def test_a_comma_cannot_smuggle_anything_past_the_value_check():
     for bad in ("104,abc", "104,,101", "104, 101", ",104", "104,"):
         with pytest.raises(ValidationError):
             parse_filters(f"https://www.zhipin.com/web/geek/jobs?experience={bad}")
+
+
+# --------------------------------------------------------------------------
+# experience: a constraint on every search, never a segment of its own
+# --------------------------------------------------------------------------
+
+
+def test_experience_constrains_every_segment_instead_of_multiplying_them():
+    """Two salary bands under one experience band is two searches, not four.
+
+    Salary bands exist to make BOSS return *different* lists, so each is its
+    own search. An experience requirement is a property every result should
+    have, so it rides along on each.
+    """
+    segments = [{"salary": "402"}, {"salary": "403"}]
+    out = with_experience(segments, "103")
+    assert out == [
+        {"salary": "402", "experience": "103"},
+        {"salary": "403", "experience": "103"},
+    ]
+
+
+def test_experience_alone_still_produces_one_search():
+    assert with_experience([], "103") == [{"experience": "103"}]
+
+
+def test_no_experience_code_changes_nothing():
+    segments = [{"salary": "402"}]
+    assert with_experience(segments, None) == segments
+    assert with_experience(segments, "  ") == segments
+    assert with_experience([], None) == []
+
+
+def test_a_pasted_urls_own_experience_choice_is_never_overwritten():
+    """That set came from a URL the human built in their own browser; changing
+    it would search for something other than what they pasted."""
+    segments = [{"experience": "104,105"}, {"salary": "402"}]
+    assert with_experience(segments, "103") == [
+        {"experience": "104,105"},
+        {"salary": "402", "experience": "103"},
+    ]
+
+
+def test_an_unreadable_experience_code_is_refused_before_anything_is_created():
+    """The value ends up in a URL the extension will navigate to."""
+    for bad in ("abc", "103;104", "103 104", "'", "10" * 9):
+        with pytest.raises(ValidationError):
+            with_experience([], bad)
+
+
+def test_the_constraint_never_mutates_the_caller_s_segments():
+    segments = [{"salary": "402"}]
+    with_experience(segments, "103")
+    assert segments == [{"salary": "402"}]

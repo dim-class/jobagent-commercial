@@ -156,6 +156,7 @@ def quick_prepare(
     # fail the whole request rather than leave a half-segmented batch behind.
     filter_sets = [boss_search_filters.parse_filters(url) for url in payload.filter_urls]
     filter_sets += boss_search_filters.salary_segments(payload.salary_codes)
+    filter_sets = boss_search_filters.with_experience(filter_sets, payload.experience_code)
     tasks, resume_name, ranking = search_plan.prepare_resume_searches(
         db,
         cities=payload.cities,

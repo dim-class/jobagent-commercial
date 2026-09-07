@@ -252,11 +252,13 @@ export const api = {
       method: 'POST', body: JSON.stringify({ cities: [city], keywords: [keyword] }),
     }),
   prepareResumeSearch: (cities: string[], targetCount: number, filterUrls: string[] = [],
-    salaryCodes: string[] = []) =>
+    salaryCodes: string[] = [], experienceCode: string | null = null) =>
     request<QuickSearchPrepareResponse>('/api/tasks/search-plan/quick-prepare', {
       method: 'POST',
+      // `experience_code` is a constraint on every search, not a segment:
+      // two salary bands under 1-3 年 is two searches, not four.
       body: JSON.stringify({ cities, target_count: targetCount, filter_urls: filterUrls,
-        salary_codes: salaryCodes }),
+        salary_codes: salaryCodes, experience_code: experienceCode }),
     }),
   // Free: reading the plan never calls a model.
   getDirectionPlan: (signal?: AbortSignal) =>

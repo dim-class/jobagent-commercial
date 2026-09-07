@@ -110,6 +110,19 @@ async def read_salary_filter(browser_page, extension_bundle):
 
 
 @pytest.fixture
+async def read_experience_filter(browser_page, extension_bundle):
+    """The same read, on the 经验 menu."""
+
+    async def _read(fixture: str, *, url: str) -> dict:
+        await _load_fixture(browser_page, extension_bundle, fixture, url=url)
+        return await browser_page.evaluate(
+            "() => BossExtract.readExperienceFilterOptions(document)"
+        )
+
+    return _read
+
+
+@pytest.fixture
 async def diagnose(browser_page, extension_bundle):
     """Load a fixture at a faked BOSS URL and run the real structural diagnostic."""
 
@@ -1415,6 +1428,32 @@ async def test_salary_bands_are_read_with_their_codes(read_salary_filter):
         {"label": "20-50K", "code": "406"},
         {"label": "50K以上", "code": "407"},
     ]
+
+
+async def test_experience_bands_are_read_with_their_codes(read_experience_filter):
+    """Two thirds of what the searches collected asked for more experience
+    than the user has (measured 2026-09-07: 508 of 742 undecided jobs wanted
+    3+ years). Asking BOSS for the band directly is what makes the returned
+    page denser, rather than merely making the skips cheaper."""
+    result = await read_experience_filter("boss_search_salary_filter.html", url=SEARCH_URL)
+    assert result["reason"] is None
+    codes = {row["label"]: row["code"] for row in result["options"]}
+    assert codes["1-3年"] == "103"
+    assert codes["3-5年"] == "104"
+    assert codes["经验不限"] == "101"
+    assert codes["10年以上"] == "106"
+
+
+async def test_the_salary_menu_is_never_read_as_experience(read_experience_filter):
+    """The two readers share everything but their label, band pattern and
+    query parameter, so the guard that matters is that each finds its own
+    menu. A salary code offered as an experience band would search for
+    something nobody asked for."""
+    result = await read_experience_filter("boss_search_salary_filter.html", url=SEARCH_URL)
+    labels = {row["label"] for row in result["options"]}
+    assert not (labels & {"3K以下", "10-20K", "20-50K", "50K以上"})
+    assert all(row["code"] not in {"401", "402", "405", "406", "407"}
+               for row in result["options"])
 
 
 async def test_the_neighbouring_menus_are_never_read_as_salary(read_salary_filter):

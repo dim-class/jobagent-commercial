@@ -3439,6 +3439,27 @@ async function readSalaryFilter(source) {
     }
     return { ok: true, options };
 }
+async function readExperienceFilter(source) {
+    if (activeRunToken !== null || salaryOcrBusy) {
+        return { ok: false, error: '请先暂停正在运行的任务，再读取经验档位。' };
+    }
+    if (source.windowId === undefined)
+        return { ok: false, error: '找不到当前 Chrome 窗口。' };
+    const tab = await reusableBossTab(source.windowId);
+    if (!tab?.id || !tab.url || !isRunnerNavOrigin(tab.url)) {
+        return { ok: false, error: '请在同一 Chrome 窗口打开 BOSS 的职位搜索页。' };
+    }
+    const response = await askTab(tab.id, { type: 'jobagent:read-experience-filter' }, true);
+    if (!response.ok || !response.result)
+        return { ok: false, error: '页面未就绪，请刷新 BOSS 搜索页后重试。' };
+    const options = response.result.options ?? [];
+    if (!options.length) {
+        return { ok: false, error: response.result.reason === 'not_a_search_page'
+                ? '当前标签页不是 BOSS 职位搜索结果页。'
+                : '没有读到经验档位。请在该页面点开「薪资待遇」菜单，再点一次本按钮。' };
+    }
+    return { ok: true, options };
+}
 async function consoleCommand(message, sender) {
     const data = message;
     const foregroundAction = ['start', 'resume', 'start-batch', 'resume-batch',
@@ -3457,7 +3478,8 @@ async function consoleCommand(message, sender) {
             // like the old build is very hard to tell apart from a broken new one.
             capabilities: ['console-search-v1', 'console-batch-v1', 'salary-backfill-v1',
                 'human-confirmed-apply-v1', 'skip-stored-candidates-v1',
-                'read-search-filters-v1', 'read-salary-filter-v1', 'background-search-v1',
+                'read-search-filters-v1', 'read-salary-filter-v1', 'read-experience-filter-v1',
+                'background-search-v1',
                 'card-signature-dedup-v1'],
             //: What this build actually enforces. Reported so the console can say
             //: "the extension in your browser is an older build" instead of letting
@@ -3520,6 +3542,8 @@ async function consoleCommand(message, sender) {
     }
     if (data.action === 'read-salary-filter')
         return readSalaryFilter(source);
+    if (data.action === 'read-experience-filter')
+        return readExperienceFilter(source);
     if (data.action === 'resume-batch')
         return resumeBatch(source);
     if (!Number.isSafeInteger(data.taskId) || data.taskId <= 0)

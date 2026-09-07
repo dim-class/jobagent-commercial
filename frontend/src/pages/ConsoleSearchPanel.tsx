@@ -757,15 +757,31 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       approvedBatchCap = batchConfirmation.cap
       const currentConfirmed = batchConfirmation.tasks.map(approvedTask =>
         tasks.find(row => row.id === approvedTask.id))
-      const unchanged = batchConfirmation.cap === batchCap && batchSize === batchConfirmation.tasks.length
+      const tasksUnchanged = batchConfirmation.cap === batchCap
+        && batchSize === batchConfirmation.tasks.length
         && currentConfirmed.length === taskIds.length
         && currentConfirmed.every((row, index) => row?.state === 'pending'
           && row.id === taskIds![index]
           && row.city === batchConfirmation.tasks[index].city
           && row.keywords === batchConfirmation.tasks[index].keywords)
-        && !connection.runner && connection.batch?.state !== 'running' && connection.batch?.state !== 'paused'
+      // Split from the task check on purpose. Both used to fail into one
+      // sentence about the tasks having changed, so a leftover batch pointer -
+      // by far the commoner cause - read as "press it again and nothing
+      // happens". The remedy differs too: one wants a refresh, the other
+      // wants 取消.
+      const busyElsewhere = !!connection.runner
+        || connection.batch?.state === 'running' || connection.batch?.state === 'paused'
       setBatchConfirmation(null)
-      if (!unchanged) { setError('批次任务或状态已变化，请刷新后重新确认；尚未发送请求。'); return }
+      if (busyElsewhere) {
+        setError(
+          connection.runner
+            ? '扩展里还有一个搜索单元在运行，先让它结束或点「取消」，再开始新批次；尚未发送请求。'
+            : `扩展里还留着上一个批次（${connection.batch?.state === 'paused' ? '已暂停' : '运行中'}），`
+              + '先点「取消」清掉它，再开始新批次；尚未发送请求。',
+        )
+        return
+      }
+      if (!tasksUnchanged) { setError('批次任务或状态已变化，请刷新后重新确认；尚未发送请求。'); return }
     }
     admission.current = true; setBusy(true); setError(''); setMessage('')
     try {

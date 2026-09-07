@@ -850,57 +850,13 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
         <span className="small faint">库里已有的会跳过，不占名额；每个方向最多打开 60 个详情。</span>
       </div>
 
-      {/* Both of these are remembered and both default to on, so the page
-          does not need to ask again every time. Open the row to change them. */}
-      <details>
-      <summary className="small">
-        搜索选项：{runInBackground
-          ? '后台搜索（窗口别盖住）'
-          : <strong>前台搜索（切走会立即停止）</strong>} ·{' '}
-        {autoFillSalary ? '结束后自动补薪资' : '不自动补薪资'}
-        {activeBandCodes.length ? ` · 按 ${activeBandCodes.length} 个薪资档分段` : ''}
-        {activeExpLabel ? ` · 只搜 ${activeExpLabel}` : ''}
-      </summary>
-      <div className="checkbox-row mt-1">
-        <input
-          id="run-background"
-          type="checkbox"
-          checked={runInBackground}
-          onChange={e => {
-            setRunInBackground(e.target.checked)
-            try { window.localStorage.setItem(BACKGROUND_KEY, e.target.checked ? 'on' : 'off') } catch { /* ignore */ }
-          }}
-        />
-        <label htmlFor="run-background">
-          后台运行：可以切到别的窗口去做别的事，搜索和补薪资继续
-        </label>
-      </div>
-      <p className="small faint indent">
-        BOSS 窗口不能最小化、也不能被完全盖住——Chrome 会停掉看不见的标签页的渲染，
-        BOSS 就不再往下加载新岗位，一个方向只剩首屏十几个。露出一条边就够了。
-        遇到这种情况会暂停并在上面告诉你，不会当成“搜完了”。
-      </p>
-      <p className="small faint indent">
-        只影响搜索，投递仍需前台确认。登录、验证码、风控照样立即停止，但你不会当场看见——回本页查看。
-      </p>
-      <div className="checkbox-row">
-        <input
-          id="auto-fill-salary"
-          type="checkbox"
-          checked={autoFillSalary}
-          onChange={e => {
-            setAutoFillSalary(e.target.checked)
-            try { window.localStorage.setItem(AUTO_FILL_KEY, e.target.checked ? 'on' : 'off') } catch { /* ignore */ }
-          }}
-        />
-        <label htmlFor="auto-fill-salary">搜索结束后自动补全薪资</label>
-      </div>
-      <p className="small faint indent">
-        BOSS 的列表和详情面板里薪资是特殊字体，读不到；补全会去岗位详情页取。
-      </p>
-
-      <div className="field mt-1">
-          <label>只搜这些经验档（可多选）</label>
+      {/* Not folded away. Which experience bands to search is one of the
+          three things that define a run - alongside the cities and the
+          target count, both of which are already out here. It spent two
+          runs inside the collapsed 搜索选项 block and was never once
+          ticked, which is a fair verdict on hiding it. */}
+      <div className="field">
+          <label>只搜这些经验档（可多选，不勾＝不限）</label>
           <div className="row">
             {expBands.map(band => (
               <label key={band.code} className="checkbox-row">
@@ -951,6 +907,57 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
             </button>
           </details>
         </div>
+
+      {/* Both of these are remembered and both default to on, so the page
+          does not need to ask again every time. Open the row to change them. */}
+      <details>
+      <summary className="small">
+        搜索选项：{runInBackground
+          ? '后台搜索（窗口别盖住）'
+          : <strong>前台搜索（切走会立即停止）</strong>} ·{' '}
+        {autoFillSalary ? '结束后自动补薪资' : '不自动补薪资'}
+        {activeBandCodes.length ? ` · 按 ${activeBandCodes.length} 个薪资档分段` : ''}
+        {activeExpLabel ? ` · 只搜 ${activeExpLabel}` : ''}
+      </summary>
+      <div className="checkbox-row mt-1">
+        <input
+          id="run-background"
+          type="checkbox"
+          checked={runInBackground}
+          onChange={e => {
+            setRunInBackground(e.target.checked)
+            try { window.localStorage.setItem(BACKGROUND_KEY, e.target.checked ? 'on' : 'off') } catch { /* ignore */ }
+          }}
+        />
+        <label htmlFor="run-background">
+          后台运行：可以切到别的窗口去做别的事，搜索和补薪资继续
+        </label>
+      </div>
+      <p className="small faint indent">
+        BOSS 窗口不能最小化、也不能被完全盖住——Chrome 会停掉看不见的标签页的渲染，
+        BOSS 就不再往下加载新岗位，一个方向只剩首屏十几个。露出一条边就够了。
+        遇到这种情况会暂停并在上面告诉你，不会当成“搜完了”。
+      </p>
+      <p className="small faint indent">
+        只影响搜索，投递仍需前台确认。登录、验证码、风控照样立即停止，但你不会当场看见——回本页查看。
+      </p>
+      <div className="checkbox-row">
+        <input
+          id="auto-fill-salary"
+          type="checkbox"
+          checked={autoFillSalary}
+          onChange={e => {
+            setAutoFillSalary(e.target.checked)
+            try { window.localStorage.setItem(AUTO_FILL_KEY, e.target.checked ? 'on' : 'off') } catch { /* ignore */ }
+          }}
+        />
+        <label htmlFor="auto-fill-salary">搜索结束后自动补全薪资</label>
+      </div>
+      <p className="small faint indent">
+        BOSS 的列表和详情面板里薪资是特殊字体，读不到；补全会去岗位详情页取。
+      </p>
+
+
       {salaryBands.length && !activeBandCodes.length ? (
         <div className="row">
           <span className="small">
@@ -990,16 +997,6 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
         </p>
       ) : null}
       </details>
-      {/* Outside the folded options, right above the button. The first run
-          with an experience band selected nothing because the choice lived
-          only inside a collapsed block - there was no way to tell at the
-          moment of pressing 开始搜索 whether it had been made. */}
-      <p className="small">
-        经验档：{activeExpLabel
-          ? <strong>{activeExpLabel}</strong>
-          : <span className="faint">不限（搜全部经验要求）</span>}
-        <span className="faint">　·　在「搜索选项」里改</span>
-      </p>
       <button className="btn btn-primary btn-lg" disabled={busy || checking || !backendReady || !connection
         || !setupReady || !!connection.runner || batchActive}>
         {busy ? '正在准备…' : '开始搜索'}

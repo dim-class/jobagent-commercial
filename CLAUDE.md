@@ -946,12 +946,14 @@ something other than what they pasted.
 Asking BOSS to filter beats skipping cards afterwards: the whole returned page
 is in range, rather than 30 cards of which two thirds get thrown away.
 
-The chosen bands are printed **outside the collapsed 搜索选项 block, directly
-above 开始搜索**. The first run after this shipped carried no filter at all:
-the control existed and worked, but lived inside a folded section, so there was
-nothing to tell the user at the moment of pressing the button whether they had
-actually chosen anything. A setting that only exists where nobody looks is a
-setting nobody applies.
+The band checkboxes sit **beside the cities and the target count, not inside
+the collapsed 搜索选项 block**. They spent two runs in that fold and were never
+once ticked - both runs went out unfiltered while the control existed, worked
+and was verified as served. Which experience bands to search is one of the
+three things that define a run; folding it away made it a setting nobody
+applies, and a readout above the button was not enough either. Multi-select,
+because 经验不限 alongside 1-3年 is one search and is the combination that
+matters.
 
 The queue filters the **already collected** library the same way, locally and
 for free: `QueueFilters.max_required_years` drops a proposal whose *minimum*

@@ -987,6 +987,29 @@ nothing. All three pre-open skips (already stored, early-career, excluded
 title) now report their `last_action`, because a run that skipped everything
 used to look from the console like a run that did nothing.
 
+**A card is clicked by its URL, never by its position (2026-09-07).** The
+runner decides which card to open from a DETECT it made earlier and then sent
+an *index*; the content script re-derived the list independently, so anything
+that re-rendered in between changed what that index meant. BOSS opens its
+detail pane on the first card as the results page settles, which shifts the
+list on its own.
+
+It surfaced as `detail:out_of_range` on the very first candidate of a run -
+`last_error=click_failed`, task `failed`, and a sixteen-task batch stopped
+dead. The quieter form of the same bug is worse and leaves no trace: the index
+still resolves, and the runner opens a different posting than the one it chose.
+
+`openCandidateLink(doc, index, expectedUrl)` now locates the card by its own
+canonical URL and treats the index as a hint. Two matches refuse
+(`card_ambiguous`) rather than pick. A card that is simply gone reports
+`card_gone`, which the runner **skips** - it is already in `handled`, so the
+loop moves on. Ending a batch over one vanished card is not a proportionate
+response to a list that shifted.
+
+The task's `last_error` also carries the content script's own reason now
+(`click_failed:<reason>`): the bare `click_failed` it recorded before named
+nothing, and the real answer had to be dug out of `supervised_session_events`.
+
 `POST /api/extension/jobs/known` is what keeps a run from spending its budget
 on work already done. A candidate slot is an *opened detail pane*, so the only
 place a duplicate can be skipped for free is before the click. Two answers, and

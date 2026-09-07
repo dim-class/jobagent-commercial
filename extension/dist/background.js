@@ -1535,6 +1535,7 @@ async function processNewCandidates(taskId, runToken, tabId) {
         const opened = await askRunnerTab(tabId, {
             type: 'jobagent:open-candidate',
             index: nextIndex,
+            expectedUrl: targetUrl,
         });
         const clicked = !!opened.ok && !!opened.result?.ok;
         handled.add(targetUrl);
@@ -1546,8 +1547,22 @@ async function processNewCandidates(taskId, runToken, tabId) {
             lastAction: 'opening_candidate',
         });
         const confirmed = await navigateConfirmForTab(tabId, 'detail', targetUrl, clicked ? 'success' : 'failed', clicked ? null : opened.result?.error || 'unknown');
-        if (!clicked)
-            return { status: 'error', reason: opened.error || 'click_failed' };
+        if (!clicked) {
+            // The card is no longer on the page - BOSS re-rendered the list under
+            // us. It is already in `handled`, so the loop simply moves on. Ending a
+            // sixteen-task batch over one vanished card is not a proportionate
+            // response to a list that shifted.
+            if (opened.result?.error === 'card_gone') {
+                await persistAndReport(taskId, runToken, { lastAction: 'skipped_card_gone' });
+                return { status: 'ok' };
+            }
+            // Carry the content script's own reason instead of the generic
+            // fallback: `click_failed` alone sent us looking in the wrong place.
+            return {
+                status: 'error',
+                reason: opened.error || `click_failed:${opened.result?.error || 'unknown'}`,
+            };
+        }
         // CLAUDE.md M4f review item 3 - a failed/unconfirmed confirm must stop
         // fail-closed and never reach capture/preview/import below: the click
         // really happened but the backend could not be told, so the recorded

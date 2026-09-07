@@ -688,11 +688,45 @@ var BossExtract = (function () {
         anchor.click();
         return { ok: true };
     }
-    function openCandidateLink(doc, index) {
+    /**
+     * Clicks one already-rendered card. `expectedUrl` is what makes it the
+     * right one.
+     *
+     * A position is not an identity. The caller decides which card to open from
+     * a DETECT it made earlier, and this re-derives the list independently, so
+     * anything that re-renders between the two calls changes what an index
+     * means - BOSS opens its detail pane on the first card as the results page
+     * settles, which shifts the list on its own. On 2026-09-07 that surfaced as
+     * `out_of_range` on the very first candidate, killing a sixteen-task batch;
+     * the quieter version of the same bug clicks a different posting than the
+     * one the caller decided on, and nothing downstream would notice.
+     *
+     * With `expectedUrl` the card is found by its own canonical URL and the
+     * index is only a hint. Gone means gone (`card_gone`) - a skippable
+     * condition, not a failed run - and two matches refuse rather than pick.
+     */
+    function openCandidateLink(doc, index, expectedUrl) {
         // Same discovery `extractSearch` used to report this index, fallback or
         // not - so a click always lands on the card the popup/overlay actually
         // showed at that position.
         const found = findCardRoots(doc);
+        if (expectedUrl) {
+            const wanted = cleanUrl(expectedUrl);
+            const matches = [];
+            for (let i = 0; i < found.nodes.length; i += 1) {
+                const own = found.canonicalUrls[i];
+                const url = own
+                    ? cleanUrl(own)
+                    : cleanUrl(extractCard(found.nodes[i], i).source_url || '');
+                if (url && url === wanted)
+                    matches.push(i);
+            }
+            if (matches.length === 0)
+                return { ok: false, error: 'card_gone' };
+            if (matches.length > 1)
+                return { ok: false, error: 'card_ambiguous' };
+            index = matches[0];
+        }
         if (index < 0 || index >= found.nodes.length) {
             return { ok: false, error: 'out_of_range' };
         }

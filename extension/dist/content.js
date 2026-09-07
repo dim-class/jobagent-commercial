@@ -97,7 +97,10 @@ var BossContentScript = (function () {
             // The one navigation primitive: click an already-rendered card's own
             // link, by index. Never scrolls, never constructs a URL, never
             // guesses on an ambiguous match. See `boss/extract.ts`.
-            return { ok: true, result: BossExtract.openCandidateLink(document, request.index) };
+            return {
+                ok: true,
+                result: BossExtract.openCandidateLink(document, request.index, request.expectedUrl),
+            };
         }
         if (request.type === CAPTURE_DETAIL
             && typeof request.canonicalUrl === 'string'

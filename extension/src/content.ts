@@ -74,6 +74,9 @@ var BossContentScript = (function () {
      *  identifies the conversation BOSS opened - the live chat page exposes
      *  no job id at all. */
     expectedCompany?: string
+    /** The canonical URL of the card the caller decided to open. It, not the
+     *  index, is what identifies the card - see `openCandidateLink`. */
+    expectedUrl?: string
   }
 
   function handle(message: unknown): unknown {
@@ -160,7 +163,10 @@ var BossContentScript = (function () {
       // The one navigation primitive: click an already-rendered card's own
       // link, by index. Never scrolls, never constructs a URL, never
       // guesses on an ambiguous match. See `boss/extract.ts`.
-      return { ok: true, result: BossExtract.openCandidateLink(document, request.index) }
+      return {
+        ok: true,
+        result: BossExtract.openCandidateLink(document, request.index, request.expectedUrl),
+      }
     }
 
     if (

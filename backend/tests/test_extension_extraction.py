@@ -1663,3 +1663,83 @@ async def test_a_list_container_that_does_not_scroll_moves_the_page_instead(
     assert moved["before"] == 0
     assert moved["after"] == moved["end"] > 0, "the page reached the end of the list"
     assert moved["boxScrolled"] == 0, "the container itself never scrolls - it cannot"
+
+
+# --------------------------------------------------------------------------
+# clicking a card: the URL identifies it, the index is only a hint
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_card_is_clicked_by_its_url_not_its_position(browser_page, extension_bundle):
+    """A position is not an identity.
+
+    The caller decides which card to open from a DETECT it made earlier, and
+    the content script re-derives the list independently - so anything that
+    re-renders in between changes what an index means. BOSS opens its detail
+    pane on the first card as the results page settles, which shifts the list
+    on its own. Observed 2026-09-07 as `out_of_range` on the very first
+    candidate, which failed the task and stopped a sixteen-task batch; the
+    quieter version of the same bug clicks a different posting than the one
+    the caller chose, and nothing downstream would notice.
+    """
+    await _load_fixture(browser_page, extension_bundle, "boss_search.html", url=SEARCH_URL)
+    outcome = await browser_page.evaluate(
+        """() => {
+          const found = BossExtract.detect(document, document.location.href)
+          const cards = found.candidates.filter(c => c.source_url)
+          if (cards.length < 2) return { skip: cards.length }
+          const wanted = cards[1].source_url
+          let clicked = null
+          document.addEventListener('click', (e) => {
+            const a = e.target.closest && e.target.closest('a[href*="/job_detail/"]')
+            if (a) clicked = a.getAttribute('href')
+          }, true)
+          // The index deliberately points at a DIFFERENT card than the URL.
+          const result = BossExtract.openCandidateLink(document, 0, wanted)
+          return { ok: result.ok, error: result.error, clicked, wanted }
+        }"""
+    )
+    if outcome.get("skip") is not None:
+        pytest.skip(f"fixture has {outcome['skip']} linked cards")
+    assert outcome["ok"] is True
+    assert outcome["clicked"], "something was clicked"
+    assert outcome["wanted"].endswith(outcome["clicked"].split("?")[0].split("/")[-1]), (
+        "the URL decided which card, not the index 0 that was passed alongside it"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_card_that_is_no_longer_there_reports_card_gone(browser_page, extension_bundle):
+    """Skippable, not fatal: ending a sixteen-task batch over one vanished
+    card is not a proportionate response to a list that shifted."""
+    await _load_fixture(browser_page, extension_bundle, "boss_search.html", url=SEARCH_URL)
+    result = await browser_page.evaluate(
+        """() => BossExtract.openCandidateLink(
+             document, 0, 'https://www.zhipin.com/job_detail/nothing-here~.html')"""
+    )
+    assert result["ok"] is False
+    assert result["error"] == "card_gone"
+
+
+@pytest.mark.asyncio
+async def test_two_cards_with_the_same_url_refuse_rather_than_pick(
+    browser_page, extension_bundle
+):
+    await _load_fixture(browser_page, extension_bundle, "boss_search.html", url=SEARCH_URL)
+    result = await browser_page.evaluate(
+        """() => {
+          const found = BossExtract.detect(document, document.location.href)
+          const first = found.candidates.find(c => c.source_url)
+          if (!first) return { skip: true }
+          // Clone a card so its URL appears twice on the page.
+          const link = document.querySelector('a[href*="/job_detail/"]')
+          const card = link.closest('li') || link.closest('div')
+          card.parentElement.appendChild(card.cloneNode(true))
+          return BossExtract.openCandidateLink(document, 0, first.source_url)
+        }"""
+    )
+    if result.get("skip"):
+        pytest.skip("fixture has no linked card")
+    assert result["ok"] is False
+    assert result["error"] == "card_ambiguous"

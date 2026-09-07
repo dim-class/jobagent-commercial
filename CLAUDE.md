@@ -895,6 +895,25 @@ Whether the live bar keeps this shape is still a manual claim the user makes in
 their own Chrome - which is exactly why the console displays every band beside
 its code rather than hiding it.
 
+**The console seeds the experience bands (user asked 2026-09-07).** This
+supersedes, for the console only, the rule above that no table of BOSS filter
+codes may exist in this repo. That rule was written when the codes were
+*guesses*, and its stated reason - "a wrong search in front of the user with no
+way to notice" - is what the seed's three mitigations address:
+
+- the values were **read from the live page**, not guessed, and the constant
+  carries that date;
+- **a live read overwrites the seed** and is attempted automatically whenever a
+  BOSS results tab is open, so the site remains the authority;
+- the console shows every band **beside its code**, states whether what is on
+  screen came from BOSS or from the seed, and says how to verify one.
+
+What forced it: requiring a successful read before the control appeared meant
+the control usually did not appear, and a filter nobody can select filters
+nothing. `boss_search_filters.py` still holds no table and still validates a
+code purely by shape - the seed lives in the console, which is the only place
+that needs to offer a choice.
+
 **Searching by experience band (2026-09-07).** Measured on the library it was
 added against: of 742 undecided jobs, 255 asked for 3-5 years and 253 for 5-10
 - **508 of them, 68%, out of reach of a two-year candidate**, against 114 in

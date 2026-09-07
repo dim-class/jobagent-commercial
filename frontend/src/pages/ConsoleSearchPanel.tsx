@@ -54,6 +54,30 @@ const BACKGROUND_KEY = 'jobagent.search.background'
 const CHOSEN_BANDS_KEY = 'jobagent.search.salaryBandsChosen'
 const EXP_BANDS_KEY = 'jobagent.search.experienceBands'
 const EXP_CHOSEN_KEY = 'jobagent.search.experienceChosen'
+const EXP_SOURCE_KEY = 'jobagent.search.experienceBandsSource'
+
+/** BOSS's own 经验 bands, read off a live results page on 2026-09-07:
+ *  `<li ka="sel-job-rec-exp-104"> 1-3年<i class="ui-icon-check"></i></li>`.
+ *
+ *  A seed, not an authority. The reader overwrites it the moment it can read
+ *  the live menu, and every band is displayed beside its code so a person can
+ *  check one against BOSS's own URL. It exists because requiring a successful
+ *  read before the control appears meant the control usually did not appear -
+ *  and a filter nobody can select filters nothing.
+ *
+ *  If BOSS renumbers these, the live read corrects them; until it does, the
+ *  displayed code is the thing to verify. 不限 is excluded on purpose: it is
+ *  the unfiltered search. */
+const SEEDED_EXPERIENCE_BANDS: SalaryBand[] = [
+  { label: '经验不限', code: '101' },
+  { label: '在校生', code: '108' },
+  { label: '应届生', code: '102' },
+  { label: '1年以内', code: '103' },
+  { label: '1-3年', code: '104' },
+  { label: '3-5年', code: '105' },
+  { label: '5-10年', code: '106' },
+  { label: '10年以上', code: '107' },
+]
 
 export interface SalaryBand { label: string; code: string }
 
@@ -155,7 +179,15 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
   // ones are. Unlike salary, exactly one may be chosen: it constrains every
   // search rather than splitting the run into segments.
   const [expBands, setExpBands] = useState<SalaryBand[]>(() => {
-    try { return JSON.parse(window.localStorage.getItem(EXP_BANDS_KEY) || '[]') } catch { return [] }
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(EXP_BANDS_KEY) || '[]')
+      if (Array.isArray(stored) && stored.length) return stored
+    } catch { /* fall through to the seed */ }
+    return SEEDED_EXPERIENCE_BANDS
+  })
+  // Whether what is on screen came from BOSS itself or from the seed above.
+  const [expFromSite, setExpFromSite] = useState(() => {
+    try { return window.localStorage.getItem(EXP_SOURCE_KEY) === 'site' } catch { return false }
   })
   const [expChosen, setExpChosen] = useState<string | null>(() => {
     try { return window.localStorage.getItem(EXP_CHOSEN_KEY) || null } catch { return null }
@@ -443,14 +475,16 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
   // was enough to make the experience menu never be read at all, which is
   // exactly what happened on 2026-09-07: the picker simply never appeared.
   useEffect(() => {
-    if (expProbed.current || expBands.length || expBusy) return
+    // Not gated on `expBands.length` any more: they start seeded, so waiting
+    // for them to be empty would mean never refreshing them from the site.
+    if (expProbed.current || expFromSite || expBusy) return
     if (!connection?.capabilities?.includes('read-experience-filter-v1')) return
     if (connection.runner || connection.batch?.state === 'running') return
     expProbed.current = true
     void (async () => {
       try { await readExperienceBands(true) } catch { /* the button is the explicit path */ }
     })()
-  }, [connection, expBands.length, expBusy])
+  }, [connection, expFromSite, expBusy])
 
   useEffect(() => {
     if (!autoFillSalary || salaryBusy || autoFilled.current) return
@@ -474,7 +508,11 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       // 不限 is a real BOSS option, and choosing it is the unfiltered search.
       const bands = reply.options.filter(row => row.label !== '不限')
       setExpBands(bands)
-      try { window.localStorage.setItem(EXP_BANDS_KEY, JSON.stringify(bands)) } catch { /* ignore */ }
+      setExpFromSite(true)
+      try {
+        window.localStorage.setItem(EXP_BANDS_KEY, JSON.stringify(bands))
+        window.localStorage.setItem(EXP_SOURCE_KEY, 'site')
+      } catch { /* ignore */ }
       if (!silent) {
         setFilterNote(`读到 ${bands.length} 个经验档位。请核对档位和代码是否和 BOSS 页面一致，再选择。`)
       }
@@ -850,32 +888,8 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
         BOSS 的列表和详情面板里薪资是特殊字体，读不到；补全会去岗位详情页取。
       </p>
 
-      {/* Always rendered, so there is a way to read the bands when the silent
-          probe could not - an empty section that only appears once it has
-          already worked is no help at all. */}
       <div className="field mt-1">
-        <label htmlFor="exp-band">只搜这个经验档</label>
-        {expBands.length ? null : (
-          <div className="row">
-            <button
-              type="button"
-              className="btn-sm"
-              disabled={expBusy || !connection?.capabilities?.includes('read-experience-filter-v1')}
-              onClick={() => void readExperienceBands()}
-            >
-              {expBusy ? '读取中…' : '从 BOSS 页面读取经验档位'}
-            </button>
-            <span className="small faint">
-              {connection?.capabilities?.includes('read-experience-filter-v1')
-                ? '需要一个已打开的 BOSS 搜索结果页。只读，不会展开菜单或点击任何东西。'
-                : '扩展版本较旧，没有这个能力——请在 Chrome 扩展页点一下「重新加载」。'}
-            </span>
-          </div>
-        )}
-      </div>
-      {expBands.length ? (
-        <div className="field mt-1">
-          <label htmlFor="exp-band-select">档位</label>
+          <label htmlFor="exp-band-select">只搜这个经验档</label>
           <select
             id="exp-band-select"
             value={activeExpCode ?? ''}
@@ -896,23 +910,30 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
           <p className="small faint">
             交给 BOSS 去筛，所以整页结果都在这个档里，而不是搜回来再扔掉。
             它作用在每一次搜索上，不会像薪资分段那样把名额切开。
-            第一次用之前，请在 BOSS 上点一下同名档位，核对地址栏 experience= 后面的代码。
           </p>
-          <div className="row">
-            {expBands.map(band => (
-              <span key={band.code} className="chip">{band.label} · {band.code}</span>
-            ))}
+          <details>
+            <summary className="small faint">
+              档位来源：{expFromSite ? 'BOSS 页面（已自动读取）' : '内置默认（2026-09-07 读自 BOSS，建议核对一次）'}
+            </summary>
+            <div className="row mt-1">
+              {expBands.map(band => (
+                <span key={band.code} className="chip">{band.label} · {band.code}</span>
+              ))}
+            </div>
+            <p className="small faint">
+              核对方法：在 BOSS 上点一下同名档位，看地址栏 experience= 后面的数字对不对得上。
+              开着 BOSS 搜索结果页时会自动重读一次；也可以现在手动重读。
+            </p>
             <button
               type="button"
               className="btn-sm"
-              disabled={expBusy}
+              disabled={expBusy || !connection?.capabilities?.includes('read-experience-filter-v1')}
               onClick={() => void readExperienceBands()}
             >
-              {expBusy ? '读取中…' : '重新读取'}
+              {expBusy ? '读取中…' : '从 BOSS 页面重新读取'}
             </button>
-          </div>
+          </details>
         </div>
-      ) : null}
       {salaryBands.length && !activeBandCodes.length ? (
         <div className="row">
           <span className="small">

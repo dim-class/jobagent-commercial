@@ -640,3 +640,52 @@ def test_a_skipped_sibling_does_not_count_as_contacted(db):
     db.add(skipped)
     db.commit()
     assert contacted_companies([skipped]) == {}
+
+
+# --------------------------------------------------------------------------
+# experience: "show me only what I could actually meet"
+# --------------------------------------------------------------------------
+
+
+def test_a_posting_asking_for_more_years_than_i_have_is_filtered_out(client, make_analyzed):
+    """Measured on the real library on 2026-09-07: 508 of 742 undecided jobs
+    asked for 3+ years against a two-year candidate - 68% of everything the
+    searches had collected."""
+    near = make_analyzed(experience_text="1-3年")
+    far = make_analyzed(experience_text="5-10年")
+
+    ids = queue_ids(client, max_required_years=2)
+    assert near in ids
+    assert far not in ids, "its minimum of 5 is above what the filter allows"
+
+    # Unfiltered, both are still there - this hides rows, it never decides.
+    assert {near, far} <= set(queue_ids(client))
+
+
+def test_a_posting_that_never_stated_a_requirement_is_kept(client, make_analyzed):
+    """Unknown is not a reason to hide a job the user might well be right for -
+    the same rule the rest of the app applies to a missing fact."""
+    quiet = make_analyzed(
+        experience_text="",
+        raw_description=(
+            "负责云平台的日常建设与维护，参与容器平台的部署和监控体系搭建，"
+            "配合研发团队完成发布流程优化，处理线上告警并推动问题闭环。"
+            "熟悉 Linux 与常见中间件，能独立排查故障。"
+        ),
+    )
+    assert quiet in queue_ids(client, max_required_years=1)
+
+
+def test_the_boundary_year_is_included(client, make_analyzed):
+    """3 years of experience meets a 3-5 年 posting's minimum."""
+    boundary = make_analyzed(experience_text="3-5年")
+    assert boundary in queue_ids(client, max_required_years=3)
+    assert boundary not in queue_ids(client, max_required_years=2)
+
+
+def test_the_requirement_travels_with_the_row_so_it_can_be_shown(client, make_analyzed):
+    """The reader should see why a row is in or out, not just that it is."""
+    job_id = make_analyzed(experience_text="3-5年")
+    row = next(r for r in queue(client)["items"] if r["job_id"] == job_id)
+    assert row["experience_min_years"] == 3
+    assert row["experience_text"] == "3-5年"

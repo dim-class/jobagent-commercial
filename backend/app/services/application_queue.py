@@ -27,6 +27,7 @@ from app.schemas.application import (
 )
 from app.services.timezones import is_local_today, local_now
 from app.services.job_eligibility import is_early_career_track
+from app.services.scoring import extract_experience_requirement
 from app.services.urls import canonical_url, is_openable_posting_url
 
 #: Sort keys the UI offers.
@@ -52,6 +53,10 @@ class QueueFilters:
     include_decided: bool = False
     #: The candidate-stage policy this view applies (from the live strategy).
     early_career_policy: str = "include"
+    #: "Show me only what I could actually meet": drops postings whose *minimum*
+    #: requirement is above this. A posting that never said is kept - unknown is
+    #: not a reason to hide a job the user might well be right for.
+    max_required_years: int | None = None
     #: Explicit "show me what the policy hid". Never on by default, so the
     #: policy actually takes effect, and never silent - `build_summary`
     #: reports the count either way.
@@ -172,6 +177,10 @@ def build_proposal(
         company_applied_title=sibling.title if sibling else None,
         company_applied_job_id=sibling.id if sibling else None,
         early_career=is_early_career_track(job.title, job.normalized_description),
+        experience_min_years=extract_experience_requirement(
+            job.experience_text or "", job.normalized_description or ""
+        ).min_years,
+        experience_text=job.experience_text,
         job_status=job.status,
         proposal_state=proposal_state(job, now=now),
         review_after=job.review_after,
@@ -212,6 +221,12 @@ def is_eligible(proposal: ApplicationProposal, filters: QueueFilters) -> bool:
     if filters.status and proposal.job_status != filters.status:
         return False
     if filters.source and proposal.source != filters.source:
+        return False
+    if (
+        filters.max_required_years is not None
+        and proposal.experience_min_years is not None
+        and proposal.experience_min_years > filters.max_required_years
+    ):
         return False
 
     # The candidate-stage policy is a *view* rule: it hides rows and never

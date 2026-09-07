@@ -901,6 +901,25 @@ something other than what they pasted.
 Asking BOSS to filter beats skipping cards afterwards: the whole returned page
 is in range, rather than 30 cards of which two thirds get thrown away.
 
+The queue filters the **already collected** library the same way, locally and
+for free: `QueueFilters.max_required_years` drops a proposal whose *minimum*
+requirement is above what the user says they have. Measured on the library it
+shipped against, over 341 analyzed jobs: 273 visible at 3 years, 128 at 2.
+
+Two rules make it honest rather than merely narrowing:
+
+- **a posting that never stated a requirement is kept.** `experience_min_years`
+  is `None` there, which is not the same as "no requirement" and is never a
+  reason to hide a job the user might well be right for - the same treatment
+  missing facts get everywhere else in this codebase;
+- **it hides rows, it never decides.** `Job.status` is untouched, the row
+  returns the moment the filter is cleared, and `experience_text` travels with
+  every proposal so the reader can see why a row is in or out.
+
+The requirement is read by `scoring.extract_experience_requirement`, the same
+extractor the analysis pipeline uses. There is no second definition of what a
+posting asks for.
+
 **A card the strategy excludes is skipped before the click (2026-09-05).** The
 same discipline the early-career title filter already followed, for the same
 reason: an opened detail is the scarce resource. `excluded_title_keywords` on

@@ -578,6 +578,8 @@ export interface ApplicationProposal {
   company_applied_title: string | null
   company_applied_job_id: number | null
   early_career: boolean
+  experience_min_years: number | null
+  experience_text: string | null
   overall_score: number
   verdict: Verdict
   matched_skills: string[]

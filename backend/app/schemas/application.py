@@ -126,6 +126,12 @@ class ApplicationProposal(BaseModel):
     #: (应届 / 校招 / 实习). Computed deterministically from title + JD by the
     #: same `job_eligibility` classifier the intake uses - never a model.
     early_career: bool = False
+    #: What the posting asks for, in years, read from `experience_text` and the
+    #: JD by the same deterministic extractor `scoring.py` uses - no second
+    #: definition. `None` means the posting never said, which is not the same
+    #: as "no requirement" and is never treated as a disqualification.
+    experience_min_years: int | None = None
+    experience_text: str | None = None
 
     job_status: JobStatus
     proposal_state: ProposalState

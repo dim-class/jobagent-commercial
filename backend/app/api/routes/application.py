@@ -75,6 +75,10 @@ def get_queue(
     include_early_career: bool = Query(
         default=False, description="忽略候选阶段设置，显示被它隐藏的岗位"
     ),
+    max_required_years: int | None = Query(
+        default=None, ge=0, le=20,
+        description="只看要求经验不超过这个年数的岗位；没写要求的岗位一律保留",
+    ),
     sort: str = Query(default="recommended", pattern="^(recommended|score|newest|salary)$"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -95,6 +99,7 @@ def get_queue(
         include_decided=include_decided,
         early_career_policy=policy,
         include_early_career=include_early_career,
+        max_required_years=max_required_years,
         sort=sort,
         limit=limit,
         offset=offset,

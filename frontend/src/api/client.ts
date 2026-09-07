@@ -215,6 +215,9 @@ export interface QueueFilters {
   include_maybe?: boolean
   include_decided?: boolean
   include_early_career?: boolean
+  /** Only postings whose *minimum* requirement is at most this. A posting that
+   *  never stated one is kept - unknown is not a reason to hide a job. */
+  max_required_years?: number
   sort?: 'recommended' | 'score' | 'newest' | 'salary'
   limit?: number
   offset?: number

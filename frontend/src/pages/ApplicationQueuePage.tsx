@@ -675,6 +675,30 @@ export default function ApplicationQueuePage() {
           </div>
 
           <div className="field">
+            <label htmlFor="q-exp">我的经验年数</label>
+            <select
+              id="q-exp"
+              value={filters.max_required_years ?? ''}
+              onChange={(e) =>
+                updateFilter(
+                  'max_required_years',
+                  e.target.value ? Number(e.target.value) : undefined,
+                )
+              }
+            >
+              <option value="">不限</option>
+              <option value="1">1 年</option>
+              <option value="2">2 年</option>
+              <option value="3">3 年</option>
+              <option value="5">5 年</option>
+              <option value="8">8 年</option>
+            </select>
+            <span className="small faint">
+              只看要求不超过这个年数的岗位。没写要求的一律保留。
+            </span>
+          </div>
+
+          <div className="field">
             <label htmlFor="q-score">最低匹配分</label>
             <select
               id="q-score"
@@ -861,6 +885,9 @@ export default function ApplicationQueuePage() {
               ) : null}
               {proposal.city ? <span className="chip">{proposal.city}</span> : null}
               {proposal.salary_text ? <span className="chip">{proposal.salary_text}</span> : null}
+              {proposal.experience_text ? (
+                <span className="chip">{proposal.experience_text}</span>
+              ) : null}
               <span className="chip">{proposal.source}</span>
               {proposal.matched_skills.slice(0, 3).map((skill) => (
                 <span key={skill} className="chip chip-good">

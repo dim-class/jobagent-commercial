@@ -381,6 +381,26 @@ untouched; nothing polls it, the queue just compares it to now.
 Daily metrics convert UTC timestamps to `REPORT_TIMEZONE` (default
 `Asia/Tokyo`) before comparing dates - never compare naive UTC dates.
 
+### An error nobody can see is the same as no error (2026-09-07)
+
+Four rounds of 「没反应」 on the console's search panel, three different root
+causes, and one thing common to all of them: `{error && <p role="alert">}` was
+the **last line of a very long component**, roughly two thousand pixels below
+the button that set it. Every refusal was reported correctly and none of them
+was ever visible.
+
+It hid, in order: a backend that silently ignored `experience_code`, a
+`connection` held null by a stale candidate ceiling, and a batch-start
+refusal. Each was diagnosed by reading the database or the running server's
+own schema, because the screen said nothing.
+
+Feedback now renders **directly under the control that produced it**. The
+related rule, learned the same day: `disabled={... || !connection}` on the
+start button means a bad handshake produces no click, no handler and no
+message - so the guards inside those handlers report `bridgeDetail` rather
+than returning quietly, and the ceiling those handshakes validate against is
+pinned by a test.
+
 ### A stale backend drops new fields in silence (2026-09-07)
 
 Three runs went out with no experience filter while the console showed the

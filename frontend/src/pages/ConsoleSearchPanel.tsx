@@ -1045,6 +1045,13 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
         || !setupReady || !!connection.runner || batchActive}>
         {busy ? '正在准备…' : '开始搜索'}
       </button>
+      {/* Beside the button that causes them. These used to render at the very
+          end of the component - roughly two thousand pixels below the fold on
+          a page this long - so every refusal in this panel looked to the user
+          like the button doing nothing at all. Several rounds of "没反应" were
+          messages nobody could see. */}
+      {error ? <p className="text-danger mt-1" role="alert">{error}</p> : null}
+      {message ? <p className="small mt-1" role="status">{message}</p> : null}
     </form>
 
     {portfolioTasks.length ? <div className="card-block mt-1">
@@ -1447,7 +1454,6 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       <p>系统内部一次只执行一个；失败、取消、验证或前台丢失会停止整批，不会自动继续。</p>
       <p>无定时后台启动、无 AI 匹配费用，不投递、不收藏、不发消息。</p>
     </Modal>}
-    {error && <p role="alert">{error}</p>}{message && <p role="status">{message}</p>}
     {(() => {
       // The most recent stopped run in this plan - a failure the user has not
       // been shown is indistinguishable from "nothing happened".

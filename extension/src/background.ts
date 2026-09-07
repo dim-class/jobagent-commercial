@@ -3096,13 +3096,36 @@ function isConsoleUrl(raw: string | undefined): boolean {
   } catch { return false }
 }
 
+/** BOSS's own results-page filters, mirrored from `ALLOWED_FILTERS` in
+ *  `services/boss_search_filters.py`. The two lists move together.
+ *
+ *  This validator predates filters and accepted only `city` and `query`, so
+ *  the moment a task carried `experience=101,104` the worker refused it as
+ *  「已变化或不是待处理搜索任务」 - a message about the task's *state*, for a
+ *  URL whose shape it did not recognise. Salary segmentation would have hit
+ *  the same wall had it ever worked on the live page. */
+const CONSOLE_SEARCH_FILTERS = [
+  'salary', 'multiBusinessDistrict', 'experience', 'degree',
+  'industry', 'scale', 'stage', 'jobType', 'position',
+]
+
+/** A filter value is a code or a comma-separated list of codes - the same
+ *  shape the backend validates before it ever builds the URL. Checked here
+ *  too because this string is about to be navigated to. */
+const CONSOLE_FILTER_VALUE = /^\d{1,12}(?:,\d{1,12}){0,19}$/
+
 function isConsoleSearchUrl(raw: string): boolean {
   try {
     const url = new URL(raw)
-    return isRunnerNavOrigin(raw) && !url.username && !url.password && !url.hash
+    if (!(isRunnerNavOrigin(raw) && !url.username && !url.password && !url.hash
       && url.pathname === '/web/geek/jobs' && /^\d+$/.test(url.searchParams.get('city') || '')
-      && !!url.searchParams.get('query')
-      && Array.from(url.searchParams.keys()).every(key => key === 'city' || key === 'query')
+      && !!url.searchParams.get('query'))) return false
+    for (const key of Array.from(url.searchParams.keys())) {
+      if (key === 'city' || key === 'query') continue
+      if (!CONSOLE_SEARCH_FILTERS.includes(key)) return false
+      if (!CONSOLE_FILTER_VALUE.test(url.searchParams.get(key) || '')) return false
+    }
+    return true
   } catch { return false }
 }
 

@@ -1033,6 +1033,15 @@ that shape. 经验不限 alongside 1-3年 is one search, not two - and it is the
 combination that actually matters, since a posting that asks for nothing is as
 reachable as one asking for a year or two.
 
+**The worker's URL validator has to know about filters too.** `isConsoleSearchUrl`
+predates them and accepted only `city` and `query`, so the first task carrying
+`experience=101,104` was refused with 「已变化或不是待处理搜索任务」 - a message
+about the task's *state*, for a URL whose shape it did not recognise. It now
+mirrors `ALLOWED_FILTERS` and checks each value against the same code shape the
+backend does, because this string is about to be navigated to. A test pins the
+two lists together. Salary segmentation would have hit the same wall the moment
+it worked on the live page.
+
 **It is a constraint, not a segment, and that distinction is the whole design.**
 Salary bands exist to make BOSS return *different* lists, so each band is its
 own search. An experience requirement is a property every result should have,

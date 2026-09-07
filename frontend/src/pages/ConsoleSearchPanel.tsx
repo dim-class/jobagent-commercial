@@ -189,8 +189,15 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
   const [expFromSite, setExpFromSite] = useState(() => {
     try { return window.localStorage.getItem(EXP_SOURCE_KEY) === 'site' } catch { return false }
   })
-  const [expChosen, setExpChosen] = useState<string | null>(() => {
-    try { return window.localStorage.getItem(EXP_CHOSEN_KEY) || null } catch { return null }
+  // Several bands at once, because BOSS itself accepts them as one
+  // comma-separated value (`experience=101,104`) - 经验不限 alongside 1-3年 is
+  // one search, not two, and it is what a person actually wants: postings that
+  // ask for nothing are as reachable as postings that ask for a year or two.
+  const [expChosen, setExpChosen] = useState<string[]>(() => {
+    try {
+      const raw = window.localStorage.getItem(EXP_CHOSEN_KEY) || ''
+      return raw ? raw.split(',').filter(Boolean) : []
+    } catch { return [] }
   })
   const [expBusy, setExpBusy] = useState(false)
   const expProbed = useRef(false)
@@ -771,8 +778,12 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     .map(band => band.code)
   // Dropped rather than sent if the band is no longer among those read: it
   // would be a code with no label behind it.
-  const activeExpCode = expBands.some(b => b.code === expChosen) ? expChosen : null
-  const activeExpLabel = expBands.find(b => b.code === activeExpCode)?.label ?? null
+  // A chosen code with no band behind it any more is dropped rather than sent.
+  const activeExpBands = expBands.filter(b => expChosen.includes(b.code))
+  const activeExpCode = activeExpBands.length
+    ? activeExpBands.map(b => b.code).join(',')
+    : null
+  const activeExpLabel = activeExpBands.map(b => b.label).join('、') || null
   const batchActive = connection?.batch?.state === 'running' || connection?.batch?.state === 'paused'
   const setupReady = setupLoaded && hasResume && hasRoles && cities.length > 0
   //: No title: the page header directly above already carries it.
@@ -889,27 +900,33 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       </p>
 
       <div className="field mt-1">
-          <label htmlFor="exp-band-select">只搜这个经验档</label>
-          <select
-            id="exp-band-select"
-            value={activeExpCode ?? ''}
-            onChange={e => {
-              const code = e.target.value || null
-              setExpChosen(code)
-              try {
-                if (code) window.localStorage.setItem(EXP_CHOSEN_KEY, code)
-                else window.localStorage.removeItem(EXP_CHOSEN_KEY)
-              } catch { /* ignore */ }
-            }}
-          >
-            <option value="">不限（搜全部经验要求）</option>
+          <label>只搜这些经验档（可多选）</label>
+          <div className="row">
             {expBands.map(band => (
-              <option key={band.code} value={band.code}>{band.label}</option>
+              <label key={band.code} className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={expChosen.includes(band.code)}
+                  onChange={e => {
+                    const next = e.target.checked
+                      ? [...expChosen, band.code]
+                      : expChosen.filter(code => code !== band.code)
+                    setExpChosen(next)
+                    try {
+                      if (next.length) window.localStorage.setItem(EXP_CHOSEN_KEY, next.join(','))
+                      else window.localStorage.removeItem(EXP_CHOSEN_KEY)
+                    } catch { /* ignore */ }
+                  }}
+                />
+                <span>{band.label}</span>
+              </label>
             ))}
-          </select>
+          </div>
           <p className="small faint">
-            交给 BOSS 去筛，所以整页结果都在这个档里，而不是搜回来再扔掉。
-            它作用在每一次搜索上，不会像薪资分段那样把名额切开。
+            {activeExpLabel
+              ? `本次只搜：${activeExpLabel}。BOSS 直接按这些档返回结果，不是搜回来再扔掉。`
+              : '一个都不勾 = 不限，搜全部经验要求。勾上「经验不限」和「1-3年」是最常用的组合。'}
+            {' '}它作用在每一次搜索上，不会像薪资分段那样把名额切开。
           </p>
           <details>
             <summary className="small faint">
@@ -973,6 +990,16 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
         </p>
       ) : null}
       </details>
+      {/* Outside the folded options, right above the button. The first run
+          with an experience band selected nothing because the choice lived
+          only inside a collapsed block - there was no way to tell at the
+          moment of pressing 开始搜索 whether it had been made. */}
+      <p className="small">
+        经验档：{activeExpLabel
+          ? <strong>{activeExpLabel}</strong>
+          : <span className="faint">不限（搜全部经验要求）</span>}
+        <span className="faint">　·　在「搜索选项」里改</span>
+      </p>
       <button className="btn btn-primary btn-lg" disabled={busy || checking || !backendReady || !connection
         || !setupReady || !!connection.runner || batchActive}>
         {busy ? '正在准备…' : '开始搜索'}

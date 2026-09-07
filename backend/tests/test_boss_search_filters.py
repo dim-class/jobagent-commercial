@@ -155,3 +155,18 @@ def test_the_constraint_never_mutates_the_caller_s_segments():
     segments = [{"salary": "402"}]
     with_experience(segments, "103")
     assert segments == [{"salary": "402"}]
+
+
+def test_several_bands_travel_as_one_comma_separated_value():
+    """BOSS writes a multi-select as `experience=101,104`, and `_VALUE` already
+    accepts that shape - so 经验不限 alongside 1-3年 is one search, not two."""
+    assert with_experience([], "101,104") == [{"experience": "101,104"}]
+    assert with_experience([{"salary": "406"}], "101,104") == [
+        {"salary": "406", "experience": "101,104"}
+    ]
+
+
+def test_a_multi_value_still_cannot_smuggle_anything():
+    for bad in ("101,", ",104", "101,,104", "101, 104", "101,abc"):
+        with pytest.raises(ValidationError):
+            with_experience([], bad)

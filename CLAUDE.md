@@ -928,6 +928,12 @@ opening no menu and clicking nothing, with every band shown beside its code so
 a person can check one against BOSS's own URL. `boss_search_filters.py` still
 holds no table of codes and still cannot say what `103` means.
 
+**Several bands at once**, because BOSS itself accepts them as one
+comma-separated value (`experience=101,104`) and `_VALUE` already validated
+that shape. 经验不限 alongside 1-3年 is one search, not two - and it is the
+combination that actually matters, since a posting that asks for nothing is as
+reachable as one asking for a year or two.
+
 **It is a constraint, not a segment, and that distinction is the whole design.**
 Salary bands exist to make BOSS return *different* lists, so each band is its
 own search. An experience requirement is a property every result should have,
@@ -939,6 +945,13 @@ something other than what they pasted.
 
 Asking BOSS to filter beats skipping cards afterwards: the whole returned page
 is in range, rather than 30 cards of which two thirds get thrown away.
+
+The chosen bands are printed **outside the collapsed 搜索选项 block, directly
+above 开始搜索**. The first run after this shipped carried no filter at all:
+the control existed and worked, but lived inside a folded section, so there was
+nothing to tell the user at the moment of pressing the button whether they had
+actually chosen anything. A setting that only exists where nobody looks is a
+setting nobody applies.
 
 The queue filters the **already collected** library the same way, locally and
 for free: `QueueFilters.max_required_years` drops a proposal whose *minimum*

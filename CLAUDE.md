@@ -139,9 +139,11 @@ them read「您好，我目前从事云基础设施与中间件工程，具备 A
 沟通。」- 90 to 130 characters of flattened résumé, identical opener, and not one
 word about the posting.
 
-What the prompt asks for instead: at most 90 characters, something the JD
-actually says, **one concrete thing from the work history** rather than two
-skill names, and **a question the recruiter can answer in one line**. The question is the part
+What the prompt asks for instead: 45-70 characters, two sentences. The first
+binds what the JD asks for to **one concrete thing from the work history**
+(never two skill names) using the JD's own vocabulary, so the fit is visible
+without the reader connecting anything. The second is a short question the
+recruiter can answer in one line. The question is the part
 that matters:「期待进一步沟通」gives them nothing to reply to, while「这个岗位更偏
 平台建设还是值班运维？」gets answered on the way to the next message. It must ask
 about something the JD says or conspicuously omits - never an invented detail.
@@ -157,7 +159,7 @@ Grounding is unchanged and is the one rule that never bends: nothing may
 appear that is not in the résumé. A better register must never buy itself a
 fabricated project.
 
-It took six versions and about twenty real fast-model calls to get there,
+It took eight versions and about thirty real fast-model calls to get there,
 and the useful part is *why* the middle ones failed:
 
 - **v2/v3 replaced one template with another.** Prescribing "三句话，按这个
@@ -178,12 +180,23 @@ and the useful part is *why* the middle ones failed:
 - **v6 is bookkeeping**: pin 您好 (v4 dropped the rule and outputs drifted to
   你好), ban 参与过 and 正是我想发展的方向, and list five question shapes,
   because all four greetings had converged on 「更偏 A 还是 B？」.
+- **v7 fixed the shape, not the words.** v6 read 「JD 说 A。我做过 B。问题？」-
+  the first sentence restated the posting back at the person who wrote it, and
+  the match between A and B was left for them to work out. The user's words:
+  「感觉像是只在问人家一些问题，没有那种一眼看出来我和他们公司能匹配上的感觉」.
+  v7 requires the match to happen **inside one sentence**, in the JD's own
+  vocabulary: 「您这边要用 Terraform 管理 AWS，我用 Terraform 搭过 VPC、子网和
+  EC2」. The question shrinks to a short clause - it earns the reply, it is not
+  the message.
+- **v8 removed the 「也……」 clause.** v7 kept bolting a second experience on and
+  overshot its own limit on half the runs. One match, stated once, is both
+  shorter and sharper - the same lesson as v5. 45-70 characters, down from 90.
 
 Grounding never moved through any of it: a warmer register may not buy itself
 one fabricated fact, and a number that is not in the résumé is a fabricated
 fact.
 
-`PROMPT_VERSION` is `v6`, so **only newly analyzed jobs get the new
+`PROMPT_VERSION` is `v8`, so **only newly analyzed jobs get the new
 greeting**. 投递队列's 刷新招呼语 refreshes the listed ones, and it needed no new
 endpoint or service: `analyze-batch/plan` then `analyze-batch` with
 **`force=false`**, because `analysis_cache_key` already contains the prompt

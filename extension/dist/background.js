@@ -2083,7 +2083,7 @@ async function startRunner(taskId, candidateCap, binding, matchApproval, console
     if (salaryOcrBusy)
         return { ok: false, error: 'salary_ocr_busy' };
     if (!validCandidateCap(candidateCap))
-        return { ok: false, error: '候选上限必须是 1–20 的整数，请重新确认。' };
+        return { ok: false, error: `候选上限必须是 1–${RUNNER_MAX_TARGET} 的整数，请重新确认。` };
     if (matchApproval && (matchApproval.confirmed !== true || matchApproval.cap !== candidateCap || candidateCap > 3)) {
         return { ok: false, error: '自动匹配需明确确认费用，候选/分析上限最多 3 个。' };
     }
@@ -2811,17 +2811,23 @@ async function startBatch(taskIds, candidateCap, sender, background = false) {
     if (!validBatchTaskIds(taskIds))
         return { ok: false, error: '批次必须包含 1–16 个不重复的待处理任务。' };
     if (!validCandidateCap(candidateCap))
-        return { ok: false, error: '候选上限必须是 1–20 的整数。' };
+        return { ok: false, error: `候选上限必须是 1–${RUNNER_MAX_TARGET} 的整数。` };
     if (batchAdmission)
         return { ok: false, error: '批次启动确认正在处理，请勿重复提交。' };
     batchAdmission = true;
     try {
         if (activeRunToken !== null || await getRunnerPointer() || await getGlobalPointer()) {
-            return { ok: false, error: '已有任务运行；不会并发启动批次。' };
+            // Name the pointer. "已有任务运行" was true of three different things,
+            // and the remedy differs for each.
+            const which = activeRunToken !== null ? '本次会话内有运行中的搜索'
+                : await getRunnerPointer() ? '扩展里残留着一个搜索单元的指针'
+                    : '扩展里残留着一个受监督会话指针';
+            return { ok: false, error: `${which}；请在弹窗或本页点「取消」清掉它，再开始批次。` };
         }
         const existing = await getBatchPointer();
-        if (existing && ['running', 'paused'].includes(existing.state))
-            return { ok: false, error: '已有批次运行。' };
+        if (existing && ['running', 'paused'].includes(existing.state)) {
+            return { ok: false, error: `扩展里还留着一个${existing.state === 'paused' ? '已暂停' : '运行中'}的批次（任务 #${existing.taskIds[existing.currentIndex]}）；请先点「取消」。` };
+        }
         // Validate the whole approved list before the first browser side effect.
         const validatedTasks = [];
         for (const taskId of taskIds) {

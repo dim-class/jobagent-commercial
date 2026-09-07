@@ -869,11 +869,31 @@ the same `filter_sets` path a pasted URL already used - there is no second
 segmentation mechanism, and the same `_VALUE` pattern validates both, because
 the value ends up in a URL the extension will navigate to.
 
-The fixtures for this reader are **authored, not captured**: no save of the
-BOSS filter bar existed, and no automated test may visit zhipin.com to make
-one. The tests pin the reader's logic; whether it matches the live bar stays a
-manual claim the user makes in their own Chrome - which is exactly why the
-console displays the codes rather than hiding them.
+The fixture for this reader was authored from a guess, and **every part of the
+guess was wrong** - discovered on 2026-09-07 when the picker returned nothing
+on the live page. Read read-only from the real filter bar that day (one
+navigation, DOM reads, no menu opened, nothing clicked), an option is:
+
+```html
+<li ka="sel-job-rec-exp-104"> 1-3年<i class="ui-icon-check"></i></li>
+```
+
+- **the code lives in BOSS's own `ka` attribute**, not in an `href`. The live
+  page has zero `a[href*="salary="]` and zero `a[href*="experience="]`;
+- **a band is not a childless node** - it wraps an icon - so a reader that
+  only looked at childless elements found none of them. `ownText()` reads an
+  element's direct text nodes, which gets 「1-3年」 from the `li` and an empty
+  string from the `ul` that contains every band;
+- **1-3年 is 104, not the 103 that was guessed** - 103 is 1年以内. An off-by-one
+  band would have searched the wrong thing with nothing to notice it by.
+
+The same two structural mistakes meant **the salary reader had never worked on
+the live page either**, which is why no salary bands ever appeared. The fixture
+now mirrors the real DOM and carries the real codes.
+
+Whether the live bar keeps this shape is still a manual claim the user makes in
+their own Chrome - which is exactly why the console displays every band beside
+its code rather than hiding it.
 
 **Searching by experience band (2026-09-07).** Measured on the library it was
 added against: of 742 undecided jobs, 255 asked for 3-5 years and 253 for 5-10

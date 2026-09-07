@@ -1734,11 +1734,11 @@ var BossExtract = (function () {
         let labelsWithoutCode = 0;
         const seen = new Set();
         for (const el of bandsIn(root, spec.band)) {
-            const text = (el.textContent || '').trim();
+            const text = ownText(el);
             if (seen.has(text))
                 continue;
             seen.add(text);
-            const code = codeOf(el, spec.href);
+            const code = codeOf(el, spec);
             if (code)
                 options.push({ label: text, code });
             else
@@ -1756,22 +1756,42 @@ var BossExtract = (function () {
         salary: {
             labels: BossSelectors.FILTER_SALARY_LABEL,
             band: BossSelectors.FILTER_SALARY_BAND_RE,
+            ka: BossSelectors.FILTER_SALARY_CODE_KA_RE,
             href: BossSelectors.FILTER_CODE_HREF_RE,
         },
         experience: {
             labels: BossSelectors.FILTER_EXPERIENCE_LABEL,
             band: BossSelectors.FILTER_EXPERIENCE_BAND_RE,
+            ka: BossSelectors.FILTER_EXPERIENCE_CODE_KA_RE,
             href: BossSelectors.FILTER_EXPERIENCE_CODE_HREF_RE,
         },
     };
+    /** An element's OWN text, ignoring descendants.
+     *
+     *  A band is `<li> 1-3年<i class="ui-icon-check"></i></li>`, so it is not a
+     *  childless node and `textContent` on its `<ul>` would concatenate every
+     *  band into one string. Reading only the direct text nodes gets 「1-3年」
+     *  from the `li` and an empty string from the `ul`. */
+    function ownText(el) {
+        let out = '';
+        for (const node of Array.from(el.childNodes)) {
+            if (node.nodeType === 3)
+                out += node.nodeValue || '';
+        }
+        return out.trim();
+    }
     function bandsIn(root, band) {
-        return Array.from(root.querySelectorAll('*')).filter((el) => el.children.length === 0 && band.test((el.textContent || '').trim()));
+        return Array.from(root.querySelectorAll('*')).filter((el) => band.test(ownText(el)));
     }
     /** The option's own code: BOSS's query parameter first, then a numeric
      *  attribute on the option or its immediate parent. Never a sibling's. */
-    function codeOf(el, href) {
+    function codeOf(el, spec) {
         for (const node of [el, el.parentElement].filter(Boolean)) {
-            const match = href.exec(node.getAttribute('href') || '');
+            // BOSS's own tracking attribute is where the code actually lives.
+            const ka = spec.ka.exec(node.getAttribute('ka') || '');
+            if (ka)
+                return ka[1];
+            const match = spec.href.exec(node.getAttribute('href') || '');
             if (match)
                 return match[1];
             for (const attr of Array.from(node.attributes)) {

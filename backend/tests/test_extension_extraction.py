@@ -1406,13 +1406,17 @@ async def test_a_failed_salary_read_records_the_category_not_the_figure(browser_
 
 
 # --------------------------------------------------------------------------
-# the results-page salary filter, read (never clicked)
+# the results-page filter menus, read (never clicked)
 #
-# These fixtures are AUTHORED, not captured - no save of the BOSS filter bar
-# existed, and no automated test may visit zhipin.com to make one. They pin the
-# reader's logic. Whether the live bar matches stays a manual claim, which is
-# why the console shows every label with its code and asks the human to check
-# one against BOSS's own URL.
+# `boss_search_salary_filter.html` now mirrors the live filter bar's real
+# structure and real codes, read read-only on 2026-09-07. Its first version was
+# authored from a guess, and every part of the guess was wrong: the options are
+# `<li ka="sel-job-rec-salary-406">` rather than anchors, each wraps an
+# `<i class="ui-icon-check">` so none is a childless node, and the experience
+# codes were off by one band. A reader built against that guess found nothing
+# at all on the real page. The other filter fixtures here are still authored,
+# and whether the live bar keeps this shape stays a manual claim - which is why
+# the console shows every label beside its code.
 # --------------------------------------------------------------------------
 
 SEARCH_URL = "https://www.zhipin.com/web/geek/jobs?city=101010100&query=%E8%BF%90%E7%BB%B4"
@@ -1422,8 +1426,10 @@ async def test_salary_bands_are_read_with_their_codes(read_salary_filter):
     result = await read_salary_filter("boss_search_salary_filter.html", url=SEARCH_URL)
     assert result["reason"] is None
     assert result["options"] == [
-        {"label": "不限", "code": "401"},
+        {"label": "不限", "code": "0"},
         {"label": "3K以下", "code": "402"},
+        {"label": "3-5K", "code": "403"},
+        {"label": "5-10K", "code": "404"},
         {"label": "10-20K", "code": "405"},
         {"label": "20-50K", "code": "406"},
         {"label": "50K以上", "code": "407"},
@@ -1438,10 +1444,25 @@ async def test_experience_bands_are_read_with_their_codes(read_experience_filter
     result = await read_experience_filter("boss_search_salary_filter.html", url=SEARCH_URL)
     assert result["reason"] is None
     codes = {row["label"]: row["code"] for row in result["options"]}
-    assert codes["1-3年"] == "103"
-    assert codes["3-5年"] == "104"
+    # The codes BOSS's own menu carried on 2026-09-07. The first version of
+    # this test asserted 1-3年 == "103", which is the code for 1年以内 - a
+    # guess that would have searched the wrong band with no way to notice.
+    assert codes["1-3年"] == "104"
+    assert codes["3-5年"] == "105"
+    assert codes["1年以内"] == "103"
     assert codes["经验不限"] == "101"
-    assert codes["10年以上"] == "106"
+    assert codes["10年以上"] == "107"
+
+
+async def test_a_band_is_found_even_though_it_wraps_an_icon(read_salary_filter):
+    """`<li> 20-50K<i class="ui-icon-check"></i></li>` is not a childless node,
+    and the first reader only looked at childless ones - so it found nothing on
+    the live page, for salary as much as for experience. Read 2026-09-07."""
+    result = await read_salary_filter("boss_search_salary_filter.html", url=SEARCH_URL)
+    codes = {row["label"]: row["code"] for row in result["options"]}
+    assert codes["20-50K"] == "406", "the code comes from the ka attribute, not an href"
+    assert codes["10-20K"] == "405"
+    assert "不限" in codes, "read here and dropped by the console, not by the reader"
 
 
 async def test_the_salary_menu_is_never_read_as_experience(read_experience_filter):
@@ -1452,7 +1473,7 @@ async def test_the_salary_menu_is_never_read_as_experience(read_experience_filte
     result = await read_experience_filter("boss_search_salary_filter.html", url=SEARCH_URL)
     labels = {row["label"] for row in result["options"]}
     assert not (labels & {"3K以下", "10-20K", "20-50K", "50K以上"})
-    assert all(row["code"] not in {"401", "402", "405", "406", "407"}
+    assert all(row["code"] not in {"402", "403", "404", "406", "407"}
                for row in result["options"])
 
 

@@ -3,45 +3,50 @@
 <head><meta charset="utf-8"><title>「北京招聘」-BOSS直聘</title></head>
 <body>
 <!--
-  AUTHORED, NOT CAPTURED.
+  STRUCTURE AND CODES READ FROM THE LIVE PAGE on 2026-09-07 (read-only: one
+  navigation and DOM reads, no menu opened, nothing clicked).
 
-  Every other fixture here was saved from a real BOSS page. This one was
-  written by hand: no capture of the results-page filter bar existed when the
-  salary reader was built, and no automated test may visit zhipin.com to make
-  one. So a passing test here proves the reader's logic, NOT that it matches
-  the live filter bar - that stays a manual claim the user makes after reading
-  the bands in their own Chrome and checking a code against BOSS's own URL.
+  The first version of this file was authored from a guess, and the guess was
+  wrong in three ways that all mattered: the options are `<li ka="...">` and
+  not anchors, each carries a nested `<i class="ui-icon-check">` so it is not
+  a childless node, and 1-3年 is 104 rather than the 103 that was guessed
+  (103 is 1年以内). A reader built against the guess found nothing at all on
+  the real page - for salary as well as experience.
 -->
 <div class="search-condition-wrapper">
   <div class="condition-filter-select">
-    <span class="dropdown-label">工作区域</span>
-    <ul class="dropdown-menu">
-      <li><a href="/web/geek/jobs?query=x&amp;multiBusinessDistrict=110105">朝阳区</a></li>
-      <li><a href="/web/geek/jobs?query=x&amp;multiBusinessDistrict=110108">海淀区</a></li>
-      <li><a href="/web/geek/jobs?query=x&amp;multiBusinessDistrict=110106">丰台区</a></li>
-    </ul>
+    <div class="current-select"><span class="placeholder-text">工作区域</span></div>
+    <div class="filter-select-dropdown"><ul>
+      <li ka="sel-job-rec-district-110105"> 朝阳区<i class="ui-icon-check"></i></li>
+      <li ka="sel-job-rec-district-110108"> 海淀区<i class="ui-icon-check"></i></li>
+      <li ka="sel-job-rec-district-110106"> 丰台区<i class="ui-icon-check"></i></li>
+    </ul></div>
   </div>
   <div class="condition-filter-select">
-    <span class="dropdown-label">薪资待遇</span>
-    <ul class="dropdown-menu">
-      <li><a href="/web/geek/jobs?query=x&amp;salary=401">不限</a></li>
-      <li><a href="/web/geek/jobs?query=x&amp;salary=402">3K以下</a></li>
-      <li><a href="/web/geek/jobs?query=x&amp;salary=405">10-20K</a></li>
-      <li><a href="/web/geek/jobs?query=x&amp;salary=406">20-50K</a></li>
-      <li><a href="/web/geek/jobs?query=x&amp;salary=407">50K以上</a></li>
-    </ul>
+    <div class="current-select"><span class="placeholder-text">薪资待遇</span></div>
+    <div class="filter-select-dropdown"><ul>
+      <li ka="sel-job-rec-salary-0"> 不限<i class="ui-icon-check"></i></li>
+      <li ka="sel-job-rec-salary-402"> 3K以下<i class="ui-icon-check"></i></li>
+      <li ka="sel-job-rec-salary-403"> 3-5K<i class="ui-icon-check"></i></li>
+      <li ka="sel-job-rec-salary-404"> 5-10K<i class="ui-icon-check"></i></li>
+      <li ka="sel-job-rec-salary-405"> 10-20K<i class="ui-icon-check"></i></li>
+      <li ka="sel-job-rec-salary-406"> 20-50K<i class="ui-icon-check"></i></li>
+      <li ka="sel-job-rec-salary-407"> 50K以上<i class="ui-icon-check"></i></li>
+    </ul></div>
   </div>
   <div class="condition-filter-select">
-    <span class="dropdown-label">工作经验</span>
-    <ul class="dropdown-menu">
-      <li><a href="/web/geek/jobs?query=x&amp;experience=101">经验不限</a></li>
-      <li><a href="/web/geek/jobs?query=x&amp;experience=102">在校/应届</a></li>
-      <li><a href="/web/geek/jobs?query=x&amp;experience=108">1年以内</a></li>
-      <li><a href="/web/geek/jobs?query=x&amp;experience=103">1-3年</a></li>
-      <li><a href="/web/geek/jobs?query=x&amp;experience=104">3-5年</a></li>
-      <li><a href="/web/geek/jobs?query=x&amp;experience=105">5-10年</a></li>
-      <li><a href="/web/geek/jobs?query=x&amp;experience=106">10年以上</a></li>
-    </ul>
+    <div class="current-select"><span class="placeholder-text">工作经验</span></div>
+    <div class="filter-select-dropdown"><ul>
+      <li ka="sel-job-rec-exp-0"> 不限<i class="ui-icon-check"></i></li>
+      <li ka="sel-job-rec-exp-108"> 在校生<i class="ui-icon-check"></i></li>
+      <li ka="sel-job-rec-exp-102"> 应届生<i class="ui-icon-check"></i></li>
+      <li ka="sel-job-rec-exp-101"> 经验不限<i class="ui-icon-check"></i></li>
+      <li ka="sel-job-rec-exp-103"> 1年以内<i class="ui-icon-check"></i></li>
+      <li ka="sel-job-rec-exp-104"> 1-3年<i class="ui-icon-check"></i></li>
+      <li ka="sel-job-rec-exp-105"> 3-5年<i class="ui-icon-check"></i></li>
+      <li ka="sel-job-rec-exp-106"> 5-10年<i class="ui-icon-check"></i></li>
+      <li ka="sel-job-rec-exp-107"> 10年以上<i class="ui-icon-check"></i></li>
+    </ul></div>
   </div>
 </div>
 </body>

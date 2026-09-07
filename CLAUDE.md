@@ -157,7 +157,14 @@ Grounding is unchanged and is the one rule that never bends: nothing may
 appear that is not in the résumé. A better register must never buy itself a
 fabricated project.
 
-`PROMPT_VERSION` moved to `v2`, so **only newly analyzed jobs get the new
+Verified on three real jobs before it was called done. v2 fixed the shape but
+ran 114 characters against a stated 40-90, and dropped 「您好」 entirely, which
+reads curt as a cold first message. `v3` states the limit as a hard 90 with
+instructions for what to cut, and allows 「您好」 as long as what follows is
+about the posting. The three came back at 85, 86 and — the point of the
+opener rule — three different first sentences, each naming its own JD.
+
+`PROMPT_VERSION` is `v3`, so **only newly analyzed jobs get the new
 greeting**. Everything already cached keeps the old one until it is
 re-analyzed, which costs a call - the per-job 重新分析 on the job page is the
 cheap way to refresh one.

@@ -16,6 +16,7 @@ import {
 } from '@/components/ui'
 import type {
   BatchAnalyzePlan,
+  JobCleanupPlan,
   JobCreatePayload,
   JobListItem,
   JobListResponse,
@@ -100,6 +101,12 @@ export default function JobsPage() {
   const [busyJobId, setBusyJobId] = useState<number | null>(null)
   const [selectedJobIds, setSelectedJobIds] = useState<Set<number>>(new Set())
   const [batchPlan, setBatchPlan] = useState<BatchAnalyzePlan | null>(null)
+  // Plan then confirm, like every other irreversible action here. Reading the
+  // plan deletes nothing; the confirmation carries the exact count, so a set
+  // that moved in between cancels rather than deleting a different one.
+  const [purgePlan, setPurgePlan] = useState<JobCleanupPlan | null>(null)
+  const [purgeThreshold, setPurgeThreshold] = useState(40)
+  const [purgeBusy, setPurgeBusy] = useState(false)
   const [batchPlanIds, setBatchPlanIds] = useState<number[]>([])
   const [batchBusy, setBatchBusy] = useState(false)
   const [cleanupConfirm, setCleanupConfirm] = useState(false)
@@ -218,6 +225,29 @@ export default function JobsPage() {
   // Two steps on purpose, the same shape every paid action in this app uses:
   // asking what a run would cost writes nothing and calls no model; only the
   // explicit confirmation spends anything.
+  async function openPurgePlan() {
+    setPurgeBusy(true)
+    setFeedback(null)
+    try {
+      setPurgePlan(await api.getJobCleanupPlan(purgeThreshold))
+    } catch (err) {
+      setFeedback({ tone: 'error', text: err instanceof ApiError ? err.message : '生成清理计划失败' })
+    } finally { setPurgeBusy(false) }
+  }
+
+  async function runPurge() {
+    if (!purgePlan) return
+    setPurgeBusy(true)
+    try {
+      const result = await api.runJobCleanup(purgePlan.threshold, purgePlan.deletable)
+      setPurgePlan(null)
+      setFeedback({ tone: 'success', text: result.message })
+      await load(filters)
+    } catch (err) {
+      setFeedback({ tone: 'error', text: err instanceof ApiError ? err.message : '清理失败' })
+    } finally { setPurgeBusy(false) }
+  }
+
   async function openBatchPlan() {
     const jobIds = jobs.filter((job) => selectedJobIds.has(job.id)).map((job) => job.id)
     if (jobIds.length === 0) return
@@ -842,6 +872,67 @@ export default function JobsPage() {
           </>
         )}
       </Card>
+
+      <div className="row mt-1">
+        <button
+          type="button"
+          className="btn-sm"
+          disabled={purgeBusy}
+          onClick={() => void openPurgePlan()}
+        >
+          {purgeBusy ? '处理中…' : `清理低分岗位（低于 ${purgeThreshold} 分）`}
+        </button>
+        <select
+          value={purgeThreshold}
+          onChange={e => setPurgeThreshold(Number(e.target.value))}
+          disabled={purgeBusy}
+        >
+          <option value={30}>30 分以下</option>
+          <option value={40}>40 分以下</option>
+          <option value={50}>50 分以下</option>
+          <option value={60}>60 分以下</option>
+        </select>
+        <span className="small faint">
+          删除是不可逆的。投过、跳过、回复过的岗位一律保留，不论分数。
+        </span>
+      </div>
+
+      {purgePlan ? (
+        <Modal
+          title="确认清理低分岗位"
+          onClose={() => setPurgePlan(null)}
+          footer={
+            <>
+              <button className="btn btn-secondary" onClick={() => setPurgePlan(null)}>
+                取消
+              </button>
+              <button
+                className="btn btn-danger"
+                disabled={purgeBusy || purgePlan.deletable === 0}
+                onClick={() => void runPurge()}
+              >
+                {purgeBusy ? '删除中…' : `确认删除 ${purgePlan.deletable} 个岗位`}
+              </button>
+            </>
+          }
+        >
+          <ul className="small">
+            <li>已分析的岗位：{purgePlan.analyzed} 个</li>
+            <li>
+              低于 {purgePlan.threshold} 分且从未处理过：
+              <strong>{purgePlan.deletable} 个 —— 会被删除</strong>
+            </li>
+            <li>低于 {purgePlan.threshold} 分但有操作记录：{purgePlan.protected} 个（保留）</li>
+            <li>还没分析过、没有分数：{purgePlan.unscored} 个（不动）</li>
+          </ul>
+          <p className="small text-warn">
+            删除不可撤销，岗位的分析记录也会一并消失。
+            {purgePlan.protected > 0
+              ? `已投递／跳过／回复过的 ${purgePlan.protected} 个岗位会原样保留——删掉它们会让投递漏斗和简历转化率对不上。`
+              : ''}
+          </p>
+        </Modal>
+      ) : null}
 
       {batchPlan ? (
         <Modal

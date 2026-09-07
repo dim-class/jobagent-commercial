@@ -37,6 +37,8 @@ from app.schemas.analysis import (
 from app.schemas.common import MessageResponse
 from app.schemas.job import (
     AnalysisSummary,
+    JobCleanupPlanOut,
+    JobCleanupRequest,
     JobCreate,
     JobCreateResponse,
     JobDetail,
@@ -56,6 +58,7 @@ from app.services.job_eligibility import classify_non_experienced_track
 from app.services.job_normalizer import normalize_city
 from app.core.career_strategy import load_strategy
 from app.services.job_matcher import build_pre_analysis
+from app.services import job_cleanup
 from app.services.scoring import extract_experience_requirement
 
 logger = get_logger(__name__)
@@ -510,6 +513,39 @@ def update_job(job_id: int, payload: JobUpdate, db: Session = Depends(get_db)) -
 
     db.refresh(job)
     return _get_job_or_404(db, job_id)
+
+
+@router.get("/cleanup/plan", response_model=JobCleanupPlanOut)
+def cleanup_plan(
+    threshold: int = Query(default=40, ge=0, le=100),
+    db: Session = Depends(get_db),
+) -> JobCleanupPlanOut:
+    """What a cleanup at this threshold would remove. Deletes nothing."""
+    result = job_cleanup.plan(db, threshold=threshold)
+    return JobCleanupPlanOut(
+        threshold=result.threshold,
+        analyzed=result.analyzed,
+        deletable=result.deletable_count,
+        protected=result.protected_count,
+        unscored=result.unscored,
+    )
+
+
+@router.post("/cleanup", response_model=MessageResponse)
+def cleanup_run(
+    payload: JobCleanupRequest = Body(...), db: Session = Depends(get_db)
+) -> MessageResponse:
+    """Delete low-scoring jobs nobody ever decided anything about."""
+    outcome = job_cleanup.run(
+        db,
+        threshold=payload.threshold,
+        expected_count=payload.expected_count,
+        confirmed=payload.confirmed,
+    )
+    return MessageResponse(
+        message=f"已删除 {outcome['deleted']} 个岗位；{outcome['protected']} 个因有操作记录被保留。",
+        detail=outcome,
+    )
 
 
 @router.delete("/{job_id}", response_model=MessageResponse)

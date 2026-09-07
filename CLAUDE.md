@@ -381,6 +381,41 @@ untouched; nothing polls it, the queue just compares it to now.
 Daily metrics convert UTC timestamps to `REPORT_TIMEZONE` (default
 `Asia/Tokyo`) before comparing dates - never compare naive UTC dates.
 
+### Deleting low-scoring jobs (2026-09-07)
+
+A library that has grown to ~1000 rows is mostly postings the model scored in
+the thirties, and every one of them is noise while browsing and a row the queue
+loads on each read. `services/job_cleanup.py` deletes them - with one rule that
+decides what is safe:
+
+**a decision is never thrown away.** `ApplicationEvent` is append-only and the
+analytics are built on it, so deleting a job that was applied to, skipped,
+replied to, or carried an interview or offer would quietly rewrite history: the
+funnel would report fewer applications than really happened and per-variant
+conversion would move. Those rows are reported as `protected` and left exactly
+where they are, whatever they scored. So is any job whose `Job.status` a human
+moved.
+
+What does *not* protect a row is the machine's own bookkeeping - `note`,
+`analyzed`, `viewed`, `saved`, `greeting_copied`. Intake writes a note and the
+analysis writes `analyzed` on every job there is, so counting those would make
+nothing deletable. Measured when it shipped: of 235 jobs under 40, exactly 2
+carried a human decision.
+
+A job that was **never analyzed** has no score to judge it by and is never
+touched - being new is not a reason to be thrown away. It is reported
+separately so the arithmetic adds up.
+
+Plan then confirm, like every other irreversible action here: reading the plan
+deletes nothing, and the confirmation carries the exact count, so a set that
+moved between reading the dialog and pressing the button cancels rather than
+deleting a different one.
+
+Not to be confused with 岗位库's existing 清理, which marks early-career
+postings `skipped`. That one is reversible and keeps every row; this one
+deletes. Different verbs, deliberately different names in the code
+(`purge*` vs `cleanup*`).
+
 ### Database migrations (since v0.4)
 
 Alembic owns the schema. `init_db()` creates a fresh database and stamps head,

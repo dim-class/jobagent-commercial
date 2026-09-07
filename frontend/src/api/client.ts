@@ -4,6 +4,7 @@
 // the backend only. Requests go to the Vite dev proxy (/api -> 127.0.0.1:8000).
 
 import type {
+  JobCleanupPlan,
   SearchPlanTask,
   SalaryBackfillPlan,
   SearchKeywordAnalytics,
@@ -275,6 +276,14 @@ export const api = {
   // Free: a local aggregate over analyses you already paid for.
   searchKeywordAnalytics: () =>
     request<SearchKeywordAnalytics>('/api/analytics/search-keywords'),
+  // Free: reading what a cleanup would remove deletes nothing.
+  getJobCleanupPlan: (threshold: number) =>
+    request<JobCleanupPlan>(`/api/jobs/cleanup/plan${query({ threshold })}`),
+  runJobCleanup: (threshold: number, expectedCount: number) =>
+    request<{ message: string; detail: { deleted: number; protected: number } }>('/api/jobs/cleanup', {
+      method: 'POST',
+      body: JSON.stringify({ threshold, expected_count: expectedCount, confirmed: true }),
+    }),
   getSalaryBackfillPlan: () => request<SalaryBackfillPlan>('/api/jobs/salary-backfill/plan'),
   getActiveSalaryBackfillRun: () =>
     request<SalaryBackfillRun | null>('/api/jobs/salary-backfill/runs/active'),
@@ -283,6 +292,8 @@ export const api = {
       method: 'POST', body: JSON.stringify({ confirmed: true, fingerprint: plan.fingerprint,
         job_ids: plan.items.map(item => item.job_id) }),
     }),
+  cancelSalaryBackfillRun: (id: number) =>
+    request<SalaryBackfillRun>(`/api/jobs/salary-backfill/runs/${id}/cancel`, { method: 'POST' }),
   getSalaryBackfillRun: (id: number) =>
     request<SalaryBackfillRun>(`/api/jobs/salary-backfill/runs/${id}`),
   authorizeSalaryBackfillRemaining: (id: number) =>

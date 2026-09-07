@@ -120,3 +120,21 @@ class JobCreateResponse(BaseModel):
 
 
 JobDetail.model_rebuild()
+
+
+class JobCleanupPlanOut(BaseModel):
+    """What a cleanup would remove. Every number a human needs before deleting."""
+
+    threshold: int = Field(description="低于这个匹配分的岗位会被清理")
+    analyzed: int = Field(description="库里已分析过的岗位总数")
+    deletable: int = Field(description="低于阈值且从未被人工处理过 - 会被删除")
+    protected: int = Field(description="低于阈值但有人工决定记录 - 保留，不论分数")
+    unscored: int = Field(description="从未分析过、没有分数可判断 - 永远不动")
+
+
+class JobCleanupRequest(BaseModel):
+    threshold: int = Field(default=40, ge=0, le=100)
+    #: Must equal what the plan reports at execution time, so a set that moved
+    #: between reading the dialog and pressing the button cancels instead.
+    expected_count: int = Field(ge=0)
+    confirmed: bool = False

@@ -2385,3 +2385,15 @@ export interface AiSettingsIn {
   model_fast?: string
   model_smart?: string
 }
+
+
+export interface JobCleanupPlan {
+  threshold: number
+  analyzed: number
+  /** Below the threshold and never decided on - these would be deleted. */
+  deletable: number
+  /** Below the threshold but carrying a human decision - kept regardless. */
+  protected: number
+  /** Never analyzed, so there is no score to judge them by. Never touched. */
+  unscored: number
+}

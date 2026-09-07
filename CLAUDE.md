@@ -139,9 +139,9 @@ them read「您好，我目前从事云基础设施与中间件工程，具备 A
 沟通。」- 90 to 130 characters of flattened résumé, identical opener, and not one
 word about the posting.
 
-What v2 asks for instead: 40-90 characters, three sentences - something the JD
-actually says, the one or two things the résumé actually has that match it, and
-**a question the recruiter can answer in one line**. The question is the part
+What the prompt asks for instead: at most 90 characters, something the JD
+actually says, **one concrete thing from the work history** rather than two
+skill names, and **a question the recruiter can answer in one line**. The question is the part
 that matters:「期待进一步沟通」gives them nothing to reply to, while「这个岗位更偏
 平台建设还是值班运维？」gets answered on the way to the next message. It must ask
 about something the JD says or conspicuously omits - never an invented detail.
@@ -157,14 +157,33 @@ Grounding is unchanged and is the one rule that never bends: nothing may
 appear that is not in the résumé. A better register must never buy itself a
 fabricated project.
 
-Verified on three real jobs before it was called done. v2 fixed the shape but
-ran 114 characters against a stated 40-90, and dropped 「您好」 entirely, which
-reads curt as a cold first message. `v3` states the limit as a hard 90 with
-instructions for what to cut, and allows 「您好」 as long as what follows is
-about the posting. The three came back at 85, 86 and — the point of the
-opener rule — three different first sentences, each naming its own JD.
+It took six versions and about twenty real fast-model calls to get there,
+and the useful part is *why* the middle ones failed:
 
-`PROMPT_VERSION` is `v3`, so **only newly analyzed jobs get the new
+- **v2/v3 replaced one template with another.** Prescribing "三句话，按这个
+  顺序" produced four greetings with identical rhythm. A rigid structure is
+  what made v1 stiff; a different rigid structure is still stiff.
+- **v4 gave four deliberately different example shapes, and the model picked
+  one and stayed there.** Examples anchor much harder than they diversify, so
+  variety has to come from a rule about the *input* (start from this JD),
+  never from a menu of shapes.
+- **v5 found the real defect.** Every greeting read 「我做过 AWS 迁移测试和
+  WAS/IHS 排障」 - two nouns lifted from the `skills` list with a verb bolted
+  on, which any candidate in the field could have written. The résumé had
+  「2 套 ST 应用服务器环境的搭建与配置核对」 and 「4 人团队」 sitting in
+  `work_experience`, and the agent receives the full text, so the material was
+  never the problem. v5 requires the concrete sentence to come from the work
+  history - an action, a project, a quantity - and forbids dressing up a skill
+  name.
+- **v6 is bookkeeping**: pin 您好 (v4 dropped the rule and outputs drifted to
+  你好), ban 参与过 and 正是我想发展的方向, and list five question shapes,
+  because all four greetings had converged on 「更偏 A 还是 B？」.
+
+Grounding never moved through any of it: a warmer register may not buy itself
+one fabricated fact, and a number that is not in the résumé is a fabricated
+fact.
+
+`PROMPT_VERSION` is `v6`, so **only newly analyzed jobs get the new
 greeting**. Everything already cached keeps the old one until it is
 re-analyzed, which costs a call - the per-job 重新分析 on the job page is the
 cheap way to refresh one.

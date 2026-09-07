@@ -886,7 +886,9 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
           </p>
           <details>
             <summary className="small faint">
-              档位来源：{expFromSite ? 'BOSS 页面（已自动读取）' : '内置默认（2026-09-07 读自 BOSS，建议核对一次）'}
+              档位来源：{expFromSite
+                ? 'BOSS 页面（已自动读取）'
+                : '内置默认（2026-09-07 读自 BOSS；经验不限·101 与 1-3年·104 已对照地址栏核对一致）'}
             </summary>
             <div className="row mt-1">
               {expBands.map(band => (
@@ -894,6 +896,8 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
               ))}
             </div>
             <p className="small faint">
+              选中后 JobAgent 就是把这些代码拼进搜索地址（experience=101,104），
+              BOSS 打开后「工作经验」里会直接是勾上的状态——和你自己在页面上点是同一件事。
               核对方法：在 BOSS 上点一下同名档位，看地址栏 experience= 后面的数字对不对得上。
               开着 BOSS 搜索结果页时会自动重读一次；也可以现在手动重读。
             </p>

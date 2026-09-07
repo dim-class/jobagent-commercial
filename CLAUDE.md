@@ -957,7 +957,10 @@ codes may exist in this repo. That rule was written when the codes were
 way to notice" - is what the seed's three mitigations address:
 
 - the values were **read from the live page**, not guessed, and the constant
-  carries that date;
+  carries that date. The user then checked the two that matter against BOSS's
+  own address bar on 2026-09-07: ticking 经验不限 and 1-3年 by hand produced
+  `?city=101210100&experience=101,104`, exactly what the seed holds and exactly
+  what `build_search_url` emits, comma unescaped;
 - **a live read overwrites the seed** and is attempted automatically whenever a
   BOSS results tab is open, so the site remains the authority;
 - the console shows every band **beside its code**, states whether what is on

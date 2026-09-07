@@ -1511,13 +1511,19 @@ var BossExtract = (function () {
         const pane = panes.nodes[0];
         if (!pane)
             return { status: 'chat_job_unknown' };
-        // A leaf's text, because a parent's `textContent` is every descendant
-        // concatenated and would match almost anything.
-        const leaves = Array.from(pane.querySelectorAll('*'))
-            .filter((node) => !node.children.length)
+        // Leaves alone are not enough: BOSS splits a title like
+        // 「云迁移运维工程师＋3个月（朝阳区MQ）」 across spans, so no single leaf
+        // holds it and the whole approval was refused as `chat_wrong_job`
+        // (observed 2026-09-07). A wrapper's `textContent` is every descendant
+        // concatenated, which is why the pane itself must not qualify - so a
+        // candidate is capped at a little longer than what is being looked for.
+        // That admits a header row and excludes the conversation.
+        const values = Array.from(pane.querySelectorAll('*'))
             .map((node) => text(node))
             .filter(Boolean);
-        const found = (wanted) => leaves.some((value) => {
+        const found = (wanted) => values.some((value) => {
+            if (value.length > wanted.length + 40)
+                return false;
             if (value === wanted)
                 return true;
             // BOSS renders 「公司 | 招聘者职位」 and 「职位 25-40K 北京」 as single
@@ -1560,6 +1566,19 @@ var BossExtract = (function () {
             return { status: 'empty_greeting' };
         if (!expectedExternalId)
             return { status: 'wrong_job' };
+        // Resolved BEFORE the identity check, and deliberately so. A chat page
+        // that has not finished rendering has no composer, no header and no
+        // conversation - and reporting that as `chat_job_unknown` made the worker
+        // give up at once, because only "not ready yet" statuses are waited out.
+        // Observed 2026-09-07: three applications in a row skipped their greeting
+        // against a page whose diagnostic read `ta=0/0|snd=none|see=none` - an
+        // empty document, not the wrong conversation.
+        //
+        // Nothing is typed here; the identity check below still gates that.
+        const composer = greetingComposer(doc);
+        if (composer.status !== 'ok' || !composer.input || !composer.send) {
+            return { status: composer.status };
+        }
         const observedUrl = cleanUrl(currentUrl);
         const observedId = observedUrl ? externalIdOf(observedUrl) : null;
         if (observedId) {
@@ -1573,10 +1592,6 @@ var BossExtract = (function () {
         }
         else {
             return { status: 'left_job_page' };
-        }
-        const composer = greetingComposer(doc);
-        if (composer.status !== 'ok' || !composer.input || !composer.send) {
-            return { status: composer.status };
         }
         const view = doc.defaultView;
         if (!view)

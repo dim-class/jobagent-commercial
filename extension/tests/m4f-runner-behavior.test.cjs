@@ -2930,7 +2930,7 @@ test('the wait is bounded and reports the miss rather than trying forever', { sk
     { type: 'jobagent:console-command', action: 'execute-application', approvalId: 31 },
     { tab: { id: 8 }, frameId: 0, url: 'http://127.0.0.1:5173/#/queue' },
   )
-  assert.equal(h.greetings(), 5, 'exactly the declared attempt ceiling')
+  assert.equal(h.greetings(), 9, 'exactly the declared attempt ceiling')
   assert.equal(h.outcomes.at(-1).detail, 'clicked_greeting_skipped:no_composer')
 })
 

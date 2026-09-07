@@ -3077,7 +3077,10 @@ function isM6CanonicalUrl(raw, externalId) {
  * risks a second message, which is the one thing this must never do. */
 const M6_COMPOSER_WAIT_MS = 1200;
 const M6_COMPOSER_RETRY_MS = 700;
-const M6_COMPOSER_ATTEMPTS = 5;
+// A full-page navigation to BOSS's chat app renders later than its in-page
+// panel: 1.2s + 5x0.7s still met a completely empty document on 2026-09-07.
+// Still one bounded wait with a termination counter, and still one send.
+const M6_COMPOSER_ATTEMPTS = 9;
 async function m6Tab(tabId) {
     try {
         return await chrome.tabs.get(tabId);

@@ -996,8 +996,11 @@ async def chat_greeting(browser_page, extension_bundle):
         return {
             "status": status,
             "clicks": await browser_page.evaluate("() => window.__sent"),
+            # Defensive: a test that empties the pane removes this element,
+            # and the composer's absence is the thing under test.
             "typed": await browser_page.evaluate(
-                "() => document.querySelector('.chat-input').value"
+                "() => { const i = document.querySelector('.chat-input');"
+                "  return i ? i.value : '' }"
             ),
         }
 
@@ -1053,6 +1056,47 @@ async def test_another_conversation_in_the_list_never_confirms_the_open_one(chat
     assert result["status"] == "chat_job_unknown", "both are on the page, neither is in the pane"
     assert result["clicks"] == 0
     assert result["typed"] == ""
+
+
+@pytest.mark.asyncio
+async def test_a_chat_page_still_rendering_reports_not_ready_not_wrong_job(chat_greeting):
+    """The status decides whether the worker waits or gives up.
+
+    Observed 2026-09-07: three applications skipped their greeting against a
+    chat page whose diagnostic read `ta=0/0|snd=none|see=none` - BOSS had not
+    finished building the app. Reporting that as `chat_job_unknown` made the
+    worker treat an empty document as a final answer about identity.
+    """
+    result = await chat_greeting(
+        prepare="() => { document.querySelector('.chat-conversation').innerHTML = '' }"
+    )
+    assert result["status"] == "no_composer", "the one status that gets waited out"
+
+
+@pytest.mark.asyncio
+async def test_a_title_split_across_spans_is_still_recognised(chat_greeting):
+    """BOSS splits 「云迁移运维工程师＋3个月（朝阳区MQ）」 across spans, so no
+    single leaf holds it - and the whole approval was refused as
+    chat_wrong_job on 2026-09-07."""
+    result = await chat_greeting()
+    assert result["status"] == "sent"
+    assert result["clicks"] == 1
+
+
+@pytest.mark.asyncio
+async def test_the_pane_itself_never_counts_as_a_header_match(chat_greeting):
+    """Matching a wrapper's concatenated text must not admit the whole
+    conversation - that would make any long-enough pane confirm anything."""
+    result = await chat_greeting(
+        prepare="""() => {
+          // Move the company far from the title, with a long message between
+          // them: only the pane as a whole now contains both.
+          const t = document.querySelector('.chat-title')
+          t.parentNode.appendChild(t)
+          document.querySelector('.message-card').textContent = '内容'.repeat(60)
+        }"""
+    )
+    assert result["status"] == "sent", "both still live in short header nodes"
 
 
 @pytest.mark.asyncio

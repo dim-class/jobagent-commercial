@@ -1632,7 +1632,21 @@ Rules specific to it:
   Two statuses mean "not ready yet" and are the only ones the bounded retry
   waits out: `no_composer`, and a content script that did not answer at all
   because BOSS is mid-navigation. A wrong or ambiguous job is refused, never
-  waited on.
+  waited on - which is why **the composer is resolved before the identity
+  check, not after**. A chat page still building has no composer, no header
+  and no conversation; reporting that as `chat_job_unknown` made the worker
+  treat an empty document as a final answer about identity, and three
+  applications in a row skipped their greeting against a page whose
+  diagnostic read `ta=0/0|snd=none|see=none` (2026-09-07). Nothing is typed
+  any earlier: the identity check still gates that. The wait also grew to
+  nine attempts, because a full-page navigation to the chat app renders later
+  than the in-page panel it replaces.
+
+  **A header value may be split across spans.** 「云迁移运维工程师＋3个月
+  （朝阳区MQ）」 is, so no single leaf held it and the approval was refused as
+  `chat_wrong_job`. Wrappers are matched too, capped at the wanted string's
+  length plus 40 characters - long enough for a header row, far too short for
+  the conversation, which must never qualify.
 
   The queue used to report only the click, so all four read
   「已执行一次立即沟通」 and the user found out an hour later by looking at

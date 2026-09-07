@@ -25,22 +25,22 @@ export async function startFullSalaryBackfill(
   // is pending/running/paused. A run paused by a worker error on 2026-09-06
   // therefore silently swallowed every automatic backfill after it, and 120
   // consecutive new jobs came in with no salary while the console said
-  // nothing. Deal with the old run first, in the open.
+  // nothing.
+  //
+  // A stalled plan is also a *frozen list*: #16 covered the 47 jobs that were
+  // missing a salary the day it was built, while 93 of the 100 missing one
+  // today were not in it. Resuming it would work through six stale rows and
+  // still leave those 93 outside.
+  //
+  // Cancelling it costs nothing, and that is worth saying out loud: an item
+  // still pending in that run is by definition still missing its salary, so
+  // it is already in the new plan. Only the run's own bookkeeping goes, never
+  // a job and never a recorded outcome.
   const active = await api.getActiveSalaryBackfillRun()
   if (active) {
-    const left = active.items.filter(item => item.state === 'pending').length
-    if (left > 0) {
-      // Still has work: continue it rather than abandoning what it recorded.
-      await api.authorizeSalaryBackfillRemaining(active.id)
-      const resumed = await consoleExtension(
-        'start-salary-backfill', undefined, undefined, undefined, active.id,
-        undefined, undefined, background,
-      )
-      return resumed.ok
-        ? { ok: true, message: `继续上次未完成的薪资补全，还剩 ${left} 个岗位。` }
-        : { ok: false, message: resumed.error || '上次的补全计划未能继续，请在「更多功能」里查看。' }
+    if (active.state === 'running') {
+      return { ok: false, message: '薪资补全正在运行中，等它结束或先暂停。' }
     }
-    // Nothing left in it - it only stands in the way of a fresh plan.
     await api.cancelSalaryBackfillRun(active.id)
   }
 

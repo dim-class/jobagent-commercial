@@ -381,6 +381,26 @@ untouched; nothing polls it, the queue just compares it to now.
 Daily metrics convert UTC timestamps to `REPORT_TIMEZONE` (default
 `Asia/Tokyo`) before comparing dates - never compare naive UTC dates.
 
+### A backfill plan is a frozen list (2026-09-07)
+
+`create_run` refuses while any run is `pending`/`running`/`paused`, and a run
+paused by a worker error on 2026-09-06 therefore swallowed every automatic
+backfill after it: 120 consecutive new jobs arrived with no salary while the
+console said nothing.
+
+Resuming that run is not the fix either, because a plan is **the list of jobs
+that were missing a salary the day it was built**. Plan #16 held 47; a day
+later 100 jobs were missing one and **93 of them were not in it**. The panel
+showed 「可回填 100 个」 and 「计划 #16 · 41/47」 side by side with nothing to say
+they were different sets.
+
+So `startFullSalaryBackfill` cancels an open run - unless it is actually
+`running` - and plans afresh. **Cancelling costs nothing, and the UI says so:**
+an item still pending in that run is by definition still missing its salary, so
+it is already in the new plan. Only the run's own bookkeeping goes; no job and
+no recorded outcome. The panel names the uncovered count and offers the swap in
+one click rather than leaving the arithmetic to the reader.
+
 ### Deleting low-scoring jobs (2026-09-07)
 
 A library that has grown to ~1000 rows is mostly postings the model scored in

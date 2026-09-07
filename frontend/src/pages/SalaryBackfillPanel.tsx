@@ -40,6 +40,28 @@ export default function SalaryBackfillPanel() {
   // first start, so a small plan runs as one continuous session instead of a
   // string of three-job batches. It buys continuity, never permission: login,
   // verification, foreground loss, worker error and manual pause still stop it.
+  /** Swap a frozen plan for one covering everything missing a salary now.
+   *
+   *  Reuses `startFullSalaryBackfill`, which cancels the open run first - two
+   *  copies of a sequence that authorises browser work would eventually
+   *  disagree about what it authorises. */
+  async function replacePlan() {
+    if (!plan) return
+    if (!window.confirm(
+      `作废计划 #${run?.id}，改为覆盖当前全部 ${plan.eligible_jobs} 个缺薪岗位？
+`
+      + '旧计划里没处理完的岗位本身仍缺薪资，会自动包含在新计划里，不会漏掉。',
+    )) return
+    setBusy(true)
+    try {
+      const result = await startFullSalaryBackfill()
+      setMessage(result.message)
+      await refresh()
+    } catch (err) {
+      setMessage(err instanceof ApiError ? err.message : '更换计划失败')
+    } finally { setBusy(false) }
+  }
+
   async function create(all: boolean) {
     if (!plan || plan.eligible_jobs < 1) return
     const confirmation = all
@@ -88,6 +110,12 @@ export default function SalaryBackfillPanel() {
   }
 
   const remaining = run ? run.total_jobs - run.processed_jobs : 0
+  // How many currently-eligible jobs the frozen plan does not contain. The
+  // run carries its own item list, so this needs no extra request.
+  const uncovered = run && plan
+    ? Math.max(0, plan.eligible_jobs - run.items.filter(
+        item => item.state === 'pending' || item.state === 'failed').length)
+    : 0
   const continuous = !!run && run.session_cap > 3
 
   return <section id="salary-backfill" className="card" style={{ marginTop: 16 }}>
@@ -121,6 +149,24 @@ export default function SalaryBackfillPanel() {
       {run.state === 'running' && <button disabled={busy} onClick={() => void act('pause-salary-backfill')}>暂停</button>}
       {['pending', 'running', 'paused'].includes(run.state) && <button disabled={busy}
         onClick={() => void act('cancel-salary-backfill')}>取消计划</button>}
+      {/* A plan is a frozen list, taken when it was created. #16 covered the
+          47 jobs missing a salary that day while 93 of the 100 missing one a
+          day later were not in it - and the panel showed both numbers side by
+          side with nothing to say they were different sets. */}
+      {uncovered > 0 && run.state !== 'running' ? (
+        <>
+          <p className="small text-warn">
+            这个计划是建立时的名单，不会自己加入新岗位：现在可回填 {plan?.eligible_jobs} 个，
+            其中 <strong>{uncovered} 个不在本计划里</strong>。
+          </p>
+          <button className="btn btn-primary" disabled={busy} onClick={() => void replacePlan()}>
+            换成覆盖全部 {plan?.eligible_jobs} 个的新计划
+          </button>
+          <p className="small faint">
+            本计划里还没处理的 {remaining} 个本身就还缺薪资，所以它们已经在新计划里了——不会漏掉。
+          </p>
+        </>
+      ) : null}
     </> : <>
       <button disabled={busy || !plan?.eligible_jobs} onClick={() => void create(true)}>
         准备并处理全部 {plan?.eligible_jobs ?? 0} 个

@@ -655,6 +655,18 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
         cities, targetCount, filterLines, activeBandCodes, activeExpCode)
       const nextTasks = prepared.tasks
       if (!nextTasks.length) throw new Error('没有生成可执行的搜索任务。')
+      // Pydantic ignores fields it does not know, so a backend still running
+      // code from before `experience_code` existed dropped it in silence -
+      // three runs went out unfiltered while the console showed the bands
+      // selected, and the obvious-looking conclusion ("they never ticked it")
+      // was wrong every time. The returned `search_url` is what the runner
+      // will actually navigate to, so it can simply be checked.
+      if (activeExpCode && !nextTasks.some(row => (row.search_url || '').includes('experience='))) {
+        throw new Error(
+          '已选择经验档，但后端建出来的搜索没有带上它——后端进程多半还是改动前的版本。'
+          + '请重启后端（scripts\dev.ps1 start）后重试；这批任务不带筛选，建议删掉重建。',
+        )
+      }
       const nextIds = new Set(nextTasks.map(row => row.id))
       setTasks(current => [...current.filter(row => !nextIds.has(row.id)), ...nextTasks])
       setSelected(nextTasks[0].id)

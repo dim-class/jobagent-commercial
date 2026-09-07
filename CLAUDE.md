@@ -381,6 +381,27 @@ untouched; nothing polls it, the queue just compares it to now.
 Daily metrics convert UTC timestamps to `REPORT_TIMEZONE` (default
 `Asia/Tokyo`) before comparing dates - never compare naive UTC dates.
 
+### A stale backend drops new fields in silence (2026-09-07)
+
+Three runs went out with no experience filter while the console showed the
+bands selected, and the obvious reading - "they never ticked it" - was wrong
+every time. The frontend was correct end to end; the running uvicorn process
+was not. Its `/openapi.json` still advertised
+`['cities', 'target_count', 'filter_urls', 'salary_codes']`, and Pydantic
+**ignores fields it does not know**, so `experience_code` was dropped without
+an error, a warning or a log line.
+
+Vite hot-reloads the frontend, so a long session drifts naturally into exactly
+this state: new UI talking to old routes. `scripts/dev.ps1 start -Reload` is
+what keeps the backend current.
+
+The console now checks rather than trusts. `SearchPlanTaskOut.search_url` is
+the URL the runner will actually navigate to, so after preparing, a run that
+asked for an experience band and got back tasks whose URLs carry no
+`experience=` fails loudly and names the likely cause. **A request silently
+ignored is worse than one refused** - it cost three runs and two wrong
+diagnoses before anyone thought to ask the server what it knew.
+
 ### A backfill plan is a frozen list (2026-09-07)
 
 `create_run` refuses while any run is `pending`/`running`/`paused`, and a run

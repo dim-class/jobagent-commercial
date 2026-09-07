@@ -214,11 +214,15 @@ the résumé's **raw text**, which `build_user_prompt` passes whole as
 `resume_excerpt`. The parser under-extracts; the agent is not fabricating.
 Check the raw text before treating a grounding violation as real.
 
+**v13/v14 dropped the question** (user asked 2026-09-07: 「就说对公司和岗位有兴趣就行，不用问问题」). My case for it - a question earns a reply where 「期待进一步沟通」 earns nothing - was made and overruled; these are the user's own messages to real recruiters, and that is their call. The greeting now closes on one short line of interest in *this* posting.
+
+Removing it had a side effect worth recording: with no question to build toward, the "start from the job" rule went slack and three of four openers reverted to 「您好，我做云基础设施…」 - the identical-template problem v2 existed to fix. v14 makes naming the posting in the first sentence mandatory rather than preferred. Four real runs came back at 124-133 characters against a stated 125; the overshoot is left alone, because tightening the number produced clipped phrasing and loosening it produced longer output.
+
 Grounding never moved through any of it: a warmer register may not buy itself
 one fabricated fact, and a number that is not in the résumé is a fabricated
 fact.
 
-`PROMPT_VERSION` is `v12`, so **only newly analyzed jobs get the new
+`PROMPT_VERSION` is `v14`, so **only newly analyzed jobs get the new
 greeting**. 投递队列's 刷新招呼语 refreshes the listed ones, and it needed no new
 endpoint or service: `analyze-batch/plan` then `analyze-batch` with
 **`force=false`**, because `analysis_cache_key` already contains the prompt

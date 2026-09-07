@@ -23,6 +23,7 @@ import {
 } from '@/components/ui'
 import type {
   ApplicationApprovalOut,
+  BatchAnalyzePlan,
   ApplicationProposal,
   JobStatus,
   QueueResponse,
@@ -122,6 +123,12 @@ const STATE_LABEL: Record<string, string> = {
 
 export default function ApplicationQueuePage() {
   const [data, setData] = useState<QueueResponse | null>(null)
+  // Refreshing the greetings is a paid action, so it uses the same
+  // plan-then-confirm shape every paid action in this app uses: asking what a
+  // run would cost writes nothing and calls no model.
+  const [greetPlan, setGreetPlan] = useState<BatchAnalyzePlan | null>(null)
+  const [greetIds, setGreetIds] = useState<number[]>([])
+  const [greetBusy, setGreetBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [feedback, setFeedback] = useState<Feedback>(null)
   const [busyJob, setBusyJob] = useState<number | null>(null)
@@ -184,6 +191,53 @@ export default function ApplicationQueuePage() {
   const items = data?.items ?? []
   const cityOptions = useMemo(() => Object.keys(data?.facets.cities ?? {}), [data])
   const skipReasons = data?.facets.skip_reasons ?? []
+
+  /** What re-analyzing the listed jobs would cost. Pure read - spends nothing.
+   *
+   *  `force` is deliberately false: the analysis cache key includes the prompt
+   *  version, so a job already analyzed under the current one is a cache hit
+   *  and costs nothing, while one written by an older prompt is a miss and
+   *  gets the new greeting. The plan's `cached` / `pending` split therefore
+   *  already says exactly how many greetings are out of date. */
+  async function openGreetingPlan() {
+    const jobIds = items.map(item => item.job_id)
+    if (jobIds.length === 0) return
+    setGreetBusy(true)
+    setFeedback(null)
+    try {
+      const plan = await api.analyzeBatchPlan(jobIds)
+      setGreetIds(jobIds)
+      setGreetPlan(plan)
+    } catch (err) {
+      setFeedback({ tone: 'error', text: err instanceof ApiError ? err.message : '生成计划失败' })
+    } finally {
+      setGreetBusy(false)
+    }
+  }
+
+  async function runGreetingRefresh() {
+    if (!greetPlan || greetIds.length === 0) return
+    setGreetBusy(true)
+    setFeedback({ tone: 'info', text: `正在重新分析 ${greetPlan.in_batch} 个岗位…` })
+    try {
+      const result = await api.analyzeBatch(false, greetIds)
+      setGreetPlan(null)
+      setGreetIds([])
+      const failed = result.failed > 0 ? `，失败 ${result.failed} 个（不会自动重试）` : ''
+      const deferred = result.requested > result.items.length
+        ? `；还有 ${result.requested - result.items.length} 个超出本批次上限，未处理，可以再点一次`
+        : ''
+      setFeedback({
+        tone: result.failed > 0 ? 'warn' : 'success',
+        text: `完成：新生成招呼语 ${result.analyzed} 个，${result.cached} 个已是最新（未花钱）${failed}${deferred}。`,
+      })
+      await load(filters)
+    } catch (err) {
+      setFeedback({ tone: 'error', text: err instanceof ApiError ? err.message : '重新分析失败' })
+    } finally {
+      setGreetBusy(false)
+    }
+  }
 
   function updateFilter<K extends keyof QueueFilters>(key: K, value: QueueFilters[K]) {
     setFilters((prev) => ({ ...prev, [key]: value }))
@@ -523,6 +577,66 @@ export default function ApplicationQueuePage() {
           在 BOSS 上自己投递过、但这里没记录的岗位，可以在此补上。
         </span>
       </div>
+
+      <div className="row mb-1">
+        <button
+          type="button"
+          className="btn-sm"
+          disabled={greetBusy || items.length === 0}
+          onClick={() => void openGreetingPlan()}
+        >
+          {greetBusy ? '处理中…' : '刷新招呼语'}
+        </button>
+        <span className="small faint">
+          招呼语的写法改过之后，旧岗位仍是旧版本。点一下先看要花多少次调用，再决定。
+        </span>
+      </div>
+
+      {greetPlan ? (
+        <Card title="确认重新分析">
+          <ul className="small">
+            <li>列表中的岗位：{greetPlan.selected} 个</li>
+            <li>本批次上限（MAX_ANALYSES_PER_RUN）：{greetPlan.limit} 个</li>
+            <li>本次实际处理：{greetPlan.in_batch} 个</li>
+            <li>其中招呼语已是最新、不花钱：{greetPlan.cached} 个</li>
+            <li>
+              <strong>预计新增 AI 调用：{greetPlan.pending} 次</strong>
+              （模型 {greetPlan.model}，简历「{greetPlan.resume_name}」）
+            </li>
+          </ul>
+          {greetPlan.deferred > 0 ? (
+            <p className="small text-warn">
+              超出本批次上限，本次只处理前 {greetPlan.in_batch} 个，剩余 {greetPlan.deferred} 个
+              不会处理。系统不会自行放宽上限；本次跑完后再点一次即可继续。
+            </p>
+          ) : null}
+          <p className="small faint">
+            重新分析会一并更新分数和结论，不只是招呼语——分数可能小幅变动。
+            已投递的记录不受影响。
+          </p>
+          <div className="actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={greetBusy || greetPlan.pending === 0}
+              onClick={() => void runGreetingRefresh()}
+            >
+              {greetBusy ? '分析中…' : `确认花费 ${greetPlan.pending} 次调用`}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={greetBusy}
+              onClick={() => { setGreetPlan(null); setGreetIds([]) }}
+            >
+              取消
+            </button>
+          </div>
+          {greetPlan.pending === 0 ? (
+            <p className="small faint mt-1">列表里的招呼语都已经是最新版本，无需重新分析。</p>
+          ) : null}
+        </Card>
+      ) : null}
 
       {showBackfill ? (
         <AppliedBackfillPanel onDone={() => { setShowBackfill(false); void load(filters) }} />

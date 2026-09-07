@@ -184,7 +184,17 @@ one fabricated fact, and a number that is not in the résumé is a fabricated
 fact.
 
 `PROMPT_VERSION` is `v6`, so **only newly analyzed jobs get the new
-greeting**. Everything already cached keeps the old one until it is
+greeting**. 投递队列's 刷新招呼语 refreshes the listed ones, and it needed no new
+endpoint or service: `analyze-batch/plan` then `analyze-batch` with
+**`force=false`**, because `analysis_cache_key` already contains the prompt
+version. A job analyzed under the current prompt is a cache hit and costs
+nothing; one written by an older prompt is a miss and gets rewritten. So the
+plan's existing `cached` / `pending` split *is* the count of out-of-date
+greetings, and the confirmation states it before anything is spent. Measured
+when it shipped: 21 listed, 4 already current, 17 calls.
+
+Re-analysis rewrites the score and verdict too, not only the greeting, and the
+dialog says so - a refreshed job can move a point or two. Everything already cached keeps the old one until it is
 re-analyzed, which costs a call - the per-job 重新分析 on the job page is the
 cheap way to refresh one.
 

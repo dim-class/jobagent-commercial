@@ -12,6 +12,11 @@
  */
 
 ;(function () {
+  /** Mirrors the worker's `RUNNER_MAX_CANDIDATES` and the backend's
+   *  `MAX_CANDIDATE_CAP`. All copies of a ceiling move together; the one that
+   *  does not is the one that fails quietly. */
+  const RUNNER_MAX_CANDIDATES = 60
+
   interface SearchPlanTask {
     id: number
     max_candidates?: number | null
@@ -239,8 +244,13 @@
     const task = selectedTask()
     if (!task) return
     const candidateCap = candidateCapInput.valueAsNumber
-    if (!Number.isInteger(candidateCap) || candidateCap < 1 || candidateCap > Math.min(20, task.max_candidates ?? 20)) {
-      setStatus(`请输入 1–${Math.min(20, task.max_candidates ?? 20)} 的整数候选上限。`, 'error')
+    // The immutable ceiling, mirrored from `RUNNER_MAX_CANDIDATES` in the
+    // worker and `MAX_CANDIDATE_CAP` in the backend. This copy was left at 20
+    // when those went to 60; every copy of a ceiling has to move together, and
+    // the ones that do not fail quietly.
+    const ceiling = Math.min(RUNNER_MAX_CANDIDATES, task.max_candidates ?? RUNNER_MAX_CANDIDATES)
+    if (!Number.isInteger(candidateCap) || candidateCap < 1 || candidateCap > ceiling) {
+      setStatus(`请输入 1–${ceiling} 的整数候选上限。`, 'error')
       return
     }
     startBtn.disabled = true

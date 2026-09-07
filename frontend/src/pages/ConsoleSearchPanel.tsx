@@ -693,6 +693,10 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
 
   async function command(action: ConsoleAction, approved = false) {
     if (admission.current || !task) return
+    if ((action === 'start' || action === 'resume') && !connection && !checking) {
+      setError(`扩展状态不可用，未发送请求：${bridgeDetail || '未知原因'}。可在「高级设置与诊断」里刷新连接。`)
+      return
+    }
     if ((action === 'start' || action === 'resume') && (!backendReady || !connection || checking)) return
     // Call the bridge immediately in the trusted click turn: no async preparation
     // before browser handoff, and never include a paid match approval.
@@ -747,7 +751,15 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
   }
 
   async function batchCommand(action: 'start-batch' | 'pause-batch' | 'resume-batch' | 'cancel-batch', approved = false) {
-    if (admission.current || !connection) return
+    if (admission.current) return
+    // Never a silent no-op. `connection` is null whenever the handshake failed
+    // its own validation, and returning quietly here meant a healthy worker
+    // reporting one out-of-range number made every button do nothing at all,
+    // with nothing on screen to say why. `bridgeDetail` is that reason.
+    if (!connection) {
+      setError(`扩展状态不可用，未发送请求：${bridgeDetail || '未知原因'}。可在「高级设置与诊断」里刷新连接。`)
+      return
+    }
     if ((action === 'start-batch' || action === 'resume-batch') && (!backendReady || checking)) return
     let taskIds: number[] | undefined
     let approvedBatchCap: number | undefined

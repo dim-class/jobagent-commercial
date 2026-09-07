@@ -1325,15 +1325,27 @@ is what a human dragging the scrollbar does, and rounds buy depth again.
   run spends its budget on new postings rather than on more of the same;
 - the consecutive-no-new threshold (default 3) still ends a direction that has
   genuinely run dry, so 30 is a ceiling and rarely a target.
-- **a cap lives in two files, and they must be changed together.** The request
-  schema (`schemas/supervised_session.py`) repeats every ceiling that
+- **a cap lives in FOUR files, and they must be changed together.** The
+  request schema (`schemas/supervised_session.py`) repeats every ceiling that
   `services/supervised_sessions.py` enforces, because the service imports the
   schema and the dependency cannot run the other way. Raising the scroll
   ceiling in the service alone made Pydantic reject the request before the
   service was ever reached, and the run failed with the generic
   「请求参数不合法」 - which names no field, so it reads to the user as "the
-  button does nothing". `test_schema_bounds_match_the_service_ceilings` now
-  pins the pair.
+  button does nothing".
+
+  The candidate cap has two more copies, and on 2026-09-07 both were still 20
+  while the service and the worker were at 60: `runner.ts`'s popup validation,
+  and - the one that mattered - `consoleExtension.ts`'s
+  `assessConsoleConnection`. That validator declared a perfectly healthy worker
+  **invalid** because it reported a batch with `candidateCap: 60`; the console
+  then held `connection` as null, and every button returned at its first line
+  without an error. The screen did nothing at all, twice, and the cause was a
+  number in a file nobody had touched.
+
+  `tests/test_console_bridge_bounds.py` now pins all four to
+  `MAX_CANDIDATE_CAP` and fails on a bare `candidateCap > 20` anywhere, and the
+  console's guards report `bridgeDetail` instead of returning silently.
 
 #### A backgrounded tab cannot deepen the list (measured 2026-09-06)
 

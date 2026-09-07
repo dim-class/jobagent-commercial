@@ -46,6 +46,17 @@ export interface ConsoleReply {
 export const DEFAULT_BATCH_CANDIDATE_CAP = 1
 export const MAX_CONSOLE_BATCH_TASKS = 16
 
+/** The immutable per-task ceiling on opened details, mirrored from
+ *  `supervised_sessions.MAX_CANDIDATE_CAP` and the worker's
+ *  `RUNNER_MAX_CANDIDATES`. **All three move together.**
+ *
+ *  This one was left at 20 when the other two went to 60, and the failure was
+ *  as quiet as it gets: `assessConsoleConnection` declared a perfectly healthy
+ *  worker invalid because it reported a batch with `candidateCap: 60`, the
+ *  console then held `connection` as null, and every button returned at its
+ *  first line without an error. The screen simply did nothing. */
+export const MAX_CONSOLE_CANDIDATE_CAP = 60
+
 export class ConsoleConnectionError extends Error {
   readonly code: string
   constructor(code: string, message: string) {
@@ -78,7 +89,8 @@ export function assessConsoleConnection(reply: ConsoleReply): { ready: boolean; 
   if (runner !== null && (!runner || !Number.isSafeInteger(runner.taskId) || runner.taskId < 1
     || typeof runner.phase !== 'string' || runner.phase.length > 80
     || typeof runner.paused !== 'boolean' || typeof runner.paid !== 'boolean'
-    || !Number.isInteger(runner.candidateCap) || runner.candidateCap < 1 || runner.candidateCap > 20)) {
+    || !Number.isInteger(runner.candidateCap) || runner.candidateCap < 1
+    || runner.candidateCap > MAX_CONSOLE_CANDIDATE_CAP)) {
     return { ready: false, detail: '扩展运行状态响应无效；不会把未知状态当作空闲。' }
   }
   const batch = reply.batch
@@ -88,7 +100,8 @@ export function assessConsoleConnection(reply: ConsoleReply): { ready: boolean; 
     || !batch.taskIds.every(id => Number.isSafeInteger(id) && id > 0)
     || !Number.isInteger(batch.currentIndex) || batch.currentIndex < 0 || batch.currentIndex >= batch.taskIds.length
     || batch.currentTaskId !== batch.taskIds[batch.currentIndex]
-    || !Number.isInteger(batch.candidateCap) || batch.candidateCap < 1 || batch.candidateCap > 20
+    || !Number.isInteger(batch.candidateCap) || batch.candidateCap < 1
+    || batch.candidateCap > MAX_CONSOLE_CANDIDATE_CAP
     || typeof batch.requiresResume !== 'boolean'
     || (batch.lastError !== null && typeof batch.lastError !== 'string'))) {
     return { ready: false, detail: '扩展批次状态响应无效；不会启用批次操作。' }

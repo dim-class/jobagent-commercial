@@ -86,7 +86,11 @@ test('optional auto-match rejects four candidates before quote or start', async 
   assert.equal(ui.messages.some(m => m.type === 'jobagent:runner-start'), false)
 })
 
-for (const value of ['', '0', '21', '1.5', 'abc']) {
+// '61' rather than '21': the ceiling is RUNNER_MAX_CANDIDATES (60). It was
+// 20 when this list was written, and a stale copy of that number in the
+// console's own handshake validator is what silently disabled every button on
+// 2026-09-07 - see tests/test_console_bridge_bounds.py.
+for (const value of ['', '0', '61', '1.5', 'abc']) {
   test(`popup rejects invalid cap ${JSON.stringify(value)} without starting`, async () => {
     const ui = await popup()
     ui.element('runner-candidate-cap').value = value

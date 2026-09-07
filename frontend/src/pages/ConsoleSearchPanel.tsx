@@ -160,6 +160,8 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
   const [expChosen, setExpChosen] = useState<string | null>(() => {
     try { return window.localStorage.getItem(EXP_CHOSEN_KEY) || null } catch { return null }
   })
+  const [expBusy, setExpBusy] = useState(false)
+  const expProbed = useRef(false)
   const [chosenBands, setChosenBands] = useState<string[]>(() => loadChosenBands())
   const [bandBusy, setBandBusy] = useState(false)
   //: Reading the bands is a pure DOM read on a tab the human already has open,
@@ -432,16 +434,23 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
         const reply = await consoleExtension('read-salary-filter')
         const bands = (reply.options ?? []).filter(row => row.label !== '不限')
         if (reply.ok && bands.length) { setSalaryBands(bands); saveBands(bands) }
-        // Same silent, read-only probe for 经验 - one page load, no menu opened.
-        const exp = await consoleExtension('read-experience-filter')
-        const expOptions = (exp.options ?? []).filter(row => row.label !== '不限')
-        if (exp.ok && expOptions.length) {
-          setExpBands(expOptions)
-          try { window.localStorage.setItem(EXP_BANDS_KEY, JSON.stringify(expOptions)) } catch { /* ignore */ }
-        }
       } catch { /* silent: the button is the explicit path */ }
     })()
   }, [connection, salaryBands.length, bandBusy])
+
+  // Its own effect on purpose. Hanging this off the salary probe meant every
+  // salary-side condition silently blocked it - a stored set of salary bands
+  // was enough to make the experience menu never be read at all, which is
+  // exactly what happened on 2026-09-07: the picker simply never appeared.
+  useEffect(() => {
+    if (expProbed.current || expBands.length || expBusy) return
+    if (!connection?.capabilities?.includes('read-experience-filter-v1')) return
+    if (connection.runner || connection.batch?.state === 'running') return
+    expProbed.current = true
+    void (async () => {
+      try { await readExperienceBands(true) } catch { /* the button is the explicit path */ }
+    })()
+  }, [connection, expBands.length, expBusy])
 
   useEffect(() => {
     if (!autoFillSalary || salaryBusy || autoFilled.current) return
@@ -451,6 +460,28 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     autoFilled.current = true
     void fillSalaries(true)
   }, [autoFillSalary, salaryBusy, connection, missingSalaries])
+
+  async function readExperienceBands(silent = false) {
+    if (expBusy) return
+    setExpBusy(true)
+    if (!silent) setFilterNote('')
+    try {
+      const reply = await consoleExtension('read-experience-filter')
+      if (!reply.ok || !reply.options?.length) {
+        if (!silent) setFilterNote(reply.error || '没有读到经验档位。')
+        return
+      }
+      // 不限 is a real BOSS option, and choosing it is the unfiltered search.
+      const bands = reply.options.filter(row => row.label !== '不限')
+      setExpBands(bands)
+      try { window.localStorage.setItem(EXP_BANDS_KEY, JSON.stringify(bands)) } catch { /* ignore */ }
+      if (!silent) {
+        setFilterNote(`读到 ${bands.length} 个经验档位。请核对档位和代码是否和 BOSS 页面一致，再选择。`)
+      }
+    } catch (err) {
+      if (!silent) setFilterNote(err instanceof Error ? err.message : '读取失败')
+    } finally { setExpBusy(false) }
+  }
 
   async function readSalaryBands() {
     if (bandBusy) return
@@ -819,11 +850,34 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
         BOSS 的列表和详情面板里薪资是特殊字体，读不到；补全会去岗位详情页取。
       </p>
 
+      {/* Always rendered, so there is a way to read the bands when the silent
+          probe could not - an empty section that only appears once it has
+          already worked is no help at all. */}
+      <div className="field mt-1">
+        <label htmlFor="exp-band">只搜这个经验档</label>
+        {expBands.length ? null : (
+          <div className="row">
+            <button
+              type="button"
+              className="btn-sm"
+              disabled={expBusy || !connection?.capabilities?.includes('read-experience-filter-v1')}
+              onClick={() => void readExperienceBands()}
+            >
+              {expBusy ? '读取中…' : '从 BOSS 页面读取经验档位'}
+            </button>
+            <span className="small faint">
+              {connection?.capabilities?.includes('read-experience-filter-v1')
+                ? '需要一个已打开的 BOSS 搜索结果页。只读，不会展开菜单或点击任何东西。'
+                : '扩展版本较旧，没有这个能力——请在 Chrome 扩展页点一下「重新加载」。'}
+            </span>
+          </div>
+        )}
+      </div>
       {expBands.length ? (
         <div className="field mt-1">
-          <label htmlFor="exp-band">只搜这个经验档</label>
+          <label htmlFor="exp-band-select">档位</label>
           <select
-            id="exp-band"
+            id="exp-band-select"
             value={activeExpCode ?? ''}
             onChange={e => {
               const code = e.target.value || null
@@ -842,7 +896,21 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
           <p className="small faint">
             交给 BOSS 去筛，所以整页结果都在这个档里，而不是搜回来再扔掉。
             它作用在每一次搜索上，不会像薪资分段那样把名额切开。
+            第一次用之前，请在 BOSS 上点一下同名档位，核对地址栏 experience= 后面的代码。
           </p>
+          <div className="row">
+            {expBands.map(band => (
+              <span key={band.code} className="chip">{band.label} · {band.code}</span>
+            ))}
+            <button
+              type="button"
+              className="btn-sm"
+              disabled={expBusy}
+              onClick={() => void readExperienceBands()}
+            >
+              {expBusy ? '读取中…' : '重新读取'}
+            </button>
+          </div>
         </div>
       ) : null}
       {salaryBands.length && !activeBandCodes.length ? (

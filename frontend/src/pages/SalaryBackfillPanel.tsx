@@ -119,15 +119,19 @@ export default function SalaryBackfillPanel() {
   const continuous = !!run && run.session_cap > 3
 
   return <section id="salary-backfill" className="card" style={{ marginTop: 16 }}>
-    <h2>历史缺薪回填</h2>
-    <p>只处理已入库的 BOSS 详情链接；通过现有 canonical intake 补薪，不新建岗位。</p>
+    <h2>补全缺失的薪资</h2>
+    <p className="small faint">
+      BOSS 的列表和详情面板里薪资是特殊字体，读不到，所以要逐个打开岗位自己的详情页去取。
+      只处理已入库的岗位，不会新建，也不投递。
+    </p>
     {plan && <p>岗位 {plan.total_jobs} 个 · 已有薪资 {plan.salary_present} 个 ·
       可回填 {plan.eligible_jobs} 个 · 不可回填 {plan.ineligible_jobs} 个</p>}
+    {run ? <p>计划 #{run.id}：{run.state} · {run.processed_jobs}/{run.total_jobs} ·
+      成功 {run.updated_jobs} · 无法读取 {run.unavailable_jobs} · 失败 {run.failed_jobs}
+      · 本次授权 {run.session_processed}/{run.session_cap}
+      {run.paused_reason ? ` · 暂停：${run.paused_reason}` : ''}</p> : null}
+    <div className="btn-row">
     {run ? <>
-      <p>计划 #{run.id}：{run.state} · {run.processed_jobs}/{run.total_jobs} ·
-        成功 {run.updated_jobs} · 无法读取 {run.unavailable_jobs} · 失败 {run.failed_jobs}
-        · 本次授权 {run.session_processed}/{run.session_cap}
-        {run.paused_reason ? ` · 暂停：${run.paused_reason}` : ''}</p>
       {run.state === 'paused' && (continuous
         ? <button disabled={busy} onClick={() => void act('resume-salary-backfill')}>
           继续处理剩余 {remaining} 个
@@ -149,11 +153,21 @@ export default function SalaryBackfillPanel() {
       {run.state === 'running' && <button disabled={busy} onClick={() => void act('pause-salary-backfill')}>暂停</button>}
       {['pending', 'running', 'paused'].includes(run.state) && <button disabled={busy}
         onClick={() => void act('cancel-salary-backfill')}>取消计划</button>}
-      {/* A plan is a frozen list, taken when it was created. #16 covered the
-          47 jobs missing a salary that day while 93 of the 100 missing one a
-          day later were not in it - and the panel showed both numbers side by
-          side with nothing to say they were different sets. */}
-      {uncovered > 0 && run.state !== 'running' ? (
+    </> : <>
+      <button disabled={busy || !plan?.eligible_jobs} onClick={() => void create(true)}>
+        准备并处理全部 {plan?.eligible_jobs ?? 0} 个
+      </button>
+      <button disabled={busy || !plan?.eligible_jobs} onClick={() => void create(false)}>
+        每批 3 个
+      </button>
+    </>}
+    <button disabled={busy} onClick={() => void refresh()}>刷新进度</button>
+    </div>
+    {/* A plan is a frozen list, taken when it was created. #16 covered the
+        47 jobs missing a salary that day while 93 of the 100 missing one a
+        day later were not in it - and the panel showed both numbers side by
+        side with nothing to say they were different sets. */}
+    {run && uncovered > 0 && run.state !== 'running' ? (
         <>
           <p className="small text-warn">
             这个计划是建立时的名单，不会自己加入新岗位：现在可回填 {plan?.eligible_jobs} 个，
@@ -167,15 +181,6 @@ export default function SalaryBackfillPanel() {
           </p>
         </>
       ) : null}
-    </> : <>
-      <button disabled={busy || !plan?.eligible_jobs} onClick={() => void create(true)}>
-        准备并处理全部 {plan?.eligible_jobs ?? 0} 个
-      </button>
-      <button disabled={busy || !plan?.eligible_jobs} onClick={() => void create(false)}>
-        每批 3 个
-      </button>
-    </>}
-    <button disabled={busy} onClick={() => void refresh()}>刷新进度</button>
     {message && <p>{message}</p>}
     <p className="small faint">
       启动前请把同一 Chrome 窗口里的 BOSS 标签页停在<strong>搜索结果页</strong>

@@ -118,7 +118,7 @@ export default function OnboardingPage() {
         <p>{resume ? `已选择：${resume.label}` : '尚未上传简历'}</p>
         <input ref={fileInput} type="file" accept=".pdf,.docx,.txt" style={{ display: 'none' }}
           onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file) }} />
-        <div className="actions"><button className="btn btn-secondary" disabled={busy}
+        <div className="btn-row"><button className="btn btn-secondary" disabled={busy}
           onClick={() => fileInput.current?.click()}>{resume ? '更换简历' : '上传简历'}</button>
           <Link className="btn btn-secondary" to="/resume">管理简历版本</Link></div>
       </Card>
@@ -144,7 +144,7 @@ export default function OnboardingPage() {
       </Card>
     </div>
     <Card title="3. 保存并开始">
-      <div className="actions"><button className="btn btn-primary" disabled={busy || !strategy || !options}
+      <div className="btn-row"><button className="btn btn-primary" disabled={busy || !strategy || !options}
         onClick={() => void save()}>{busy ? '处理中…' : '保存个人设置'}</button>
         {ready ? <Link className="btn btn-secondary" to="/console">前往搜索岗位</Link> : null}</div>
       <p className="small faint">当前仅列出 JobAgent 已验证城市；未知城市不会被替换为默认城市。</p>

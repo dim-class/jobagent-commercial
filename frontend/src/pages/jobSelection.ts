@@ -1,7 +1,7 @@
 /** How the job library's selection reacts to a freshly loaded list.
  *
  * Extracted so the rule can be tested without rendering the page, the same way
- * `matchResultLifecycle.ts` is.
+ * a task-scoped one was.
  *
  * Two cases, and the difference is the whole point:
  *

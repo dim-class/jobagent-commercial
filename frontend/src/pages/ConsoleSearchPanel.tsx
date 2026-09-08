@@ -131,7 +131,7 @@ function saveSegments(value: string): void {
 
 const NEWLINE = String.fromCharCode(10)
 
-export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number) => void }) {
+export default function ConsoleSearchPanel() {
   const [cities, setCities] = useState<string[]>([])
   const [searchOptions, setSearchOptions] = useState<SearchPlanOptions | null>(null)
   const [hasResume, setHasResume] = useState(false)
@@ -640,7 +640,6 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       setTasks(current => [...current.filter(row => !nextIds.has(row.id)), ...nextTasks])
       setSelected(nextTasks[0].id)
       setPortfolioTaskIds(nextTasks.map(row => row.id))
-      onSelect(nextTasks[0].id)
       setBatchSize(nextTasks.length)
       setBatchCap(targetCount)
       setBatchConfirmation({
@@ -1045,7 +1044,7 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
           </div>
         )
         : null}
-      <div className="actions mt-1">
+      <div className="btn-row mt-1">
         <button className="btn btn-secondary" disabled={busy || !batchActive || !connection?.runner}
           onClick={() => void batchCommand('pause-batch')}>暂停</button>
         <button className="btn btn-secondary" disabled={busy || checking || !backendReady || !batchActive

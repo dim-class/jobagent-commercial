@@ -1093,6 +1093,42 @@ only control that advances it was inside 高级设置与诊断). The two `<detai
 nested *inside* that already-collapsed block were flattened for the same
 reason: one layer of hiding is a choice, two is how a control stops existing.
 
+**The console's 更多功能 half is gone with it (2026-09-08), and this supersedes
+the M5a/M5b "console UI rules" below for the *console* only** - every backend
+rule they state still binds whatever calls those endpoints.
+
+- **待处理事项** was a second dashboard. `/dashboard` (数据概览) already shows
+  the same five tiles, and the two that matter mid-search - 待分析岗位 and
+  投递队列待处理 - sit inline in the search panel beside the buttons that act
+  on them;
+- **新建任务 / 任务列表 / 关联已有岗位 / 候选人 / 事件记录** was M5a's manual
+  path: make a task, search the library, associate jobs one at a time, then
+  score them. 搜索 → 全部分析 → 投递队列 does the same in three clicks.
+  Measured before deleting rather than assumed: of 890 rows in
+  `job_search_tasks` exactly **one** came from that form (2026-08-23, its name
+  still matching the form's own placeholder) - every other row is
+  plan-generated - and `orchestration_events` held **2** rows in total, the
+  last on 2026-08-28;
+- **CrossTaskMatchPanel** (M5b) scored several completed tasks' candidates,
+  which is 全部分析 with extra steps.
+
+`AutoMatchReviewPanel.tsx`, `CrossTaskMatchPanel.tsx` and
+`matchResultLifecycle.ts` are deleted, not orphaned - an unrendered component
+is how the previous round of this accumulated. **The M5a and M5b endpoints,
+services and tests are untouched**; what went is one console surface.
+
+`SalaryBackfillPanel` is the one that stays, and it is no longer folded: the
+search panel can *start* a backfill, but only that panel resumes a paused run,
+finishes the remainder in one session, or replaces a stale plan - and a run
+that paused silently is how 120 consecutive jobs once arrived with no salary.
+
+One thing the always-visible panel exposed: **`.actions` is not defined in
+`app.css` at all**. It renders as a plain block, so its buttons only looked
+spaced where JSX happened to leave whitespace between them; two adjacent
+`{cond && <button/>}` expressions produced 「准备并处理全部 1 个每批 3 个刷新
+进度」. `.btn-row` is the real class (flex, 6px gap, wraps), and the four pages
+using the phantom one now use it.
+
 The queue filters the **already collected** library the same way, locally and
 for free: `QueueFilters.max_required_years` drops a proposal whose *minimum*
 requirement is above what the user says they have. Measured on the library it

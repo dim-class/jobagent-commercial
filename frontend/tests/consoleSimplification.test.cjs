@@ -30,12 +30,28 @@ test('default navigation keeps the frequent workflow short and folds secondary t
   assert.match(app, /<Navigate to="\/console" replace \/>/)
 })
 
-test('maintenance and legacy task management stay behind one explicit more-tools control', () => {
-  const toggle = consolePage.indexOf("showAdvancedConsole ? '收起更多功能' : '更多功能'")
-  const conditional = consolePage.indexOf('{showAdvancedConsole ? <>', toggle)
-  const salary = consolePage.indexOf('<SalaryBackfillPanel />', conditional)
-  const crossTask = consolePage.indexOf('<CrossTaskMatchPanel />', conditional)
-  assert.ok(toggle >= 0 && conditional > toggle)
-  assert.ok(salary > conditional && crossTask > conditional)
-  assert.equal(consolePage.indexOf('<SalaryBackfillPanel />'), salary)
+test('the console is the search flow, with the superseded surface deleted not folded', () => {
+  // This used to assert that the legacy surface stayed behind 更多功能. Hiding
+  // it was the half-measure: it survived a year of being unused because a fold
+  // costs nothing to keep. 搜索 -> 全部分析 -> 投递队列 does the same work in
+  // three clicks, and the numbers said so - of 890 rows in `job_search_tasks`
+  // exactly one came from 新建任务, and `orchestration_events` held 2 rows in
+  // total. The assertion follows the design, not the version before it.
+  // Comments stripped first: the page's own docstring names what was removed
+  // and why, and that record is worth more than a grep that trips over it.
+  const code = consolePage.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '')
+  for (const gone of [
+    '新建任务', '任务列表', '关联已有岗位', '事件记录', '待处理事项',
+    'CrossTaskMatchPanel', 'AutoMatchReviewPanel', '生成匹配计划',
+  ]) {
+    assert.doesNotMatch(code, new RegExp(gone), `${gone} is superseded`)
+  }
+  // No fold left to hide anything in.
+  assert.doesNotMatch(code, /showAdvancedConsole|更多功能/)
+
+  // The one panel that survives, and visible: the search panel can start a
+  // salary backfill but only this one can resume a paused run, finish the
+  // remainder in a single session, or replace a stale plan.
+  assert.match(consolePage, /<SalaryBackfillPanel \/>/)
+  assert.match(consolePage, /<ConsoleSearchPanel \/>/)
 })

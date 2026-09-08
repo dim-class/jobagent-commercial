@@ -617,7 +617,7 @@ export default function ApplicationQueuePage() {
             重新分析会一并更新分数和结论，不只是招呼语——分数可能小幅变动。
             已投递的记录不受影响。
           </p>
-          <div className="actions">
+          <div className="btn-row">
             <button
               type="button"
               className="btn btn-primary"

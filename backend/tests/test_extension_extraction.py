@@ -1084,6 +1084,48 @@ async def test_a_company_that_only_shares_a_prefix_is_not_a_match(chat_greeting)
 
 
 @pytest.mark.asyncio
+async def test_a_fallback_list_selector_never_shrinks_the_scope_further(chat_greeting):
+    """CHAT_LIST is ordered and the first selector that resolves wins.
+
+    Three live refusals in a row read `co=0` with the company plainly on
+    screen, and the union was the reason to suspect: only `.list-warp` was
+    ever read from the live page, and `.chat-user` - a fallback written from a
+    guess - is a thoroughly plausible name for the OPEN conversation's header
+    (「张女士 硅基流动｜招聘负责人」 is the chat user). Excluding the union
+    deletes exactly the row the company lives in.
+
+    The fixture's header carries `chat-user` as a probe. Unioning the
+    selectors refuses this; taking `.list-warp` alone sends. The prepare step
+    fails loudly if that probe is ever tidied away, since without it this test
+    passes while asserting nothing.
+    """
+    result = await chat_greeting(
+        prepare="() => { if (!document.querySelector('.chat-title.chat-user'))"
+        "  throw new Error('the fallback-selector probe is gone') }"
+    )
+    assert result["status"] == "sent"
+    assert result["clicks"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_list_selector_that_swallows_the_conversation_is_not_the_list(
+    chat_greeting,
+):
+    """A "list" containing the open conversation cannot be the list.
+
+    Taking it would leave nothing in scope and refuse every approval - which
+    reads exactly like a wrong job and is not one. The next selector decides
+    instead.
+    """
+    result = await chat_greeting(
+        prepare="() => { document.querySelector('.chat-wrap')"
+        "  .classList.add('list-warp') }"
+    )
+    assert result["status"] == "sent", "the real list still decided the scope"
+    assert result["clicks"] == 1
+
+
+@pytest.mark.asyncio
 async def test_an_unresolvable_conversation_list_refuses_rather_than_widening(
     chat_greeting,
 ):

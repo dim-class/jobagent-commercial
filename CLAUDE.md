@@ -1927,17 +1927,35 @@ Rules specific to it:
   names no company and no job, and the rest of the page is the one open
   conversation.
 
-  Two rules make that subtraction actually hold:
+  Three rules make that subtraction actually hold:
 
   - **a node qualifies only if it neither sits inside the list nor contains
     it.** A node's text is every descendant concatenated, so excluding the
     list's own nodes still leaves all forty conversations readable through its
     ancestors - `.chat-wrap` read as containing 浩鲸科技 with the list itself
     correctly excluded;
+  - **`CHAT_LIST` is ordered and the first selector that resolves wins - never
+    the union**, the ordinary `pick` discipline the rest of the codebase
+    follows. Only `.chat-wrap > .list-warp.v2` was read from the live page;
+    `.chat-user`, `.user-list` and `.user-list-content` are fallbacks written
+    from a guess, and unioning them in can only ever remove *more* of the page
+    than the list does. `.chat-user` is a thoroughly plausible name for the
+    open conversation's own header - 「张女士 硅基流动｜招聘负责人」 *is* the
+    chat user - which is exactly the row the company lives in, and three
+    refusals in a row read `co=0` with the company plainly on screen. A
+    candidate that contains the pane is discarded too: a "list" holding the
+    open conversation leaves the scope empty and refuses everything, which
+    reads exactly like a wrong job and is not one;
   - **an unresolvable list is a refusal** (`chat_list_unknown`), never a
     fallback to the whole document. Without that, a renamed class silently
     turns the identity check into a text search that any conversation would
     satisfy.
+
+  `coL=` in a refusal's diagnostic is what separates the two readings of
+  `co=0` beside `coUp=1` - the company is only in the conversation list (the
+  refusal is right) versus the exclusion swallowed the header (the refusal is
+  a bug) - and `lst=` names the selector that did it. Three consecutive live
+  refusals could not answer that question, which is why it is recorded.
 
   Both company *and* title must be found: several roles at one company is
   normal, and so is the same title at two companies. The wanted string may sit

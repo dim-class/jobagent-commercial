@@ -169,13 +169,21 @@ var BossSelectors = {
     CHAT_CONVERSATION: ['.chat-conversation'],
     /** The conversation LIST - every recruiter this account has ever spoken to.
      *
-     *  Named so it can be excluded. The open conversation's company turned out
-     *  to live outside `.chat-conversation` (measured 2026-09-08 from a
-     *  refusal's own diagnostic: `co=0,ti=1p` - the title inside the pane, the
-     *  company nowhere in it), so the identity check has to look slightly wider
-     *  than the pane. Widening to the pane's parent would swallow this list,
-     *  and a company matched from it would confirm a conversation with someone
-     *  else entirely - the exact wrong-person send the check exists to stop. */
+     *  Named so it can be excluded. The open conversation's company lives
+     *  outside `.chat-conversation` (measured 2026-09-08 from a refusal's own
+     *  diagnostic: `co=0,ti=1p` - the title inside the pane, the company
+     *  nowhere in it), so the identity check reads the page around it. A
+     *  company matched from THIS list would confirm a conversation with someone
+     *  else entirely - the exact wrong-person send the check exists to stop.
+     *
+     *  **Ordered, and the first selector that resolves wins** - never the union
+     *  of all four, which is the ordinary `pick` discipline everywhere else in
+     *  this file. Only `.chat-wrap > .list-warp.v2` was actually read from the
+     *  live page; the rest are fallbacks written from a guess, and excluding
+     *  them alongside it can only ever remove MORE of the page. `.chat-user` is
+     *  a thoroughly plausible name for the open conversation's own header -
+     *  「张女士 硅基流动｜招聘负责人」 is the chat user - and that header is
+     *  exactly where the company being looked for lives. */
     CHAT_LIST: ['.list-warp', '.chat-user', '.user-list', '.user-list-content'],
     COMPANY: [
         '.job-boss-info .boss-info-attr',

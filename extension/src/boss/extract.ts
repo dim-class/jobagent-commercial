@@ -1896,9 +1896,27 @@ var BossExtract = (function () {
     // renamed class would silently turn this into a document-wide match over
     // forty other conversations - the exact wrong-person send the check
     // exists to stop.
-    const listRoots = Array.from(
-      doc.querySelectorAll(BossSelectors.CHAT_LIST.join(',')),
-    )
+    //
+    // ORDERED, first match wins - never the union. `.list-warp` is the only
+    // one of these read from the live page; the rest are fallbacks written
+    // from a guess, and unioning them in can only remove MORE of the page
+    // than the list. That is not hypothetical: `.chat-user` is a thoroughly
+    // plausible class for the open conversation's own HEADER
+    // (「张女士 硅基流动｜招聘负责人」 is the chat user), which is exactly
+    // where the company being looked for lives - and three refusals in a row
+    // read `co=0` with the company plainly on screen.
+    let listRoots: Element[] = []
+    let listSelector = ''
+    for (const selector of BossSelectors.CHAT_LIST) {
+      let hits: Element[] = []
+      try {
+        hits = Array.from(doc.querySelectorAll(selector))
+      } catch { hits = [] }
+      // A "list" that contains the open conversation is not the list. Taking
+      // it would leave the scope empty and refuse every approval.
+      hits = hits.filter((node) => !node.contains(pane))
+      if (hits.length) { listRoots = hits; listSelector = selector; break }
+    }
     //
     // Subtracting the list by node identity is not enough on its own: a
     // node's `textContent` is every descendant concatenated, so the list's
@@ -1975,9 +1993,22 @@ var BossExtract = (function () {
       return 99
     }
 
+    /** Did the subtracted region swallow what we were looking for?
+     *
+     *  The question three refusals in a row could not answer. `co=0` says the
+     *  company is not in scope and `coUp=1` says it is on the page, and those
+     *  two together have two readings that need opposite fixes: it is only in
+     *  the conversation list (the refusal is correct), or the exclusion is
+     *  too greedy and deleted the header (the refusal is a bug). `coL=1`
+     *  says which, and names the selector that did it. */
+    const inList = (wanted: string): boolean =>
+      listRoots.some((list) => (list.textContent || '').includes(wanted))
+
     const detail = `co=${company ? 1 : 0}${present(expectedCompany) ? 'p' : ''}`
       + `,ti=${title ? 1 : 0}${present(expectedTitle) ? 'p' : ''}`
       + `,n=${values.length}`
+      + `,lst=${listSelector}:${listRoots.length}`
+      + `,coL=${inList(expectedCompany) ? 1 : 0}`
       + `,coUp=${distance(expectedCompany)},tiUp=${distance(expectedTitle)}`
 
     // Neither read means the header could not be read at all; one of the two

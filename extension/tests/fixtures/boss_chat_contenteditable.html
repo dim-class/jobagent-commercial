@@ -55,7 +55,15 @@
          scopes were tried against the live page and both read `co=0`
          (2026-09-08). The company sits in the middle of its row, as the live
          header does. -->
-    <div class="chat-title">
+    <!-- `chat-user` is here ON PURPOSE, and it is a probe rather than a claim
+         about BOSS's markup: only `.list-warp` was read from the live page,
+         and the other CHAT_LIST entries are guesses. `.chat-user` is a
+         plausible name for the OPEN conversation's header, and excluding the
+         union of all four would delete exactly the row the company lives in -
+         which is what three live refusals read as `co=0` with the company
+         plainly on screen. First selector that resolves wins, so `.list-warp`
+         decides and this class changes nothing. -->
+    <div class="chat-title chat-user">
       <span class="name-box">雷宇博 中信建投证券｜信息技术部人力资源</span>
       <span class="more">更多</span>
     </div>

@@ -33,6 +33,19 @@ test('the search panel drives one aggregate run, with no second set of controls'
   assert.match(panel, /batchCommand\('pause-batch'\)/)
 })
 
+test('the one paid button in the panel asks before it spends', () => {
+  // 重新分析 sits among free controls - 刷新状态, 按方向看简历支撑度, the whole
+  // search form - and is the only one that bills. The forced variant is the
+  // one that most needs the dialog: it re-bills for a result already paid for
+  // and replaces it, and nothing on the button said so.
+  assert.doesNotMatch(panel, /onClick=\{\(\) => void analyzeDirections\(/,
+    'the click opens the confirmation, it does not call the model')
+  assert.match(panel, /setDirectionConfirm\(\{/)
+  // The exact call count travels into the dialog, as it does for 全部分析.
+  assert.match(panel, /确认分析（\{directionConfirm\.calls\} 次调用）/)
+  assert.match(panel, /这次会重新计费并替换它/)
+})
+
 test('nothing that decides or advances a run is hidden behind 高级设置', () => {
   const advanced = panel.indexOf('{showAdvanced ? <div')
   assert.ok(advanced > 0, 'the advanced block still exists')

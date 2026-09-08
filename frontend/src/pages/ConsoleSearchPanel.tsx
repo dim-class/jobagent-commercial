@@ -252,6 +252,11 @@ export default function ConsoleSearchPanel() {
   const [aiPlan, setAiPlan] = useState<DirectionAnalysisPlan | null>(null)
   const [aiBusy, setAiBusy] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
+  //: Spending money asks first, with the exact call count - the same shape
+  //: 全部分析 and 比较简历 use. The forced variant is the one that most needs
+  //: it: it bills for a result already paid for and replaces it.
+  const [directionConfirm, setDirectionConfirm] = useState<
+    { force: boolean; calls: number } | null>(null)
   //: BOSS search URLs the user built in their own browser. Each one narrows a
   //: search so its top results differ - the only way to reach past the first
   //: page without moving a ceiling. One per line.
@@ -1086,7 +1091,10 @@ export default function ConsoleSearchPanel() {
               type="button"
               className="btn-sm"
               disabled={aiBusy}
-              onClick={() => void analyzeDirections(aiPlan.cached)}
+              onClick={() => setDirectionConfirm({
+                force: aiPlan.cached,
+                calls: aiPlan.cached ? 1 : aiPlan.pending_calls,
+              })}
             >
               {aiBusy
                 ? '分析中…'
@@ -1099,7 +1107,7 @@ export default function ConsoleSearchPanel() {
             </span>
           </div>
         )}
-        {aiError ? <p className="small mt-1">{aiError}</p> : null}
+        {aiError ? <p className="small mt-1" role="alert">{aiError}</p> : null}
         {aiPlan.directions.length ? (
           <details>
           <summary className="small">按方向看简历支撑度</summary>
@@ -1276,6 +1284,29 @@ export default function ConsoleSearchPanel() {
         </section>
       ) : null}
     </div> : null}
+    {directionConfirm ? <Modal
+      title={directionConfirm.force ? '确认重新分析简历方向' : '确认分析简历方向'}
+      onClose={() => setDirectionConfirm(null)}
+      footer={<>
+        <button type="button" onClick={() => setDirectionConfirm(null)}>取消</button>
+        <button type="button" className="btn-primary" onClick={() => {
+          const { force } = directionConfirm
+          setDirectionConfirm(null)
+          void analyzeDirections(force)
+        }}>确认分析（{directionConfirm.calls} 次调用）</button>
+      </>}
+    >
+      <p>将产生 <strong>{directionConfirm.calls} 次</strong> AI 调用，
+        一次覆盖全部 {aiPlan?.candidates.length ?? 0} 个方向。</p>
+      {directionConfirm.force ? (
+        <p>已经有一份缓存结果，<strong>这次会重新计费并替换它</strong>。
+          简历或职业策略改过之后才有必要重来——没改的话，缓存结果和新结果是一样的。</p>
+      ) : null}
+      <p className="small faint">
+        它只影响下一次搜索挑哪些岗位方向，不改任何岗位的状态，也不投递。
+      </p>
+    </Modal> : null}
+
     {analyseConfirm ? <Modal
       title="确认批量分析"
       onClose={() => setAnalyseConfirm(null)}

@@ -1944,10 +1944,33 @@ var BossExtract = (function () {
       return 99
     }
 
+    /** The same walk, but ignoring anything inside the conversation list.
+     *
+     *  `coUp=1` on its own is ambiguous, and the two readings need opposite
+     *  fixes: the company may be in a header beside the pane (widen), or it
+     *  may only be in the list row for this same recruiter (do NOT widen -
+     *  that row is exactly what must never count, and its presence says
+     *  nothing about which conversation is open). `-1` here with `coUp=1`
+     *  above means the second: the open conversation's own header does not
+     *  carry the company as text at all. */
+    const distanceOutsideList = (wanted: string): number => {
+      let node: Element | null = pane
+      for (let up = 0; up < 12 && node; up += 1) {
+        const hit = Array.from(node.querySelectorAll('*'))
+          .concat(node)
+          .filter((el) => !listRoots.some((list) => list === el || list.contains(el)))
+          .some((el) => (el.textContent || '').includes(wanted))
+        if (hit) return up
+        node = node.parentElement
+      }
+      return -1
+    }
+
     const detail = `co=${company ? 1 : 0}${present(expectedCompany) ? 'p' : ''}`
       + `,ti=${title ? 1 : 0}${present(expectedTitle) ? 'p' : ''}`
       + `,n=${values.length}`
       + `,coUp=${distance(expectedCompany)},tiUp=${distance(expectedTitle)}`
+      + `,coUpX=${distanceOutsideList(expectedCompany)}`
 
     // Neither read means the header could not be read at all; one of the two
     // means this is a conversation about something else.

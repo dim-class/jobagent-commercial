@@ -1894,9 +1894,25 @@ var BossExtract = (function () {
     const company = found(expectedCompany)
     const title = found(expectedTitle)
     if (company && title) return { status: 'ok' }
+
+    // A refusal that only says "wrong job" is not enough to fix anything: on
+    // 2026-09-08 an approval was refused while both its company and its title
+    // were plainly on screen. `present` asks the weaker question - does the
+    // text appear anywhere in the pane at all, at any length - so the next
+    // refusal distinguishes "the pane does not contain it" from "it is there
+    // and the prefix rule rejected it". Only strings the approval itself
+    // supplied are echoed; no page text is copied out.
+    const present = (wanted: string): boolean =>
+      values.some((value) => value.includes(wanted))
+    const detail = `co=${company ? 1 : 0}${present(expectedCompany) ? 'p' : ''}`
+      + `,ti=${title ? 1 : 0}${present(expectedTitle) ? 'p' : ''}`
+      + `,n=${values.length}`
+
     // Neither read means the header could not be read at all; one of the two
     // means this is a conversation about something else.
-    return { status: company || title ? 'chat_wrong_job' : 'chat_job_unknown' }
+    return {
+      status: `${company || title ? 'chat_wrong_job' : 'chat_job_unknown'}|${detail}`,
+    }
   }
 
   /**

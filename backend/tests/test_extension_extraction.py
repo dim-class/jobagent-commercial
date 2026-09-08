@@ -1031,6 +1031,28 @@ async def test_the_conversation_boss_opened_for_this_job_accepts_the_greeting(ch
 
 
 @pytest.mark.asyncio
+async def test_a_refusal_says_which_half_of_the_identity_missed(chat_greeting):
+    """"Wrong job" alone cannot be acted on.
+
+    On 2026-09-08 an approval was refused as `chat_wrong_job` while both its
+    company and its title were plainly on screen, and there was no way to tell
+    whether the pane lacked the text or the prefix rule had rejected it. The
+    suffix answers exactly that: `co=1` matched, `co=0p` means the text is in
+    the pane but the rule turned it down, `co=0` means it is not there at all.
+
+    Only strings the approval itself supplied are echoed - no page text is
+    copied into the record.
+    """
+    result = await chat_greeting(company="浩鲸科技")
+    reason, _, detail = result["status"].partition("|")
+    assert reason == "chat_wrong_job"
+    assert "ti=1" in detail, "the title matched"
+    assert "co=0" in detail, "the company did not"
+    assert "co=0p" not in detail, "and it is genuinely absent, not merely rejected"
+    assert "n=" in detail, "how many nodes were considered"
+
+
+@pytest.mark.asyncio
 async def test_a_contenteditable_composer_is_typed_into_and_sent(
     browser_page, extension_bundle
 ):
@@ -1090,7 +1112,7 @@ async def test_a_conversation_about_another_company_is_refused(chat_greeting):
     """The whole reason the check exists: BOSS picks which conversation is
     open, and the wrong one is a message to a real person."""
     result = await chat_greeting(company="浩鲸科技")
-    assert result["status"] == "chat_wrong_job", "the title matched and the company did not"
+    assert result["status"].split("|")[0] == "chat_wrong_job", "the title matched and the company did not"
     assert result["clicks"] == 0
     assert result["typed"] == "", "nothing is typed, not even before the send"
 
@@ -1100,7 +1122,7 @@ async def test_a_conversation_about_another_role_at_the_same_company_is_refused(
     """Several roles at one company is normal, so the company alone is not an
     identification."""
     result = await chat_greeting(title="云安全工程师")
-    assert result["status"] == "chat_wrong_job"
+    assert result["status"].split("|")[0] == "chat_wrong_job"
     assert result["clicks"] == 0
     assert result["typed"] == ""
 
@@ -1110,7 +1132,7 @@ async def test_a_longer_title_starting_with_the_approved_one_is_not_a_match(chat
     """「云运维工程师」 must not match 「云运维工程师(高级)」. A prefix counts
     only when what follows is a separator, a space or a digit."""
     result = await chat_greeting(title="私有云运维")
-    assert result["status"] == "chat_wrong_job"
+    assert result["status"].split("|")[0] == "chat_wrong_job"
     assert result["clicks"] == 0
 
 
@@ -1121,7 +1143,7 @@ async def test_another_conversation_in_the_list_never_confirms_the_open_one(chat
     those while BOSS had a different conversation open - which is exactly the
     wrong-person send this check exists to prevent."""
     result = await chat_greeting(company="嘉环科技股份有限公司", title="云计算工程师")
-    assert result["status"] == "chat_job_unknown", "both are on the page, neither is in the pane"
+    assert result["status"].split("|")[0] == "chat_job_unknown", "both on the page, neither in the pane"
     assert result["clicks"] == 0
     assert result["typed"] == ""
 
@@ -1173,7 +1195,7 @@ async def test_a_pane_that_cannot_be_read_is_refused(chat_greeting):
         prepare="() => { document.querySelector('.chat-title').remove();"
                 "  document.querySelector('.job-info .job-name').remove() }"
     )
-    assert result["status"] == "chat_job_unknown"
+    assert result["status"].split("|")[0] == "chat_job_unknown"
     assert result["clicks"] == 0
 
 

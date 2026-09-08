@@ -196,10 +196,17 @@ var BossSelectors = {
    *  of all four, which is the ordinary `pick` discipline everywhere else in
    *  this file. Only `.chat-wrap > .list-warp.v2` was actually read from the
    *  live page; the rest are fallbacks written from a guess, and excluding
-   *  them alongside it can only ever remove MORE of the page. `.chat-user` is
-   *  a thoroughly plausible name for the open conversation's own header -
-   *  「张女士 硅基流动｜招聘负责人」 is the chat user - and that header is
-   *  exactly where the company being looked for lives. */
+   *  them alongside it can only ever remove MORE of the page than the list.
+   *
+   *  Confirmed live on 2026-09-08, and it is the difference between three
+   *  consecutive refusals and a sent greeting: with the union, the company
+   *  was unreadable on a page displaying it (`co=0` beside `coUp=1`, at both
+   *  a narrow and a whole-page scope); taking `.list-warp` alone, the same
+   *  approval sent. What that proves is that at least one fallback matches
+   *  something outside the real list carrying the company - almost certainly
+   *  the open conversation's own header, since 「张女士 硅基流动｜招聘负责人」
+   *  *is* the chat user. Which of the three it is was never established, and
+   *  is not worth a live read to find out: the ordering makes it moot. */
   CHAT_LIST: ['.list-warp', '.chat-user', '.user-list', '.user-list-content'] as string[],
 
   COMPANY: [

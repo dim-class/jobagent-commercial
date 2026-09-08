@@ -1089,10 +1089,12 @@ async def test_a_fallback_list_selector_never_shrinks_the_scope_further(chat_gre
 
     Three live refusals in a row read `co=0` with the company plainly on
     screen, and the union was the reason to suspect: only `.list-warp` was
-    ever read from the live page, and `.chat-user` - a fallback written from a
-    guess - is a thoroughly plausible name for the OPEN conversation's header
-    (「张女士 硅基流动｜招聘负责人」 is the chat user). Excluding the union
-    deletes exactly the row the company lives in.
+    ever read from the live page, and the other three are fallbacks written
+    from a guess. Excluding the union deletes more of the page than the list -
+    almost certainly the OPEN conversation's own header, since
+    「张女士 硅基流动｜招聘负责人」 is the chat user and that is exactly the row
+    the company lives in. Confirmed by the fix working live on 2026-09-08;
+    which of the three fallbacks matched it was never pinned down.
 
     The fixture's header carries `chat-user` as a probe. Unioning the
     selectors refuses this; taking `.list-warp` alone sends. The prepare step

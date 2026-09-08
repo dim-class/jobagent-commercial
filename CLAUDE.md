@@ -1939,13 +1939,17 @@ Rules specific to it:
     follows. Only `.chat-wrap > .list-warp.v2` was read from the live page;
     `.chat-user`, `.user-list` and `.user-list-content` are fallbacks written
     from a guess, and unioning them in can only ever remove *more* of the page
-    than the list does. `.chat-user` is a thoroughly plausible name for the
-    open conversation's own header - 「张女士 硅基流动｜招聘负责人」 *is* the
-    chat user - which is exactly the row the company lives in, and three
-    refusals in a row read `co=0` with the company plainly on screen. A
-    candidate that contains the pane is discarded too: a "list" holding the
-    open conversation leaves the scope empty and refuses everything, which
-    reads exactly like a wrong job and is not one;
+    than the list does. This is the fix that made the chat-page greeting work
+    (confirmed live 2026-09-08): with the union, three consecutive approvals
+    were refused reading `co=0` beside `coUp=1` - the company unreadable on a
+    page displaying it, at a narrow scope and then at a whole-page one; taking
+    `.list-warp` alone, the next one sent. So at least one fallback matches
+    something outside the real list that carries the company, almost certainly
+    the open conversation's own header - 「张女士 硅基流动｜招聘负责人」 *is*
+    the chat user. **Which of the three was never established**, and the
+    ordering makes it moot. A candidate that contains the pane is discarded
+    too: a "list" holding the open conversation leaves the scope empty and
+    refuses everything, which reads exactly like a wrong job and is not one;
   - **an unresolvable list is a refusal** (`chat_list_unknown`), never a
     fallback to the whole document. Without that, a renamed class silently
     turns the identity check into a text search that any conversation would

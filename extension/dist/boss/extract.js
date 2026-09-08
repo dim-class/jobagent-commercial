@@ -1585,11 +1585,13 @@ var BossExtract = (function () {
         // ORDERED, first match wins - never the union. `.list-warp` is the only
         // one of these read from the live page; the rest are fallbacks written
         // from a guess, and unioning them in can only remove MORE of the page
-        // than the list. That is not hypothetical: `.chat-user` is a thoroughly
-        // plausible class for the open conversation's own HEADER
-        // (「张女士 硅基流动｜招聘负责人」 is the chat user), which is exactly
-        // where the company being looked for lives - and three refusals in a row
-        // read `co=0` with the company plainly on screen.
+        // than the list. Confirmed live on 2026-09-08: with the union, three
+        // approvals in a row were refused reading `co=0` beside `coUp=1` - the
+        // company unreadable on a page displaying it - and with `.list-warp`
+        // alone the next one sent. Almost certainly one of the fallbacks matches
+        // the open conversation's own HEADER (「张女士 硅基流动｜招聘负责人」 is
+        // the chat user), which is exactly the row the company lives in; which
+        // one was never pinned down, and the ordering makes it moot.
         let listRoots = [];
         let listSelector = '';
         for (const selector of BossSelectors.CHAT_LIST) {

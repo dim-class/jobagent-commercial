@@ -46,12 +46,18 @@
     </div>
 
     <!-- The open conversation. -->
+    <!-- The recruiter/company row sits OUTSIDE `.chat-conversation`: measured
+         2026-09-08 from a refusal's own diagnostic, `co=0,ti=1p` - the job
+         title was inside the pane and the company was nowhere in it. The
+         identity check therefore looks at the pane's parent, minus the
+         conversation list. -->
+    <div class="chat-title">
+      <span class="name">雷宇博</span>
+      <span class="company">中信建投证券</span>
+      <span class="boss-title">信息技术部人力资源</span>
+    </div>
+
     <div class="chat-conversation">
-      <div class="chat-title">
-        <span class="name">雷宇博</span>
-        <span class="company">中信建投证券</span>
-        <span class="boss-title">信息技术部人力资源</span>
-      </div>
       <div class="job-info">
         <!-- Split across spans on purpose: BOSS does this to a title like
              「云迁移运维工程师＋3个月（朝阳区MQ）」, and a leaf-only reader

@@ -167,6 +167,16 @@ var BossSelectors = {
      * not about some other one further down the list.
      */
     CHAT_CONVERSATION: ['.chat-conversation'],
+    /** The conversation LIST - every recruiter this account has ever spoken to.
+     *
+     *  Named so it can be excluded. The open conversation's company turned out
+     *  to live outside `.chat-conversation` (measured 2026-09-08 from a
+     *  refusal's own diagnostic: `co=0,ti=1p` - the title inside the pane, the
+     *  company nowhere in it), so the identity check has to look slightly wider
+     *  than the pane. Widening to the pane's parent would swallow this list,
+     *  and a company matched from it would confirm a conversation with someone
+     *  else entirely - the exact wrong-person send the check exists to stop. */
+    CHAT_LIST: ['.list-warp', '.chat-user', '.user-list', '.user-list-content'],
     COMPANY: [
         '.job-boss-info .boss-info-attr',
         '.job-banner .company-info .name',

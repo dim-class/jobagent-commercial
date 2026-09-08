@@ -1031,6 +1031,37 @@ async def test_the_conversation_boss_opened_for_this_job_accepts_the_greeting(ch
 
 
 @pytest.mark.asyncio
+async def test_the_company_is_found_in_the_header_outside_the_pane(chat_greeting):
+    """BOSS renders 「HR｜公司｜职务」 outside `.chat-conversation`.
+
+    Measured 2026-09-08 from a refusal's own diagnostic: `co=0,ti=1p` - the
+    job title inside the pane, the company nowhere in it, so an approval whose
+    company and title were both plainly on screen was refused as
+    `chat_wrong_job`. The check now looks at the pane's parent.
+    """
+    result = await chat_greeting()
+    assert result["status"] == "sent"
+    assert result["clicks"] == 1
+
+
+@pytest.mark.asyncio
+async def test_widening_to_the_header_still_never_reaches_the_conversation_list(
+    chat_greeting,
+):
+    """The whole risk of looking wider than the pane.
+
+    The list holds every recruiter this account has spoken to; a company
+    matched from it says nothing about the conversation actually open, and
+    acting on it is a message to the wrong person. It is subtracted by name,
+    not by position.
+    """
+    result = await chat_greeting(company="嘉环科技股份有限公司", title="云计算工程师")
+    assert result["status"].split("|")[0] in {"chat_job_unknown", "chat_wrong_job"}
+    assert result["clicks"] == 0
+    assert result["typed"] == ""
+
+
+@pytest.mark.asyncio
 async def test_a_refusal_says_which_half_of_the_identity_missed(chat_greeting):
     """"Wrong job" alone cannot be acted on.
 

@@ -1868,16 +1868,31 @@ var BossExtract = (function () {
     const pane = panes.nodes[0]
     if (!pane) return { status: 'chat_job_unknown' }
 
+    // The open conversation's pane, PLUS its surrounding header, MINUS the
+    // conversation list.
+    //
+    // The pane alone was not enough: measured 2026-09-08 from a refusal's own
+    // diagnostic, `co=0,ti=1p` - the job title inside `.chat-conversation`,
+    // the company nowhere in it, because BOSS renders 「HR｜公司｜职务」 just
+    // outside. Widening to the pane's parent reaches that header - and would
+    // also reach the list of every recruiter this account has spoken to,
+    // where a company match means nothing about the conversation that is
+    // actually open. So the list is subtracted by name.
+    const listRoots = Array.from(
+      doc.querySelectorAll(BossSelectors.CHAT_LIST.join(',')),
+    )
+    const scope = pane.parentElement || pane
+    const nodes = Array.from(scope.querySelectorAll('*'))
+      .filter((node) => !listRoots.some((list) => list === node || list.contains(node)))
+
     // Leaves alone are not enough: BOSS splits a title like
     // 「云迁移运维工程师＋3个月（朝阳区MQ）」 across spans, so no single leaf
     // holds it and the whole approval was refused as `chat_wrong_job`
     // (observed 2026-09-07). A wrapper's `textContent` is every descendant
-    // concatenated, which is why the pane itself must not qualify - so a
+    // concatenated, which is why the scope itself must not qualify - so a
     // candidate is capped at a little longer than what is being looked for.
     // That admits a header row and excludes the conversation.
-    const values = Array.from(pane.querySelectorAll('*'))
-      .map((node) => text(node))
-      .filter(Boolean)
+    const values = nodes.map((node) => text(node)).filter(Boolean)
 
     const found = (wanted: string): boolean => values.some((value) => {
       if (value.length > wanted.length + 40) return false

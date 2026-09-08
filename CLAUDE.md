@@ -1893,11 +1893,19 @@ Rules specific to it:
   `div`s. So the header's text is the only identity the page exposes, which
   is what the user authorized checking in the first place.
 
-  **`CHAT_CONVERSATION` scoping is the whole safety argument.** The left list
-  holds every recruiter this account has ever spoken to, so a document-wide
-  text match would happily confirm a job applied to yesterday while BOSS had
-  a different conversation open - the exact wrong-person send this prevents.
-  One pane, one conversation. Both company *and* title must be found: several
+  **Scoping is the whole safety argument, and the scope is "the open
+  conversation, minus the list".** The left list holds every recruiter this
+  account has ever spoken to, so a document-wide text match would happily
+  confirm a job applied to yesterday while BOSS had a different conversation
+  open - the exact wrong-person send this prevents.
+
+  `.chat-conversation` alone turned out to be too narrow: BOSS renders
+  「HR｜公司｜职务」 just outside it. Measured 2026-09-08 from a refusal's own
+  diagnostic - `co=0,ti=1p`, the job title inside the pane and the company
+  nowhere in it - an approval whose company and title were both plainly on
+  screen was refused. The check now reads the pane's **parent** and subtracts
+  `CHAT_LIST` by name. Widening without that subtraction would swallow the
+  list, which is the one thing that must never count. Both company *and* title must be found: several
   roles at one company is normal, and so is the same title at two companies.
   A leaf's text may *lead* with what is wanted, because BOSS renders
   「公司 | 招聘者职位」 and 「职位 25-40K 北京」 as single nodes - but only when

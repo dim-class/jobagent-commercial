@@ -150,7 +150,14 @@ var BossSelectors = {
    */
   CLOSED_POSTING_TEXT: ['职位已关闭', '该职位已关闭', '职位已下线', '已下线'] as string[],
 
-  GREETING_INPUT: ['textarea'] as string[],
+  /** BOSS's composer is not always a `<textarea>`.
+   *
+   *  Measured 2026-09-08 from a real refusal's own diagnostic:
+   *  `ta=0/0|ce=1/1|snd=button.btn-v2` - no textarea anywhere, one visible
+   *  `contenteditable`, and the send control right there beside it. A reader
+   *  that only knew about textareas reported `no_composer` on a page whose
+   *  composer was sitting in front of it. */
+  GREETING_INPUT: ['textarea', '[contenteditable="true"]', '[contenteditable=""]'] as string[],
   // A live run found the textarea and confirmed it empty, then failed with
   // `no_send_control`: BOSS's 发送 is not a <button>. Widened to the elements a
   // site actually uses for one. This stays safe because the match is still

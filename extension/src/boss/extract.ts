@@ -1683,9 +1683,14 @@ var BossExtract = (function () {
    * - both must sit in the same container, so a composer from some other panel
    *   on the page cannot be paired with this one's send button.
    */
+  /** What a composer currently holds, whichever kind it is. */
+  function composerText(node: HTMLElement): string {
+    return node instanceof HTMLTextAreaElement ? node.value : (node.textContent || '')
+  }
+
   function greetingComposer(doc: Document): {
     status: 'ok' | 'no_composer' | 'ambiguous_composer' | 'no_send_control' | 'input_not_empty'
-    input?: HTMLTextAreaElement
+    input?: HTMLElement
     send?: HTMLElement
   } {
     const view = doc.defaultView
@@ -1699,14 +1704,18 @@ var BossExtract = (function () {
     }
 
     const inputs = Array.from(doc.querySelectorAll(BossSelectors.GREETING_INPUT.join(',')))
-      .filter((node): node is HTMLTextAreaElement => node instanceof view.HTMLTextAreaElement)
+      .filter((node): node is HTMLElement => node instanceof view.HTMLElement)
       .filter(visible)
-      .filter((node) => !node.disabled && !node.readOnly)
+      // A textarea can be disabled or read-only; a contenteditable is
+      // "disabled" by simply not being editable any more.
+      .filter((node) => node instanceof view.HTMLTextAreaElement
+        ? !node.disabled && !node.readOnly
+        : node.isContentEditable)
     if (!inputs.length) return { status: 'no_composer' }
     if (inputs.length > 1) return { status: 'ambiguous_composer' }
 
     const input = inputs[0]
-    if (input.value.trim()) return { status: 'input_not_empty' }
+    if (composerText(input).trim()) return { status: 'input_not_empty' }
 
     const wanted = BossSelectors.GREETING_SEND_TEXT
     for (let scope = input.parentElement; scope; scope = scope.parentElement) {
@@ -1947,17 +1956,29 @@ var BossExtract = (function () {
     // Assigning `.value` alone leaves the page's own state untouched, so the
     // send control stays disabled and nothing would go out. The native setter
     // plus an input event is what a framework-backed field actually listens to.
-    const setter = Object.getOwnPropertyDescriptor(
-      view.HTMLTextAreaElement.prototype, 'value',
-    )?.set
-    if (setter) setter.call(composer.input, body)
-    else composer.input.value = body
+    //
+    // BOSS's composer is a `contenteditable` on at least some pages (measured
+    // 2026-09-08: `ta=0/0|ce=1/1`), where there is no `value` at all - the
+    // text is the node's own content, and the same `input` event is what the
+    // editor listens for.
+    if (composer.input instanceof view.HTMLTextAreaElement) {
+      const setter = Object.getOwnPropertyDescriptor(
+        view.HTMLTextAreaElement.prototype, 'value',
+      )?.set
+      if (setter) setter.call(composer.input, body)
+      else composer.input.value = body
+    } else {
+      composer.input.focus()
+      composer.input.textContent = body
+    }
     composer.input.dispatchEvent(new view.Event('input', { bubbles: true }))
     composer.input.dispatchEvent(new view.Event('change', { bubbles: true }))
 
     // Re-read rather than trust the write: if the page rejected or rewrote it,
-    // nothing is sent.
-    if (composer.input.value.trim() !== body) return { status: 'input_rejected' }
+    // nothing is sent. This is the guard that makes trying a second composer
+    // kind safe - a contenteditable the editor refuses to accept simply never
+    // reaches the send control.
+    if (composerText(composer.input).trim() !== body) return { status: 'input_rejected' }
     composer.send.click()
     return { status: 'sent' }
   }

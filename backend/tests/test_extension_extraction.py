@@ -1031,6 +1031,61 @@ async def test_the_conversation_boss_opened_for_this_job_accepts_the_greeting(ch
 
 
 @pytest.mark.asyncio
+async def test_a_contenteditable_composer_is_typed_into_and_sent(
+    browser_page, extension_bundle
+):
+    """BOSS's composer is not always a `<textarea>`.
+
+    Recovered from a real refusal's own diagnostic on 2026-09-08:
+    `no_composer|ta=0/0|ce=1/1|snd=button.btn-v2` - no textarea anywhere, one
+    visible contenteditable, and the send control right beside it. The reader
+    knew only about textareas, so it reported "no composer" at a composer in
+    plain sight, and the greeting was skipped on a page that was perfectly
+    ready to send it.
+    """
+    await _load_fixture(
+        browser_page, extension_bundle, "boss_chat_contenteditable.html", url=CHAT_URL
+    )
+    result = await browser_page.evaluate(
+        """([text, company, title]) => {
+          let clicks = 0
+          document.querySelector('.btn-v2').addEventListener('click', () => { clicks += 1 })
+          const status = BossExtract.sendConfirmedGreeting(
+            document, text, document.location.href, 'any-id', company, title).status
+          return { status, clicks, typed: document.querySelector('.chat-input').textContent }
+        }""",
+        [GREETING, CHAT_COMPANY, CHAT_TITLE],
+    )
+    assert result["status"] == "sent"
+    assert result["clicks"] == 1, "exactly one send"
+    assert result["typed"] == GREETING
+
+
+@pytest.mark.asyncio
+async def test_a_contenteditable_that_already_has_text_is_left_alone(
+    browser_page, extension_bundle
+):
+    """The empty-box rule is what stops a second message being appended to
+    whatever BOSS already said, and it has to read the right property."""
+    await _load_fixture(
+        browser_page, extension_bundle, "boss_chat_contenteditable.html", url=CHAT_URL
+    )
+    result = await browser_page.evaluate(
+        """([text, company, title]) => {
+          document.querySelector('.chat-input').textContent = '您好'
+          let clicks = 0
+          document.querySelector('.btn-v2').addEventListener('click', () => { clicks += 1 })
+          const status = BossExtract.sendConfirmedGreeting(
+            document, text, document.location.href, 'any-id', company, title).status
+          return { status, clicks }
+        }""",
+        [GREETING, CHAT_COMPANY, CHAT_TITLE],
+    )
+    assert result["status"] == "input_not_empty"
+    assert result["clicks"] == 0
+
+
+@pytest.mark.asyncio
 async def test_a_conversation_about_another_company_is_refused(chat_greeting):
     """The whole reason the check exists: BOSS picks which conversation is
     open, and the wrong one is a message to a real person."""

@@ -1,0 +1,79 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>BOSS chat, contenteditable composer</title>
+<!--
+  The CLASS NAMES here were read from the live /web/geek/chat page on
+  2026-09-06 (read-only: one navigation, DOM reads, no conversation selected,
+  nothing clicked): `.chat-wrap > .list-warp.v2` is the conversation list and
+  `.chat-conversation` is the open one. The page carries ZERO
+  /job_detail/ anchors and its list items are plain divs, which is why the
+  identity check reads the open pane's own company and title.
+
+  The CONTENT is authored - no conversation was opened to capture one, and no
+  automated test may visit zhipin.com. The header's internal markup is
+  therefore still a reconstruction from a screenshot; what the test pins is
+  the reader's logic and its scoping to `.chat-conversation`.
+-->
+<style>
+  .chat-wrap { display: flex }
+  .list-warp { width: 300px }
+  .chat-conversation { width: 600px }
+  .chat-input { width: 320px; height: 60px }
+  .btn-send { display: inline-block; width: 60px; height: 24px }
+  .friend-content-warp { padding: 4px }
+</style>
+
+<div class="chat-container page-container">
+  <div class="chat-wrap">
+
+    <!-- Every other recruiter this account has spoken to. A document-wide
+         text match would confirm any of these; the scoping is the point. -->
+    <div class="list-warp v2">
+      <div class="chat-user v2">
+        <div class="chat-content"><div class="user-list"><div class="user-list-content">
+          <div class="friend-content-warp"><div class="friend-content">
+            <div class="text"><div class="title-box"><span class="name">盛女士</span><span
+              class="company-name">浩鲸科技</span></div>
+              <div class="gray last-msg">阿里云运维工程师</div></div>
+          </div></div>
+          <div class="friend-content-warp"><div class="friend-content">
+            <div class="text"><div class="title-box"><span class="name">陈星星</span><span
+              class="company-name">嘉环科技股份有限公司</span></div>
+              <div class="gray last-msg">云计算工程师</div></div>
+          </div></div>
+        </div></div></div>
+      </div>
+    </div>
+
+    <!-- The open conversation. -->
+    <div class="chat-conversation">
+      <div class="chat-title">
+        <span class="name">雷宇博</span>
+        <span class="company">中信建投证券</span>
+        <span class="boss-title">信息技术部人力资源</span>
+      </div>
+      <div class="job-info">
+        <!-- Split across spans on purpose: BOSS does this to a title like
+             「云迁移运维工程师＋3个月（朝阳区MQ）」, and a leaf-only reader
+             cannot see it. -->
+        <span class="job-name">私有云运维<span class="hl">工程师</span> 25-40K</span>
+        <span class="city">北京</span>
+        <span class="view-job">查看职位</span>
+      </div>
+      <div class="chat-message-list">
+        <div class="message-card">你与该职位竞争者PK情况</div>
+      </div>
+      <!-- The composer BOSS actually served on 2026-09-08, recovered from a
+           refusal's own diagnostic: `ta=0/0|ce=1/1|snd=button.btn-v2`. No
+           textarea anywhere, one visible contenteditable, and the send
+           control beside it - a reader that only knew about textareas
+           reported `no_composer` at a composer in plain sight. -->
+      <div class="chat-editor">
+        <div class="chat-input" contenteditable="true"
+             data-placeholder="按Enter键发送，按Ctrl+Enter键换行"></div>
+        <button class="btn-v2">发送</button>
+      </div>
+    </div>
+
+  </div>
+</div>

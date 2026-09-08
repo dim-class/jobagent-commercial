@@ -1846,7 +1846,16 @@ Rules specific to it:
   into a box that is not empty would append a second message to whatever is
   there. A non-empty box skips the greeting and records why;
 - **the composer must resolve unambiguously.** Exactly one visible, enabled,
-  empty textarea sharing a container with exactly one send control. Two
+  empty composer sharing a container with exactly one send control -
+  **a `<textarea>` or a `contenteditable`**. BOSS serves both: a refusal's own
+  diagnostic read `no_composer|ta=0/0|ce=1/1|snd=button.btn-v2` on 2026-09-08,
+  meaning no textarea anywhere, one visible contenteditable, and the send
+  control right beside it. A reader that knew only about textareas reported
+  "no composer" at a composer in plain sight. Typing differs by kind - a
+  contenteditable has no `value`, its text is its own content - but the
+  "re-read rather than trust the write" guard is what makes supporting both
+  safe: a composer the editor refuses to accept never reaches the send
+  control. Two
   candidates, none, or no send control all skip without typing. Selectors are
   structural and text-based (`extension/src/boss/selectors.ts`) because the
   panel's classes were never observed, and a guessed class here would type into

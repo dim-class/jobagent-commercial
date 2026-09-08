@@ -3136,6 +3136,12 @@ const M6_COMPOSER_RETRY_MS = 700;
 // script attaches at `document_idle` after that.
 // Still one bounded wait with a termination counter, and still one send.
 const M6_COMPOSER_ATTEMPTS = 15;
+// The gap between typing and clicking send. BOSS enables 发送 on its
+// framework's next tick, so a click in the same turn hits a disabled control
+// and does nothing - silently, which is how a greeting sitting in the composer
+// got recorded as sent.
+const M6_SEND_SETTLE_MS = 500;
+const M6_SEND_ATTEMPTS = 6;
 async function m6Tab(tabId) {
     try {
         return await chrome.tabs.get(tabId);
@@ -3362,6 +3368,35 @@ async function executeM6Application(approvalId, source) {
                     // told the user nothing about why. Read where the tab actually
                     // went - path only, never the query, which carries session tokens.
                     status = `greeting_unavailable:${await tabAreaOf(tabId)}`;
+                }
+                // Typed, not yet sent. Clicking in the same synchronous turn as the
+                // input event clicked a control BOSS had not enabled yet: on
+                // 2026-09-08 a greeting was recorded as sent while it sat in the
+                // composer with the button only just turning green. The page's own
+                // framework needs a tick; then the send step re-checks the identity,
+                // the composer and that it still holds exactly this greeting before
+                // clicking. Bounded, and still exactly one send.
+                if (status === 'typed') {
+                    for (let send = 0; send < M6_SEND_ATTEMPTS; send += 1) {
+                        await new Promise((resolve) => setTimeout(resolve, M6_SEND_SETTLE_MS));
+                        const alive = await verifyRunnerTab(tabId, true);
+                        if (!alive.ok) {
+                            status = 'foreground_lost';
+                            break;
+                        }
+                        const sent = await askTab(tabId, {
+                            type: 'jobagent:m6-greeting-send',
+                            greeting: approval.answers_text,
+                            expectedExternalId: approval.external_id,
+                            expectedCompany: approval.company,
+                            expectedTitle: approval.title,
+                        }, true);
+                        status = sent.ok && sent.result ? sent.result.status : 'send_unanswered';
+                        // `send_disabled` is the one worth waiting out - it means the
+                        // control exists and the page has not enabled it yet.
+                        if (status !== 'send_disabled')
+                            break;
+                    }
                 }
                 // Two statuses mean "the page is not ready yet", and only those are
                 // worth waiting out: the composer has not rendered, or the content

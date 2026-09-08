@@ -1688,7 +1688,11 @@ var BossExtract = (function () {
     return node instanceof HTMLTextAreaElement ? node.value : (node.textContent || '')
   }
 
-  function greetingComposer(doc: Document): {
+  /** `allowText` is the one thing the box may already contain and still count
+   *  as ours - the greeting this same run just typed. Without it the rule is
+   *  simply "must be empty", which is what stops a second message being
+   *  appended to whatever BOSS said on its own. */
+  function greetingComposer(doc: Document, allowText = ''): {
     status: 'ok' | 'no_composer' | 'ambiguous_composer' | 'no_send_control' | 'input_not_empty'
     input?: HTMLElement
     send?: HTMLElement
@@ -1715,7 +1719,8 @@ var BossExtract = (function () {
     if (inputs.length > 1) return { status: 'ambiguous_composer' }
 
     const input = inputs[0]
-    if (composerText(input).trim()) return { status: 'input_not_empty' }
+    const held = composerText(input).trim()
+    if (held && held !== allowText) return { status: 'input_not_empty' }
 
     const wanted = BossSelectors.GREETING_SEND_TEXT
     for (let scope = input.parentElement; scope; scope = scope.parentElement) {
@@ -1968,6 +1973,40 @@ var BossExtract = (function () {
    * the live chat page exposes no job id at all. Anywhere else, and anything
    * ambiguous, is refused before a character is typed.
    */
+  /** Is this page the job the approval names? Returns a refusal status, or
+   *  `null` when it is. Shared by typing and by sending, so the send step
+   *  cannot be reached on a page the typing step would have refused. */
+  function greetingPageGate(
+    doc: Document,
+    currentUrl: string,
+    expectedExternalId: string,
+    expectedCompany: string,
+    expectedTitle: string,
+  ): string | null {
+    if (!expectedExternalId) return 'wrong_job'
+    const observedUrl = cleanUrl(currentUrl)
+    const observedId = observedUrl ? externalIdOf(observedUrl) : null
+    if (observedId) return observedId === expectedExternalId ? null : 'wrong_job'
+    if (!isChatPage(currentUrl)) return 'left_job_page'
+    const owner = chatConversationMatches(doc, expectedCompany, expectedTitle)
+    return owner.status === 'ok' ? null : owner.status
+  }
+
+  /** The composer, required to hold exactly `body` rather than to be empty.
+   *  Used by the send step: it is what stops a second call sending anything,
+   *  since after a successful send the box no longer matches. */
+  function greetingComposerHolding(doc: Document, body: string): {
+    status: string
+    input?: HTMLElement
+    send?: HTMLElement
+  } {
+    const composer = greetingComposer(doc, body)
+    if (composer.status !== 'ok' || !composer.input) return composer
+    return composerText(composer.input).trim() === body
+      ? composer
+      : { status: 'input_rejected' }
+  }
+
   function sendConfirmedGreeting(
     doc: Document,
     greeting: string,
@@ -1992,16 +2031,10 @@ var BossExtract = (function () {
     if (composer.status !== 'ok' || !composer.input || !composer.send) {
       return { status: composer.status }
     }
-    const observedUrl = cleanUrl(currentUrl)
-    const observedId = observedUrl ? externalIdOf(observedUrl) : null
-    if (observedId) {
-      if (observedId !== expectedExternalId) return { status: 'wrong_job' }
-    } else if (isChatPage(currentUrl)) {
-      const owner = chatConversationMatches(doc, expectedCompany, expectedTitle)
-      if (owner.status !== 'ok') return { status: owner.status }
-    } else {
-      return { status: 'left_job_page' }
-    }
+    const gate = greetingPageGate(
+      doc, currentUrl, expectedExternalId, expectedCompany, expectedTitle,
+    )
+    if (gate) return { status: gate }
     const view = doc.defaultView
     if (!view) return { status: 'no_composer' }
 
@@ -2031,7 +2064,51 @@ var BossExtract = (function () {
     // kind safe - a contenteditable the editor refuses to accept simply never
     // reaches the send control.
     if (composerText(composer.input).trim() !== body) return { status: 'input_rejected' }
-    composer.send.click()
+
+    // Typed, not sent. Clicking here - in the same synchronous turn as the
+    // input event - clicked a control the page had not enabled yet: BOSS's
+    // editor enables 发送 on its framework's next tick, so on 2026-09-08 the
+    // greeting was recorded as sent while it sat in the composer with the
+    // button only just turning green. The worker waits, then calls
+    // `submitConfirmedGreeting`, which re-checks everything before clicking.
+    return { status: 'typed' }
+  }
+
+  /**
+   * Clicks send on a composer that already holds exactly the confirmed text.
+   *
+   * Every check `sendConfirmedGreeting` makes runs again here - the page
+   * identity, the single unambiguous composer, the single send control - and
+   * one more besides: the composer must still contain *this* greeting and
+   * nothing else. A second message cannot be produced by calling this twice,
+   * because after a successful send the composer is empty and the text no
+   * longer matches.
+   */
+  function submitConfirmedGreeting(
+    doc: Document,
+    greeting: string,
+    currentUrl: string,
+    expectedExternalId: string,
+    expectedCompany = '',
+    expectedTitle = '',
+  ): { status: string } {
+    const body = (greeting || '').trim()
+    if (!body) return { status: 'empty_greeting' }
+    const gate = greetingPageGate(doc, currentUrl, expectedExternalId, expectedCompany, expectedTitle)
+    if (gate) return { status: gate }
+
+    const view = doc.defaultView
+    if (!view) return { status: 'no_composer' }
+    const composer = greetingComposerHolding(doc, body)
+    if (composer.status !== 'ok' || !composer.input || !composer.send) {
+      return { status: composer.status }
+    }
+    // A control the page has not enabled yet swallows the click silently.
+    const send = composer.send as HTMLButtonElement
+    if (send.disabled || send.getAttribute('aria-disabled') === 'true') {
+      return { status: 'send_disabled' }
+    }
+    send.click()
     return { status: 'sent' }
   }
 
@@ -2270,6 +2347,7 @@ var BossExtract = (function () {
     postingClosed,
     greetingDiagnostic,
     sendConfirmedGreeting,
+    submitConfirmedGreeting,
     readSalaryFilterOptions,
     readExperienceFilterOptions,
     MAX_DESCRIPTION_CHARS,

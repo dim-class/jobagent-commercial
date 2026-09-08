@@ -72,6 +72,14 @@ var BossContentScript = (function () {
             // recorded attempt instead of another live one.
             return { ok: true, result: { shape: BossExtract.greetingDiagnostic(document) } };
         }
+        if (request.type === 'jobagent:m6-greeting-send' && typeof request.greeting === 'string') {
+            // The second half of one send: type, let the page's own framework catch
+            // up, then click. Every check the typing step made runs again here.
+            return {
+                ok: true,
+                result: BossExtract.submitConfirmedGreeting(document, request.greeting, document.location.href, request.expectedExternalId || '', request.expectedCompany || '', request.expectedTitle || ''),
+            };
+        }
         if (request.type === M6_GREETING && typeof request.greeting === 'string') {
             // Types the human-confirmed greeting into an empty composer and sends it
             // once. Refuses on anything ambiguous, and never touches a box that

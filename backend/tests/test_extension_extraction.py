@@ -716,7 +716,12 @@ async def test_only_the_named_m4_and_m6_click_primitives_exist(extension_code):
     )
     assert "anchor.click()" in extension_code
     assert "control.node.click()" in extension_code
-    assert "composer.send.click()" in extension_code
+    # The greeting's click moved out of the typing function into
+    # `submitConfirmedGreeting` on 2026-09-08: clicking in the same
+    # synchronous turn as the input event hit a control BOSS had not enabled
+    # yet, so the greeting was recorded as sent while it sat in the composer.
+    # It moved; it did not multiply - the count above is still three.
+    assert "send.click()" in extension_code
 
 
 @pytest.mark.asyncio
@@ -1001,9 +1006,17 @@ async def chat_greeting(browser_page, extension_bundle):
         )
         if prepare:
             await browser_page.evaluate(prepare)
+        # Type, then send - the two halves of one send, the same way the
+        # worker drives them. Typing alone never clicks, because BOSS enables
+        # 发送 on its framework's next tick.
         status = await browser_page.evaluate(
-            "([text, company, title]) => BossExtract.sendConfirmedGreeting("
-            "  document, text, document.location.href, 'any-id', company, title).status",
+            """([text, company, title]) => {
+              const typed = BossExtract.sendConfirmedGreeting(
+                document, text, document.location.href, 'any-id', company, title).status
+              if (typed !== 'typed') return typed
+              return BossExtract.submitConfirmedGreeting(
+                document, text, document.location.href, 'any-id', company, title).status
+            }""",
             [GREETING, company, title],
         )
         return {
@@ -1062,6 +1075,94 @@ async def test_widening_to_the_header_still_never_reaches_the_conversation_list(
 
 
 @pytest.mark.asyncio
+async def test_typing_alone_never_clicks_send(browser_page, extension_bundle):
+    """The two halves are separate on purpose.
+
+    BOSS enables 发送 on its framework's next tick, so clicking in the same
+    synchronous turn as the input event hit a disabled control and did
+    nothing - silently. On 2026-09-08 a greeting was recorded as
+    `clicked_and_greeted` while it sat in the composer with the button only
+    just turning green.
+    """
+    await _load_fixture(
+        browser_page, extension_bundle, "boss_chat_contenteditable.html", url=CHAT_URL
+    )
+    result = await browser_page.evaluate(
+        """([text, company, title]) => {
+          let clicks = 0
+          document.querySelector('.btn-v2').addEventListener('click', () => { clicks += 1 })
+          const status = BossExtract.sendConfirmedGreeting(
+            document, text, document.location.href, 'any-id', company, title).status
+          return { status, clicks, typed: document.querySelector('.chat-input').textContent }
+        }""",
+        [GREETING, CHAT_COMPANY, CHAT_TITLE],
+    )
+    assert result["status"] == "typed"
+    assert result["clicks"] == 0, "typing must not click"
+    assert result["typed"] == GREETING, "but the text is in the box, ready to send"
+
+
+@pytest.mark.asyncio
+async def test_a_disabled_send_control_is_reported_rather_than_clicked(
+    browser_page, extension_bundle
+):
+    """A control the page has not enabled swallows the click without a trace,
+    which is exactly how this went unnoticed. It is now a status the worker
+    waits out."""
+    await _load_fixture(
+        browser_page, extension_bundle, "boss_chat_contenteditable.html", url=CHAT_URL
+    )
+    result = await browser_page.evaluate(
+        """([text, company, title]) => {
+          let clicks = 0
+          const btn = document.querySelector('.btn-v2')
+          btn.addEventListener('click', () => { clicks += 1 })
+          BossExtract.sendConfirmedGreeting(
+            document, text, document.location.href, 'any-id', company, title)
+          btn.disabled = true
+          const status = BossExtract.submitConfirmedGreeting(
+            document, text, document.location.href, 'any-id', company, title).status
+          return { status, clicks }
+        }""",
+        [GREETING, CHAT_COMPANY, CHAT_TITLE],
+    )
+    assert result["status"] == "send_disabled"
+    assert result["clicks"] == 0
+
+
+@pytest.mark.asyncio
+async def test_sending_twice_cannot_produce_a_second_message(
+    browser_page, extension_bundle
+):
+    """After a send the composer is empty, so the text no longer matches and
+    the second call refuses. One confirmation, one message."""
+    await _load_fixture(
+        browser_page, extension_bundle, "boss_chat_contenteditable.html", url=CHAT_URL
+    )
+    result = await browser_page.evaluate(
+        """([text, company, title]) => {
+          let clicks = 0
+          const box = document.querySelector('.chat-input')
+          document.querySelector('.btn-v2').addEventListener('click', () => {
+            clicks += 1
+            box.textContent = ''   // what a real send does
+          })
+          BossExtract.sendConfirmedGreeting(
+            document, text, document.location.href, 'any-id', company, title)
+          const first = BossExtract.submitConfirmedGreeting(
+            document, text, document.location.href, 'any-id', company, title).status
+          const second = BossExtract.submitConfirmedGreeting(
+            document, text, document.location.href, 'any-id', company, title).status
+          return { first, second, clicks }
+        }""",
+        [GREETING, CHAT_COMPANY, CHAT_TITLE],
+    )
+    assert result["first"] == "sent"
+    assert result["second"] == "input_rejected"
+    assert result["clicks"] == 1, "exactly one message, whatever the caller does"
+
+
+@pytest.mark.asyncio
 async def test_a_refusal_says_which_half_of_the_identity_missed(chat_greeting):
     """"Wrong job" alone cannot be acted on.
 
@@ -1103,8 +1204,12 @@ async def test_a_contenteditable_composer_is_typed_into_and_sent(
         """([text, company, title]) => {
           let clicks = 0
           document.querySelector('.btn-v2').addEventListener('click', () => { clicks += 1 })
-          const status = BossExtract.sendConfirmedGreeting(
+          let status = BossExtract.sendConfirmedGreeting(
             document, text, document.location.href, 'any-id', company, title).status
+          if (status === 'typed') {
+            status = BossExtract.submitConfirmedGreeting(
+              document, text, document.location.href, 'any-id', company, title).status
+          }
           return { status, clicks, typed: document.querySelector('.chat-input').textContent }
         }""",
         [GREETING, CHAT_COMPANY, CHAT_TITLE],
@@ -1128,8 +1233,12 @@ async def test_a_contenteditable_that_already_has_text_is_left_alone(
           document.querySelector('.chat-input').textContent = '您好'
           let clicks = 0
           document.querySelector('.btn-v2').addEventListener('click', () => { clicks += 1 })
-          const status = BossExtract.sendConfirmedGreeting(
+          let status = BossExtract.sendConfirmedGreeting(
             document, text, document.location.href, 'any-id', company, title).status
+          if (status === 'typed') {
+            status = BossExtract.submitConfirmedGreeting(
+              document, text, document.location.href, 'any-id', company, title).status
+          }
           return { status, clicks }
         }""",
         [GREETING, CHAT_COMPANY, CHAT_TITLE],
@@ -1316,8 +1425,14 @@ async def send_greeting(browser_page, extension_bundle):
         if prepare:
             await browser_page.evaluate(prepare)
         status = await browser_page.evaluate(
-            "(text) => BossExtract.sendConfirmedGreeting("
-            "  document, text, document.location.href, 'aaa111bbb222~', 'c', 't').status",
+            """(text) => {
+              const id = 'aaa111bbb222~'
+              const typed = BossExtract.sendConfirmedGreeting(
+                document, text, document.location.href, id, 'c', 't').status
+              if (typed !== 'typed') return typed
+              return BossExtract.submitConfirmedGreeting(
+                document, text, document.location.href, id, 'c', 't').status
+            }""",
             greeting,
         )
         return {

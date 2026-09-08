@@ -1866,8 +1866,23 @@ Rules specific to it:
   attempt detail records how far it got
   (`clicked_and_greeted_site_result_unverified`, or
   `clicked_greeting_skipped:<reason>`);
-- **exactly one send.** No follow-up, no second attempt, no polling for the
-  composer beyond one bounded wait;
+- **exactly one send, in two steps.** `sendConfirmedGreeting` types and stops;
+  `submitConfirmedGreeting` clicks, after re-running every check - the page
+  identity, the single composer, the single send control - plus one more: the
+  box must still hold exactly this greeting. That last check is what makes a
+  second call harmless, because a real send empties the composer and the text
+  no longer matches.
+
+  They are separate because clicking in the same synchronous turn as the input
+  event clicked a control BOSS had not enabled yet. Its editor enables 发送 on
+  the framework's next tick, so on 2026-09-08 a greeting was recorded as
+  `clicked_and_greeted` while it sat in the composer with the button only just
+  turning green - a silent failure, since a click on a disabled control raises
+  nothing. `send_disabled` is now a real status and the one the bounded retry
+  waits out.
+
+  Still no follow-up, no second message, and no polling for the composer
+  beyond one bounded wait;
 - **the greeting goes to one of exactly two places, and both are checked
   against the approval's own `external_id`** (chat page authorized
   2026-09-06). BOSS normally answers 立即沟通 with an in-page panel, but on

@@ -174,6 +174,13 @@ p { margin: 0 0 8px; }
   padding: 16px 18px;
 }
 .card + .card { margin-top: 14px; }
+/* ...but that is a rule for cards stacked in normal flow, and a grid already
+   spaces its own children with `gap`. Left to apply inside one, the margin
+   makes the row's FIRST card 14px TALLER than every sibling - a stretched
+   grid item's height is the row minus its own margins - which is why 待处理
+   stood a head above the other four counters. Direct children only: two cards
+   stacked inside one grid cell still want the margin. */
+.grid > .card + .card { margin-top: 0; }
 .card-head {
   display: flex;
   align-items: center;
@@ -303,9 +310,21 @@ label { display: block; font-size: 12px; font-weight: 600; color: var(--text-mut
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 10px;
-  align-items: end;
+  /* Stretch, not `end`. Aligning the bottoms meant one field carrying a hint
+     under its control (我的经验年数) pushed its own label and select 67px
+     above the rest of the row - the tallest cell decides, and `end` hangs
+     everything else off its bottom edge. Stretching gives every cell the same
+     height with its label and control on the same line as its neighbours',
+     and a hint simply sits under the control it explains. */
 }
-.filters .field { margin-bottom: 0; }
+/* A column, so a hint goes BELOW its control rather than flowing inline after
+   it and wrapping around the select. */
+.filters .field {
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 
 /* A browser's default fieldset border was the heaviest thing on the page,
    framing four chips that already read as a group. */

@@ -64,3 +64,20 @@ test('M6 claims one attempt before the click and never guesses applied', () => {
   assert.doesNotMatch(background, /application-approvals\/\$\{approval\.id\}\/outcome[\s\S]{0,300}outcome:\s*'applied'/)
   assert.doesNotMatch(background, /executeM6Application[\s\S]{0,8000}(?:setInterval|MutationObserver)/)
 })
+
+test('the M6 greeting may repair a tab that has no content script', () => {
+  // BOSS answers 立即沟通 by loading /web/geek/chat as a fresh document, and
+  // the declarative content script attaches at document_idle on a page whose
+  // conversation pane alone takes ~2.2s (measured live, 2026-09-08). Every
+  // attempt was reaching a tab with no receiver, which is what
+  // `greeting_unavailable:chat` records - not a wrong job, not a missing
+  // composer, simply nobody to answer.
+  //
+  // The recovery already existed for the search runner's startup; this pins
+  // that M6 asks for it too, since the default is off.
+  const call = background.indexOf("'jobagent:m6-greeting'")
+  assert.ok(call > 0, 'the greeting call site is still there')
+  const tail = background.slice(call, call + 400)
+  assert.match(tail, /\}\s*,\s*true\s*\)/,
+    'askTab must be called with allowPackagedInjection = true')
+})

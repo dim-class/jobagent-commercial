@@ -1902,6 +1902,17 @@ Rules specific to it:
   reader's logic and its scoping - whether it matches the live header stays a
   manual claim the user makes in their own Chrome.
 
+  **A chat page BOSS loaded fresh often has no content script yet, and that is
+  what `greeting_unavailable:chat` records** - not a wrong job, not a missing
+  composer, simply nobody to answer. `/web/geek/chat` is a full document load
+  whose declarative script attaches at `document_idle`; measured live on
+  2026-09-08, the conversation pane alone needs ~2.2s. The recovery already
+  existed for the search runner's own startup - inject the packaged stack
+  once, re-verifying the tab before and after, then retry the single message -
+  and M6 simply never passed `allowPackagedInjection`. It does now, and a test
+  pins it, because the default is off. The bounded wait also went from 9
+  attempts to 15 (~11s).
+
   Two statuses mean "not ready yet" and are the only ones the bounded retry
   waits out: `no_composer`, and a content script that did not answer at all
   because BOSS is mid-navigation. A wrong or ambiguous job is refused, never

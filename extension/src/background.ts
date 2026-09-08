@@ -3457,9 +3457,12 @@ function isM6CanonicalUrl(raw: string, externalId: string): boolean {
 const M6_COMPOSER_WAIT_MS = 1200
 const M6_COMPOSER_RETRY_MS = 700
 // A full-page navigation to BOSS's chat app renders later than its in-page
-// panel: 1.2s + 5x0.7s still met a completely empty document on 2026-09-07.
+// panel: 1.2s + 5x0.7s still met a completely empty document on 2026-09-07,
+// and 1.2s + 8x0.7s was still too short on 2026-09-08. Measured on the live
+// page that day: the conversation pane alone needs ~2.2s, and the content
+// script attaches at `document_idle` after that.
 // Still one bounded wait with a termination counter, and still one send.
-const M6_COMPOSER_ATTEMPTS = 9
+const M6_COMPOSER_ATTEMPTS = 15
 
 async function m6Tab(tabId: number): Promise<chrome.tabs.Tab | undefined> {
   try {
@@ -3663,13 +3666,25 @@ async function executeM6Application(
           status = 'foreground_lost'
           break
         }
+        // `allowPackagedInjection` - the third argument, and the reason this
+        // failed. BOSS answers 立即沟通 by loading `/web/geek/chat` as a fresh
+        // document, and its declarative content script attaches at
+        // `document_idle` on a page that is slow: measured 2026-09-08, the
+        // conversation pane alone takes ~2.2s to exist. Every attempt was
+        // reaching a tab with no receiver, and `greeting_unavailable:chat` is
+        // exactly that - not a wrong job, not a missing composer, simply
+        // nobody to answer.
+        //
+        // The recovery already existed for the search runner's own startup:
+        // inject the packaged stack once, re-verifying the tab before and
+        // after, then retry the single message. M6 just never asked for it.
         const greeted = await askTab<{ status: string }>(tabId, {
           type: 'jobagent:m6-greeting',
           greeting: approval.answers_text,
           expectedExternalId: approval.external_id,
           expectedCompany: approval.company,
           expectedTitle: approval.title,
-        })
+        }, true)
         if (greeted.ok && greeted.result) {
           status = greeted.result.status
         } else {

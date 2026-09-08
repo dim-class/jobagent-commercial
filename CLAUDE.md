@@ -2526,7 +2526,13 @@ Unique indexes that matter: `jobs.content_hash`, `(jobs.source, external_id)`,
   never reach a live recruitment site.
 - Browser tests use a headless Chromium against local fixture HTML only. That
   headless usage is a test-harness detail; the capture browser stays headed.
-- **Run `npm run build` after any frontend change** (it type-checks first).
+- **Run `npm run build` AND `npm test` in `frontend/` after any frontend
+  change.** The build only type-checks; `frontend/tests/` asserts the
+  *design* - which pages are in the primary nav, that the search panel
+  stays one aggregate run - by reading the source. Those tests are easy to
+  forget because nothing else runs them, and CI went red for 39 of 40 runs
+  while every local suite passed: two assertions were pinning a UI that had
+  been deliberately changed, and every push mailed the user a failure.
 - **Run `npm run build` in `extension/` after any extension change** - the
   extraction tests inject `extension/dist`, and a stale build shows up as a
   skipped test rather than a silent pass. `.\scripts\dev.ps1 test` does it

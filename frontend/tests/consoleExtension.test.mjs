@@ -115,7 +115,7 @@ test('compatible version and complete runner state are needed before enabling st
   assert.equal(old.ready, false)
   assert.match(old.detail, /旧版扩展已响应/)
   for (const patch of [{ protocol: 2 }, { capabilities: [] }, { extensionVersion: '<bad>' }, { extensionVersion: 123 },
-    { runner: undefined }, { runner: {} }, { runner: { taskId: 5, candidateCap: 21, phase: 'running', paid: false, paused: false } }]) {
+    { runner: undefined }, { runner: {} }, { runner: { taskId: 5, candidateCap: 61, phase: 'running', paid: false, paused: false } }]) {
     assert.equal(assessConsoleConnection({ ...ready, ...patch }).ready, false)
   }
   assert.equal(assessConsoleConnection({ ...ready, runner: { taskId: 5, candidateCap: 3, phase: 'paused', paid: false, paused: true } }).ready, true)
@@ -127,7 +127,7 @@ test('compatible version and complete runner state are needed before enabling st
   assert.equal(assessConsoleConnection(batchReady).ready, true)
   for (const batch of [{ ...batchReady.batch, taskIds: [5, 5] },
     { ...batchReady.batch, currentIndex: 2 }, { ...batchReady.batch, currentTaskId: 6 },
-    { ...batchReady.batch, candidateCap: 21 }]) {
+    { ...batchReady.batch, candidateCap: 61 }]) {
     assert.equal(assessConsoleConnection({ ...batchReady, batch }).ready, false)
   }
 })

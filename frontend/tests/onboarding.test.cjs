@@ -31,10 +31,15 @@ test('search capability request is read-only', () => {
 })
 
 test('personal quick search is aggregate, broader and does not expose execution order', () => {
-  assert.match(consolePanel, /useState\(8\)/)
+  // The literals this used to pin - useState(8), 整体进度, 最多 8 个相关方向 -
+  // all described a UI that has since changed on purpose: the per-direction
+  // target defaults to the opened-detail ceiling, and the direction count
+  // comes from the backend's own `max_directions` rather than a number in the
+  // page. What has to stay true is the *shape*: one aggregate run, no exposed
+  // execution order.
   assert.match(consolePanel, /本次综合搜索/)
-  assert.match(consolePanel, /整体进度/)
-  assert.match(consolePanel, /最多 8 个相关方向/)
+  assert.match(consolePanel, /个岗位方向/)
+  assert.match(consolePanel, /searchOptions\.max_directions/)
   assert.doesNotMatch(consolePanel, /将按以下固定顺序/)
   assert.doesNotMatch(consolePanel, /<ol>/)
 })

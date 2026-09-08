@@ -1852,11 +1852,13 @@ var BossExtract = (function () {
    * items are plain `div`s, not links. So the only identity the page exposes
    * is the header's own text, which is what the user authorized checking.
    *
-   * Scoped to `CHAT_CONVERSATION`, and that scope is the whole safety
-   * argument: the left list holds every other recruiter this account has
-   * spoken to, and a document-wide text match would happily confirm a job we
-   * applied to yesterday while BOSS had a different conversation open. One
-   * pane, one conversation.
+   * Scoping is the whole safety argument, and the scope is the page MINUS
+   * the conversation list: that list holds every other recruiter this account
+   * has spoken to, and a truly document-wide match would happily confirm a
+   * job applied to yesterday while BOSS had a different conversation open.
+   * Everything outside it belongs either to BOSS's own chrome or to the one
+   * conversation on screen. `CHAT_CONVERSATION` still has to resolve, and
+   * uniquely - it is what proves a conversation is open and rendered at all.
    *
    * Both the company and the title must be found. Either alone is not an
    * identification - several roles at one company is normal, and the same
@@ -1873,22 +1875,42 @@ var BossExtract = (function () {
     const pane = panes.nodes[0]
     if (!pane) return { status: 'chat_job_unknown' }
 
-    // The open conversation's pane, PLUS its surrounding header, MINUS the
-    // conversation list.
+    // EVERYTHING EXCEPT THE CONVERSATION LIST.
     //
-    // The pane alone was not enough: measured 2026-09-08 from a refusal's own
-    // diagnostic, `co=0,ti=1p` - the job title inside `.chat-conversation`,
-    // the company nowhere in it, because BOSS renders 「HR｜公司｜职务」 just
-    // outside. Widening to the pane's parent reaches that header - and would
-    // also reach the list of every recruiter this account has spoken to,
-    // where a company match means nothing about the conversation that is
-    // actually open. So the list is subtracted by name.
+    // The scope started at the pane and was widened twice, because the header
+    // that carries the identity kept sitting outside it: `co=0,ti=1p`
+    // (2026-09-08) put the job title inside `.chat-conversation` and the
+    // company nowhere in it, and widening to the pane's parent still read
+    // `co=0`, so the 「HR｜公司｜职务」 row is higher again. Guessing one
+    // ancestor at a time is the wrong shape of fix - the user pointed at the
+    // two rows on their own screen and asked why both are not simply read.
+    //
+    // So the scope is the page minus the one region that must never count:
+    // the left list of every recruiter this account has ever spoken to, where
+    // a company match says nothing about which conversation is open. What is
+    // left is BOSS's own chrome (首页 / 职位 / 消息 - no company or job names
+    // anywhere in it) and the open conversation's own column, header
+    // included.
+    //
+    // It fails closed when the list cannot be resolved. Without that, a
+    // renamed class would silently turn this into a document-wide match over
+    // forty other conversations - the exact wrong-person send the check
+    // exists to stop.
     const listRoots = Array.from(
       doc.querySelectorAll(BossSelectors.CHAT_LIST.join(',')),
     )
-    const scope = pane.parentElement || pane
+    //
+    // Subtracting the list by node identity is not enough on its own: a
+    // node's `textContent` is every descendant concatenated, so the list's
+    // ANCESTORS still carry all forty conversations' text. `.chat-wrap` read
+    // as containing 浩鲸科技 with the list itself correctly excluded. So a
+    // node qualifies only if it neither sits inside the list nor contains it.
+    if (!listRoots.length) return { status: 'chat_list_unknown' }
+    const scope = doc.body || pane
     const nodes = Array.from(scope.querySelectorAll('*'))
-      .filter((node) => !listRoots.some((list) => list === node || list.contains(node)))
+      .filter((node) => !listRoots.some(
+        (list) => list === node || list.contains(node) || node.contains(list),
+      ))
 
     // Leaves alone are not enough: BOSS splits a title like
     // 「云迁移运维工程师＋3个月（朝阳区MQ）」 across spans, so no single leaf
@@ -1899,16 +1921,24 @@ var BossExtract = (function () {
     // That admits a header row and excludes the conversation.
     const values = nodes.map((node) => text(node)).filter(Boolean)
 
+    // Requiring the value to START with what is wanted was not enough either.
+    // The live header reads 「刘女士 蚂蚁集团｜HR」 - the company sits in the
+    // middle of its own row, so a prefix rule never saw it. What actually has
+    // to hold is the boundary on BOTH sides: 「蚂蚁集团科技」 is a different
+    // company and 「云运维工程师(高级)」 is a different job, and in each the
+    // very next character says so. Brackets are deliberately not boundaries.
+    const BOUNDARY = /[\s·•|｜/、,，;；:：\-–—]/
     const found = (wanted: string): boolean => values.some((value) => {
       if (value.length > wanted.length + 40) return false
-      if (value === wanted) return true
-      // BOSS renders 「公司 | 招聘者职位」 and 「职位 25-40K 北京」 as single
-      // nodes, so a prefix counts - but only when what follows is a separator,
-      // a space or a digit. 「云运维工程师(高级)」 is a different job and the
-      // '(' stops it matching 「云运维工程师」.
-      if (!value.startsWith(wanted)) return false
-      const rest = value.slice(wanted.length)
-      return /^[\s·•|｜/\-–—]/.test(rest) || /^\d/.test(rest)
+      for (let at = value.indexOf(wanted); at >= 0; at = value.indexOf(wanted, at + 1)) {
+        const before = at === 0 ? '' : value.charAt(at - 1)
+        const after = value.charAt(at + wanted.length)
+        // A digit may follow with no separator of its own: BOSS renders
+        // 「私有云运维工程师 25-40K」 as one node.
+        if ((before === '' || BOUNDARY.test(before))
+          && (after === '' || BOUNDARY.test(after) || /\d/.test(after))) return true
+      }
+      return false
     })
 
     const company = found(expectedCompany)
@@ -1918,22 +1948,23 @@ var BossExtract = (function () {
     // A refusal that only says "wrong job" is not enough to fix anything: on
     // 2026-09-08 an approval was refused while both its company and its title
     // were plainly on screen. `present` asks the weaker question - does the
-    // text appear anywhere in the pane at all, at any length - so the next
-    // refusal distinguishes "the pane does not contain it" from "it is there
-    // and the prefix rule rejected it". Only strings the approval itself
-    // supplied are echoed; no page text is copied out.
+    // text appear in scope at all, at any length - so a refusal distinguishes
+    // "it is not on this page" from "it is there and the boundary rule turned
+    // it down". Only strings the approval itself supplied are echoed; no page
+    // text is copied out.
     const present = (wanted: string): boolean =>
       values.some((value) => value.includes(wanted))
 
     /** How far above the pane the text first appears, or -1 if the document
-     *  does not contain it at all.
+     *  does not contain it at all: 0 inside the pane, 1 its parent, 2 its
+     *  grandparent.
      *
-     *  Widening the scope to the pane's parent did not find the company
-     *  either (2026-09-08: `co=0,ti=1p,n=63` then `n=64` - one node more), so
-     *  the next question is no longer "is my rule too strict" but "where is
-     *  it". This answers it in one number: 0 inside the pane, 1 its parent, 2
-     *  its grandparent, -1 nowhere - meaning the header is not text at all
-     *  and no amount of widening will help. */
+     *  It is what located the header in the first place, and it stays because
+     *  `co=0` (absent from scope) beside `coUp=1` (present in the document)
+     *  is the signature of a company that exists only in the conversation
+     *  list - which is a refusal working exactly as intended, not a bug to
+     *  chase. `coUp=-1` would mean the page carries the name nowhere at all,
+     *  and no reader could ever find it. */
     const distance = (wanted: string): number => {
       if (!doc.body || !(doc.body.textContent || '').includes(wanted)) return -1
       let node: Element | null = pane
@@ -1944,33 +1975,10 @@ var BossExtract = (function () {
       return 99
     }
 
-    /** The same walk, but ignoring anything inside the conversation list.
-     *
-     *  `coUp=1` on its own is ambiguous, and the two readings need opposite
-     *  fixes: the company may be in a header beside the pane (widen), or it
-     *  may only be in the list row for this same recruiter (do NOT widen -
-     *  that row is exactly what must never count, and its presence says
-     *  nothing about which conversation is open). `-1` here with `coUp=1`
-     *  above means the second: the open conversation's own header does not
-     *  carry the company as text at all. */
-    const distanceOutsideList = (wanted: string): number => {
-      let node: Element | null = pane
-      for (let up = 0; up < 12 && node; up += 1) {
-        const hit = Array.from(node.querySelectorAll('*'))
-          .concat(node)
-          .filter((el) => !listRoots.some((list) => list === el || list.contains(el)))
-          .some((el) => (el.textContent || '').includes(wanted))
-        if (hit) return up
-        node = node.parentElement
-      }
-      return -1
-    }
-
     const detail = `co=${company ? 1 : 0}${present(expectedCompany) ? 'p' : ''}`
       + `,ti=${title ? 1 : 0}${present(expectedTitle) ? 'p' : ''}`
       + `,n=${values.length}`
       + `,coUp=${distance(expectedCompany)},tiUp=${distance(expectedTitle)}`
-      + `,coUpX=${distanceOutsideList(expectedCompany)}`
 
     // Neither read means the header could not be read at all; one of the two
     // means this is a conversation about something else.

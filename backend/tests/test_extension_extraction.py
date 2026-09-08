@@ -1045,16 +1045,64 @@ async def test_the_conversation_boss_opened_for_this_job_accepts_the_greeting(ch
 
 @pytest.mark.asyncio
 async def test_the_company_is_found_in_the_header_outside_the_pane(chat_greeting):
-    """BOSS renders 「HR｜公司｜职务」 outside `.chat-conversation`.
+    """BOSS renders 「HR｜公司｜职务」 outside `.chat-conversation`, and outside
+    the pane's parent too.
 
     Measured 2026-09-08 from a refusal's own diagnostic: `co=0,ti=1p` - the
-    job title inside the pane, the company nowhere in it, so an approval whose
-    company and title were both plainly on screen was refused as
-    `chat_wrong_job`. The check now looks at the pane's parent.
+    job title inside the pane, the company nowhere in it - so an approval
+    whose company and title were both plainly on screen was refused as
+    `chat_wrong_job`. Widening to the pane's parent still read `co=0`.
+    Guessing one ancestor at a time was the wrong shape of fix: the scope is
+    now the page minus the conversation list, which reads the header wherever
+    BOSS puts it.
     """
     result = await chat_greeting()
     assert result["status"] == "sent"
     assert result["clicks"] == 1
+
+
+@pytest.mark.asyncio
+async def test_the_company_is_found_in_the_middle_of_the_header_row(chat_greeting):
+    """The live header reads 「刘女士 蚂蚁集团｜HR」.
+
+    The company is neither the whole row nor its prefix, so a `startsWith`
+    rule never saw it. What has to hold is the boundary on both sides.
+    """
+    result = await chat_greeting()
+    assert result["status"] == "sent", "the company sits mid-row in the fixture"
+
+
+@pytest.mark.asyncio
+async def test_a_company_that_only_shares_a_prefix_is_not_a_match(chat_greeting):
+    """The other half of the boundary rule. 「中信建投」 must not be confirmed
+    by 「中信建投证券」 - a name that continues into another character is a
+    different company, exactly as 「云运维工程师(高级)」 is a different job."""
+    result = await chat_greeting(company="中信建投")
+    assert result["status"].split("|")[0] == "chat_wrong_job"
+    assert result["clicks"] == 0
+    assert result["typed"] == ""
+
+
+@pytest.mark.asyncio
+async def test_an_unresolvable_conversation_list_refuses_rather_than_widening(
+    chat_greeting,
+):
+    """Subtracting the list is the whole safety argument, so losing it is a
+    refusal and never a document-wide match.
+
+    Without this, a renamed class would quietly turn the identity check into a
+    text search over forty other conversations - and every one of them would
+    confirm some job or other.
+    """
+    result = await chat_greeting(
+        prepare="() => document.querySelectorAll("
+        "  '.list-warp, .chat-user, .user-list, .user-list-content'"
+        ").forEach((el) => el.classList.remove("
+        "  'list-warp', 'chat-user', 'user-list', 'user-list-content'))"
+    )
+    assert result["status"] == "chat_list_unknown"
+    assert result["clicks"] == 0
+    assert result["typed"] == ""
 
 
 @pytest.mark.asyncio
@@ -1066,7 +1114,7 @@ async def test_widening_to_the_header_still_never_reaches_the_conversation_list(
     The list holds every recruiter this account has spoken to; a company
     matched from it says nothing about the conversation actually open, and
     acting on it is a message to the wrong person. It is subtracted by name,
-    not by position.
+    not by position - which is what lets the scope be the rest of the page.
     """
     result = await chat_greeting(company="嘉环科技股份有限公司", title="云计算工程师")
     assert result["status"].split("|")[0] in {"chat_job_unknown", "chat_wrong_job"}
@@ -1281,9 +1329,19 @@ async def test_another_conversation_in_the_list_never_confirms_the_open_one(chat
     """The list holds every recruiter this account has spoken to, including
     jobs already applied to. A document-wide text match would confirm one of
     those while BOSS had a different conversation open - which is exactly the
-    wrong-person send this check exists to prevent."""
+    wrong-person send this check exists to prevent.
+
+    The `p` assertions pin the subtler half. A node's text is every descendant
+    concatenated, so excluding the list's own nodes still leaves all forty
+    conversations readable through the list's ANCESTORS - `.chat-wrap` read as
+    containing 浩鲸科技 with the list itself correctly excluded. A node
+    therefore qualifies only if it neither sits inside the list nor contains
+    it, and `co=0` with no `p` is what says so.
+    """
     result = await chat_greeting(company="嘉环科技股份有限公司", title="云计算工程师")
-    assert result["status"].split("|")[0] == "chat_job_unknown", "both on the page, neither in the pane"
+    reason, _, detail = result["status"].partition("|")
+    assert reason == "chat_job_unknown", "both on the page, neither in the conversation"
+    assert "co=0," in detail and "ti=0," in detail, "not merely rejected - unreadable"
     assert result["clicks"] == 0
     assert result["typed"] == ""
 

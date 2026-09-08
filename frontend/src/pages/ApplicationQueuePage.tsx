@@ -75,6 +75,9 @@ const M6_GREETING_REASON: Record<string, string> = {
     '聊天页上出现了多个岗位链接，无法确定这条对话属于哪个岗位，没有发送。请到 BOSS 手动补一条。',
   chat_job_unknown:
     '聊天页上读不到这条对话对应的岗位，无法确认发给谁，没有发送。请到 BOSS 手动补一条。',
+  chat_list_unknown:
+    'BOSS 聊天页的结构变了，无法把左侧联系人列表排除在核对范围外，'
+    + '为避免发错人没有发送。请到 BOSS 手动补一条。',
   input_not_empty: 'BOSS 自己已经发了一条招呼语，所以没有再发第二条。',
   no_composer: '没等到输入框出现，招呼语没有发出去，请到 BOSS 手动补一条。',
   ambiguous_composer: '页面上有多个输入框，无法确定发给谁，没有发送。',

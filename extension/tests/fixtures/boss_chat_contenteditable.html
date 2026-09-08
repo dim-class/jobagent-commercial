@@ -7,12 +7,12 @@
   nothing clicked): `.chat-wrap > .list-warp.v2` is the conversation list and
   `.chat-conversation` is the open one. The page carries ZERO
   /job_detail/ anchors and its list items are plain divs, which is why the
-  identity check reads the open pane's own company and title.
+  identity check reads the open conversation's own company and title.
 
   The CONTENT is authored - no conversation was opened to capture one, and no
   automated test may visit zhipin.com. The header's internal markup is
-  therefore still a reconstruction from a screenshot; what the test pins is
-  the reader's logic and its scoping to `.chat-conversation`.
+  therefore still a reconstruction from a screenshot; what the tests pin is
+  the reader's logic and its scoping.
 -->
 <style>
   .chat-wrap { display: flex }
@@ -23,11 +23,17 @@
   .friend-content-warp { padding: 4px }
 </style>
 
+<div class="nav-wrap">
+  <a class="logo">BOSS直聘</a>
+  <a>首页</a><a>职位</a><a>公司</a><a>消息</a><a>简历</a>
+</div>
+
 <div class="chat-container page-container">
   <div class="chat-wrap">
 
     <!-- Every other recruiter this account has spoken to. A document-wide
-         text match would confirm any of these; the scoping is the point. -->
+         text match would confirm any of these; subtracting this one region
+         is the entire safety argument. -->
     <div class="list-warp v2">
       <div class="chat-user v2">
         <div class="chat-content"><div class="user-list"><div class="user-list-content">
@@ -45,39 +51,38 @@
       </div>
     </div>
 
-    <!-- The open conversation. -->
-    <!-- The recruiter/company row sits OUTSIDE `.chat-conversation`: measured
-         2026-09-08 from a refusal's own diagnostic, `co=0,ti=1p` - the job
-         title was inside the pane and the company was nowhere in it. The
-         identity check therefore looks at the pane's parent, minus the
-         conversation list. -->
+    <!-- Outside `.chat-conversation` AND outside the pane's parent - both
+         scopes were tried against the live page and both read `co=0`
+         (2026-09-08). The company sits in the middle of its row, as the live
+         header does. -->
     <div class="chat-title">
-      <span class="name">雷宇博</span>
-      <span class="company">中信建投证券</span>
-      <span class="boss-title">信息技术部人力资源</span>
+      <span class="name-box">雷宇博 中信建投证券｜信息技术部人力资源</span>
+      <span class="more">更多</span>
     </div>
 
-    <div class="chat-conversation">
-      <div class="job-info">
-        <!-- Split across spans on purpose: BOSS does this to a title like
-             「云迁移运维工程师＋3个月（朝阳区MQ）」, and a leaf-only reader
-             cannot see it. -->
-        <span class="job-name">私有云运维<span class="hl">工程师</span> 25-40K</span>
-        <span class="city">北京</span>
-        <span class="view-job">查看职位</span>
-      </div>
-      <div class="chat-message-list">
-        <div class="message-card">你与该职位竞争者PK情况</div>
-      </div>
-      <!-- The composer BOSS actually served on 2026-09-08, recovered from a
-           refusal's own diagnostic: `ta=0/0|ce=1/1|snd=button.btn-v2`. No
-           textarea anywhere, one visible contenteditable, and the send
-           control beside it - a reader that only knew about textareas
-           reported `no_composer` at a composer in plain sight. -->
-      <div class="chat-editor">
-        <div class="chat-input" contenteditable="true"
-             data-placeholder="按Enter键发送，按Ctrl+Enter键换行"></div>
-        <button class="btn-v2">发送</button>
+    <div class="chat-box">
+      <div class="chat-conversation">
+        <div class="job-info">
+          <!-- Split across spans on purpose: BOSS does this to a title like
+               「云迁移运维工程师＋3个月（朝阳区MQ）」, and a leaf-only reader
+               cannot see it. -->
+          <span class="job-name">私有云运维<span class="hl">工程师</span> 25-40K</span>
+          <span class="city">北京</span>
+          <span class="view-job">查看职位</span>
+        </div>
+        <div class="chat-message-list">
+          <div class="message-card">你与该职位竞争者PK情况</div>
+        </div>
+        <!-- The composer BOSS actually served on 2026-09-08, recovered from a
+             refusal's own diagnostic: `ta=0/0|ce=1/1|snd=button.btn-v2`. No
+             textarea anywhere, one visible contenteditable, and the send
+             control beside it - a reader that only knew about textareas
+             reported `no_composer` at a composer in plain sight. -->
+        <div class="chat-editor">
+          <div class="chat-input" contenteditable="true"
+               data-placeholder="按Enter键发送，按Ctrl+Enter键换行"></div>
+          <button class="btn-v2">发送</button>
+        </div>
       </div>
     </div>
 

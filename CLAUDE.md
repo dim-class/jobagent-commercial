@@ -1908,24 +1908,44 @@ Rules specific to it:
   `div`s. So the header's text is the only identity the page exposes, which
   is what the user authorized checking in the first place.
 
-  **Scoping is the whole safety argument, and the scope is "the open
-  conversation, minus the list".** The left list holds every recruiter this
-  account has ever spoken to, so a document-wide text match would happily
+  **Scoping is the whole safety argument, and the scope is "the page, minus
+  the conversation list".** The left list holds every recruiter this account
+  has ever spoken to, so a genuinely document-wide text match would happily
   confirm a job applied to yesterday while BOSS had a different conversation
-  open - the exact wrong-person send this prevents.
+  open - the exact wrong-person send this prevents. `CHAT_CONVERSATION` must
+  still resolve, and uniquely; that is what proves a conversation is open and
+  rendered at all.
 
-  `.chat-conversation` alone turned out to be too narrow: BOSS renders
-  「HR｜公司｜职务」 just outside it. Measured 2026-09-08 from a refusal's own
-  diagnostic - `co=0,ti=1p`, the job title inside the pane and the company
-  nowhere in it - an approval whose company and title were both plainly on
-  screen was refused. The check now reads the pane's **parent** and subtracts
-  `CHAT_LIST` by name. Widening without that subtraction would swallow the
-  list, which is the one thing that must never count. Both company *and* title must be found: several
-  roles at one company is normal, and so is the same title at two companies.
-  A leaf's text may *lead* with what is wanted, because BOSS renders
-  「公司 | 招聘者职位」 and 「职位 25-40K 北京」 as single nodes - but only when
-  what follows is a separator, a space or a digit, so 「云运维工程师(高级)」
-  never matches 「云运维工程师」.
+  The scope got there by being wrong twice, and the second failure is the
+  useful one. `.chat-conversation` alone was too narrow - BOSS renders
+  「HR｜公司｜职务」 outside it (2026-09-08: `co=0,ti=1p`, the job title inside
+  the pane and the company nowhere in it). Widening to the pane's **parent**
+  still read `co=0`. Guessing one ancestor at a time is the wrong shape of
+  fix: the user pointed at the two rows on their own screen and asked why both
+  are not simply read. So the region that must never count is subtracted by
+  name and **everything else on the page is in scope** - BOSS's own chrome
+  names no company and no job, and the rest of the page is the one open
+  conversation.
+
+  Two rules make that subtraction actually hold:
+
+  - **a node qualifies only if it neither sits inside the list nor contains
+    it.** A node's text is every descendant concatenated, so excluding the
+    list's own nodes still leaves all forty conversations readable through its
+    ancestors - `.chat-wrap` read as containing 浩鲸科技 with the list itself
+    correctly excluded;
+  - **an unresolvable list is a refusal** (`chat_list_unknown`), never a
+    fallback to the whole document. Without that, a renamed class silently
+    turns the identity check into a text search that any conversation would
+    satisfy.
+
+  Both company *and* title must be found: several roles at one company is
+  normal, and so is the same title at two companies. The wanted string may sit
+  **anywhere inside** a short node - the live header reads
+  「刘女士 蚂蚁集团｜HR」, so a prefix rule never saw the company at all - but
+  the character on each side must be a separator, a space, a digit or nothing.
+  That is what keeps 「云运维工程师(高级)」 from matching 「云运维工程师」 and
+  「中信建投证券」 from confirming 「中信建投」.
 
   `boss_chat_conversation.html`'s **class names come from that live read; its
   content is authored**, because no conversation was opened to capture one and

@@ -4,8 +4,8 @@ import { ApiError, api } from '@/api/client'
 import { Alert, Card, Modal } from '@/components/ui'
 import { startFullSalaryBackfill } from '@/pages/salaryBackfill'
 import { assessConsoleConnection, ConsoleConnectionError, consoleExtension,
-  DEFAULT_BATCH_CANDIDATE_CAP, MAX_CONSOLE_BATCH_TASKS, selectBoundedPendingTasks } from '@/pages/consoleExtension'
-import type { ConsoleAction, ConsoleReply } from '@/pages/consoleExtension'
+  DEFAULT_BATCH_CANDIDATE_CAP } from '@/pages/consoleExtension'
+import type { ConsoleReply } from '@/pages/consoleExtension'
 import type { DirectionAnalysisPlan, DirectionChoice, ReadinessOut, SearchKeywordAnalytics, SearchPlanOptions, SearchPlanTask } from '@/types'
 
 //: A run that stops says why in one code. Until now that code was only
@@ -35,13 +35,6 @@ function stopHint(error: string | null | undefined): string | null {
   const key = Object.keys(STOP_HINTS).find(code => error === code || error.startsWith(code + ':')
     || error.endsWith(':' + code))
   return key ? STOP_HINTS[key] : `上一次运行以「${error}」停止。`
-}
-
-function taskStatusLabel(task: SearchPlanTask): string {
-  if (task.state === 'paused_login_required' || task.paused_reason === 'login_required') return '需要登录 BOSS'
-  if (task.state === 'paused_verification' || task.paused_reason === 'verification') return '等待人工验证'
-  if (task.paused_reason === 'background_not_rendering') return '窗口被盖住，已暂停'
-  return task.state || '未开始'
 }
 
 /** A pasted block is split on the newline character itself; `trim()` on
@@ -139,14 +132,11 @@ function saveSegments(value: string): void {
 const NEWLINE = String.fromCharCode(10)
 
 export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number) => void }) {
-  const [city, setCity] = useState('')
   const [cities, setCities] = useState<string[]>([])
-  const [keyword, setKeyword] = useState('')
   const [searchOptions, setSearchOptions] = useState<SearchPlanOptions | null>(null)
   const [hasResume, setHasResume] = useState(false)
   const [hasRoles, setHasRoles] = useState(false)
   const [setupLoaded, setSetupLoaded] = useState(false)
-  const [cap, setCap] = useState(3)
   //: Remembered per browser, so a number typed once stays typed. Defaults to
   //: the opened-detail ceiling: asking for fewer only makes a direction stop
   //: earlier, and the ceiling is what limits the work either way.
@@ -296,9 +286,6 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [confirmation, setConfirmation] = useState<{
-    action: 'start' | 'resume'; taskId: number; city: string | null; keywords: string | null; cap: number
-  } | null>(null)
   const [batchConfirmation, setBatchConfirmation] = useState<{
     tasks: Array<{ id: number; city: string | null; keywords: string | null }>; cap: number
   } | null>(null)
@@ -331,12 +318,9 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       const configuredCities = strategyResponse.strategy.target_cities
         .filter(value => options.supported_cities.includes(value))
         .slice(0, options.max_selected_cities)
-      const firstCity = configuredCities[0] || options.supported_cities[0] || ''
       const firstRole = strategyResponse.strategy.preferred_roles.find(value => value.trim()) || ''
       setSearchOptions(options)
       setCities(configuredCities)
-      setCity(firstCity)
-      setKeyword(firstRole)
       setHasResume(resumeAvailable)
       setHasRoles(Boolean(firstRole))
     } catch (err) {
@@ -615,21 +599,6 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     return () => { alive.current = false; refreshSequence.current++; document.removeEventListener('visibilitychange', visible) }
   }, [loadSetup, refresh, loadMissingSalaries, loadUnanalysed, loadReadiness, loadQueue])
 
-  async function prepare(event: React.FormEvent) {
-    event.preventDefault()
-    if (admission.current || !city.trim() || !keyword.trim()) return
-    admission.current = true; setBusy(true); setError(''); setMessage('')
-    try {
-      await api.generateSearchPlan(city.trim(), keyword.trim())
-      const plan = await api.listSearchPlan()
-      setTasks(plan.items)
-      const found = plan.items.find(row => row.city === city.trim() && row.keywords === keyword.trim())
-      if (found) { setSelected(found.id); onSelect(found.id) }
-      setMessage('搜索计划已准备；尚未访问 BOSS。请确认下方任务后点击开始。已结束的同条件任务不会重置。')
-    } catch (err) { setError(err instanceof Error ? err.message : '准备任务失败') }
-    finally { admission.current = false; setBusy(false) }
-  }
-
   async function prepareQuick(event: React.FormEvent) {
     event.preventDefault()
     if (admission.current || !cities.length) return
@@ -671,7 +640,6 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       setTasks(current => [...current.filter(row => !nextIds.has(row.id)), ...nextTasks])
       setSelected(nextTasks[0].id)
       setPortfolioTaskIds(nextTasks.map(row => row.id))
-      setCap(targetCount)
       onSelect(nextTasks[0].id)
       setBatchSize(nextTasks.length)
       setBatchCap(targetCount)
@@ -691,65 +659,6 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     }
   }
 
-  async function command(action: ConsoleAction, approved = false) {
-    if (admission.current || !task) return
-    if ((action === 'start' || action === 'resume') && !connection && !checking) {
-      setError(`扩展状态不可用，未发送请求：${bridgeDetail || '未知原因'}。可在「高级设置与诊断」里刷新连接。`)
-      return
-    }
-    if ((action === 'start' || action === 'resume') && (!backendReady || !connection || checking)) return
-    // Call the bridge immediately in the trusted click turn: no async preparation
-    // before browser handoff, and never include a paid match approval.
-    if (action === 'start' && (!Number.isInteger(cap) || cap < 1 || cap > 60)) {
-      setError('候选上限必须是 1–60 的整数。'); return
-    }
-    if (action === 'start' || action === 'resume') {
-      if (!approved) {
-        setConfirmation({ action, taskId: task.id, city: task.city, keywords: task.keywords, cap })
-        return // no native JS dialog and no browser/task operation until the second click
-      }
-      const valid = confirmation?.action === action && confirmation.taskId === task.id
-        && confirmation.city === task.city && confirmation.keywords === task.keywords
-        && confirmation.cap === cap
-        && (action === 'start' ? task.state === 'pending' && !connection?.runner
-          : connection?.runner?.taskId === task.id && connection.runner.paused && !connection.runner.paid)
-      setConfirmation(null)
-      if (!valid) { setError('任务或运行状态已变化，请重新确认；尚未发送启动请求。'); return }
-    }
-    admission.current = true; setBusy(true); setError(''); setMessage('')
-    try {
-      // Only a start carries the choice. A resume restores whatever the run
-      // was started as, from the run's own pointer.
-      const result = await consoleExtension(
-        action, task.id, cap, undefined, undefined, undefined, undefined,
-        action === 'start' ? runInBackground : undefined,
-      )
-      if (!result.ok) throw new Error(result.error || '未确认执行，请刷新状态。')
-      setMessage(runInBackground && action === 'start'
-        ? '请求已接收（后台搜索）。可以切到别的窗口，但别把 BOSS 窗口最小化或完全盖住，否则 BOSS 不再加载新岗位；关闭它或离开 BOSS 仍会停止。进度回到本页查看。'
-        : '请求已接收。BOSS 页顶部显示执行进度；返回控制台会刷新后端状态。切换离开 BOSS 会停止后续浏览器动作。')
-      await refresh()
-    } catch (err) { setError(err instanceof Error ? err.message : '请求失败') }
-    finally { admission.current = false; setBusy(false) }
-  }
-
-  function prepareBatch() {
-    if (admission.current || busy || checking || !backendReady || !connection
-      || connection.runner || connection.batch?.state === 'running' || connection.batch?.state === 'paused') return
-    if (!connection.capabilities?.includes('console-batch-v1')) {
-      setError('当前扩展版本不支持有界批次，请更新扩展后刷新连接。'); return
-    }
-    if (!Number.isInteger(batchCap) || batchCap < 1 || batchCap > 60) {
-      setError('批次候选上限必须是 1–60 的整数。'); return
-    }
-    let pending: SearchPlanTask[]
-    try { pending = selectBoundedPendingTasks(tasks, batchSize) }
-    catch (err) { setError(err instanceof Error ? err.message : '批次任务数无效。'); return }
-    if (!pending.length) { setError('当前没有可加入批次的 pending 搜索任务。'); return }
-    setError(''); setMessage('')
-    setBatchConfirmation({ tasks: pending.map(row => ({ id: row.id, city: row.city, keywords: row.keywords })), cap: batchCap })
-  }
-
   async function batchCommand(action: 'start-batch' | 'pause-batch' | 'resume-batch' | 'cancel-batch', approved = false) {
     if (admission.current) return
     // Never a silent no-op. `connection` is null whenever the handshake failed
@@ -757,7 +666,7 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     // reporting one out-of-range number made every button do nothing at all,
     // with nothing on screen to say why. `bridgeDetail` is that reason.
     if (!connection) {
-      setError(`扩展状态不可用，未发送请求：${bridgeDetail || '未知原因'}。可在「高级设置与诊断」里刷新连接。`)
+      setError(`扩展状态不可用，未发送请求：${bridgeDetail || '未知原因'}。可点上方「刷新状态」重试。`)
       return
     }
     if ((action === 'start-batch' || action === 'resume-batch') && (!backendReady || checking)) return
@@ -810,7 +719,6 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     finally { admission.current = false; setBusy(false) }
   }
 
-  const owned = connection?.runner?.taskId === selected
   // A chosen code that is no longer among the read bands is dropped rather
   // than sent: it would be a code with no label behind it.
   const activeBandCodes = salaryBands
@@ -832,6 +740,12 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       <span className={`badge ${backendReady && connection ? 'badge-good' : 'badge-neutral'}`}>
         {backendReady && connection ? '已准备好' : '连接未就绪'}
       </span>
+      {/* The status is only read on open and when the tab regains focus, so
+          while a run is on screen nothing moves on its own. This button is
+          what advances it - and it used to live inside 高级设置与诊断, which
+          is no place for the only control that updates a running search. */}
+      <button type="button" className="btn-sm" disabled={busy || checking}
+        onClick={() => void refresh()}>{checking ? '刷新中…' : '刷新状态'}</button>
       <span className="small faint">
         需要保持已登录的 BOSS 标签页在正常 Chrome 中打开；首次识别特殊字体薪资时，请在该标签页点击一次 JobAgent 图标并关闭弹窗。
       </span>
@@ -1024,6 +938,11 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
           }}>取消分段</button>
         </p>
       ) : null}
+      </details>
+      {/* Out of the fold on purpose. How many searches the button is about to
+          start is the one number worth reading before pressing it, and it
+          spent its life inside a collapsed block - the same mistake the
+          experience bands were moved out of. */}
       {searchOptions && cities.length ? (
         <p className="small faint">
           本次将创建{' '}
@@ -1040,7 +959,6 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
           {activeBandCodes.length ? ` × ${activeBandCodes.length} 个薪资档` : ''}。
         </p>
       ) : null}
-      </details>
       <button className="btn btn-primary btn-lg" disabled={busy || checking || !backendReady || !connection
         || !setupReady || !!connection.runner || batchActive}>
         {busy ? '正在准备…' : '开始搜索'}
@@ -1134,7 +1052,6 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
           || !connection?.batch?.requiresResume} onClick={() => void batchCommand('resume-batch')}>恢复</button>
         <button className="btn btn-secondary" disabled={busy || !batchActive || !connection?.runner}
           onClick={() => void batchCommand('cancel-batch')}>取消</button>
-        <Link className="btn btn-secondary" to="/jobs">查看岗位库</Link>
       </div>
     </div> : null}
 
@@ -1252,10 +1169,9 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
     </button>
 
     {showAdvanced ? <div className="card-block mt-1">
-      <section aria-label="薪资分段">
-    <details className="mt-1">
-    <summary className="small">按粘贴的筛选链接分段（可选）</summary>
+      <section aria-label="分段搜索">
     <div className="field mt-1">
+      <p className="small"><strong>按粘贴的筛选链接分段（可选）</strong></p>
       <label htmlFor="filter-urls">每行一个 BOSS 搜索链接</label>
       <textarea
         id="filter-urls"
@@ -1300,10 +1216,8 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
         </p>
       ) : null}
     </div>
-    </details>
-      <details className="mt-1">
-        <summary className="small">薪资分段（可选：把一个方向拆成几段，各自有独立名额）</summary>
       <div className="field mt-1">
+        <p className="small"><strong>薪资分段（可选：把一个方向拆成几段，各自有独立名额）</strong></p>
         <div className="row">
           <button
             type="button"
@@ -1343,14 +1257,12 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
           </p>
         )}
       </div>
-      </details>
       </section>
       <section aria-label="连接诊断">
         <p>本机服务：{backendDetail}。任务接口：{planDetail}。</p>
         <p>扩展诊断：{bridgeDetail}</p>
         <p>诊断码：{diagnosticCode} · 最近检查：{checkedAt}{checking ? ' · 检查中…' : ''}</p>
       </section>
-      <button className="btn btn-secondary" disabled={busy || checking} onClick={() => void refresh()}>刷新连接</button>
     {keywordStats && keywordStats.cohorts.some(c => c.actionable) ? (
         <section className="mt-1" aria-label="搜索方向历史表现">
           <div><strong>搜索方向历史表现</strong><span className="small faint"> · 本地统计，不消耗 AI 额度</span></div>
@@ -1364,54 +1276,6 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
           {keywordStats.observations.map(line => <p key={line} className="small faint mt-1">{line}</p>)}
         </section>
       ) : null}
-      <form onSubmit={prepare} className="form-grid mt-1">
-        <label>自定义搜索城市<select value={city} onChange={e => setCity(e.target.value)}>
-          {searchOptions?.supported_cities.map(option => <option key={option} value={option}>{option}</option>)}
-        </select></label>
-        <label>自定义岗位方向<input value={keyword} maxLength={100} required
-          onChange={e => setKeyword(e.target.value)} /></label>
-        <button className="btn btn-secondary" disabled={busy || !backendReady}>准备自定义搜索</button>
-      </form>
-      <label>选择已有搜索任务<select value={selected ?? ''} disabled={busy} onChange={e => {
-        const id = Number(e.target.value); setSelected(id || null); if (id) onSelect(id)
-      }}><option value="">请选择</option>{tasks.map(row => <option key={row.id} value={row.id}>
-        #{row.id} · {row.city} · {row.keywords} · {row.state}
-      </option>)}</select></label>
-      <label>单任务候选上限（1–60）<input type="number" min={1} max={60} value={cap}
-        disabled={busy} onChange={e => setCap(Number(e.target.value))} /></label>
-
-      <section aria-label="有界搜索批次" className="mt-1">
-        <h3>批量搜索</h3>
-        <p className="small faint">内部逐个运行最多 {MAX_CONSOLE_BATCH_TASKS} 个待执行搜索单元。</p>
-        <label>搜索单元数（1–{MAX_CONSOLE_BATCH_TASKS}）<input type="number" min={1} max={MAX_CONSOLE_BATCH_TASKS} value={batchSize}
-          disabled={busy || batchActive} onChange={e => setBatchSize(Number(e.target.value))} /></label>
-        <label>每个任务候选上限（1–60）<input type="number" min={1} max={60} value={batchCap}
-          disabled={busy || batchActive} onChange={e => setBatchCap(Number(e.target.value))} /></label>
-        <div className="actions">
-          <button className="btn btn-primary" disabled={busy || checking || !backendReady || !connection
-            || !!connection.runner || batchActive} onClick={prepareBatch}>开始批量搜索</button>
-          <button className="btn btn-secondary" disabled={busy || !batchActive || !connection?.runner}
-            onClick={() => void batchCommand('pause-batch')}>暂停批次</button>
-          <button className="btn btn-secondary" disabled={busy || checking || !backendReady || !batchActive
-            || !connection?.batch?.requiresResume} onClick={() => void batchCommand('resume-batch')}>恢复批次</button>
-          <button className="btn btn-secondary" disabled={busy || !batchActive || !connection?.runner}
-            onClick={() => void batchCommand('cancel-batch')}>取消批次</button>
-        </div>
-        {connection?.batch && <p className="small">批次：{connection.batch.state} · 当前 {connection.batch.currentIndex + 1}/
-          {connection.batch.taskIds.length}（任务 #{connection.batch.currentTaskId}）</p>}
-      </section>
-      {task ? <section className="mt-1" aria-label="当前单任务详情">
-        <p><strong>{task.city} · {task.keywords}</strong> · {taskStatusLabel(task)} · 看到 {task.observed_jobs} 张 · 新入库 {task.imported_jobs} 个</p>
-        <div className="actions">
-          <button className="btn btn-primary" disabled={busy || checking || !backendReady || !connection
-            || !!connection.runner || batchActive || task.state !== 'pending'} onClick={() => void command('start')}>开始单任务</button>
-          {owned ? <><button className="btn btn-secondary" disabled={busy || batchActive} onClick={() => void command('pause')}>暂停单任务</button>
-            <button className="btn btn-secondary" disabled={busy || checking || !backendReady || batchActive
-              || !connection?.runner?.paused || connection.runner.paid} onClick={() => void command('resume')}>恢复单任务</button>
-            <button className="btn btn-secondary" disabled={busy || batchActive} onClick={() => void command('cancel')}>取消单任务</button></> : null}
-          <button className="btn btn-secondary" onClick={() => onSelect(task.id)}>查看该任务候选</button>
-        </div>
-      </section> : null}
     </div> : null}
     {analyseConfirm ? <Modal
       title="确认批量分析"
@@ -1429,15 +1293,6 @@ export default function ConsoleSearchPanel({ onSelect }: { onSelect: (id: number
       <p className="small faint">分析只给出建议评分，不会改变任何岗位的状态，更不会投递。</p>
     </Modal> : null}
 
-    {confirmation && <Modal title="确认免费采集" onClose={() => setConfirmation(null)} footer={<>
-      <button className="btn btn-secondary" autoFocus onClick={() => setConfirmation(null)}>暂不执行</button>
-      <button className="btn btn-primary" disabled={busy || checking || !backendReady || !connection}
-        onClick={() => void command(confirmation.action, true)}>确认{confirmation.action === 'start' ? '开始' : '恢复'}免费采集</button>
-    </>}>
-      <p>任务 #{confirmation.taskId} · {confirmation.city} · {confirmation.keywords}</p>
-      <p>最多 {confirmation.action === 'resume' ? '原批准数量（不重置）' : confirmation.cap} 个候选尝试、5 次滚动。失败也占名额。</p>
-      <p>扩展将切换到前台 BOSS 标签页，请保持 Chrome 前台。无 AI 匹配费用，不投递、不收藏、不发消息。</p>
-    </Modal>}
     {batchConfirmation && <Modal title="确认有界搜索批次" onClose={() => setBatchConfirmation(null)} footer={<>
       <button className="btn btn-secondary" autoFocus onClick={() => setBatchConfirmation(null)}>暂不执行</button>
       <button className="btn btn-primary" disabled={busy || checking || !backendReady || !connection}

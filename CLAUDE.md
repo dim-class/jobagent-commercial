@@ -1071,6 +1071,28 @@ applies, and a readout above the button was not enough either. Multi-select,
 because 经验不限 alongside 1-3年 is one search and is the combination that
 matters.
 
+**The console has one set of run controls, not two (2026-09-08).** 开始搜索
+prepares the batch and 本次综合搜索 pauses, resumes and cancels it; a parallel
+low-level surface - 开始批量搜索 with 暂停批次/恢复批次/取消批次, 开始单任务
+with its own four, plus 自定义搜索, 选择已有搜索任务, 单任务候选上限 and
+搜索单元数 - drove the same worker through the same states and existed only
+because the aggregate flow was built on top of it and nothing was removed
+afterwards. It is deleted, not hidden: `prepare`, `command` and `prepareBatch`
+are gone with it, and `frontend/tests/consoleSearchControls.test.cjs` pins
+their absence. A custom keyword is not lost - 策略 page → `preferred_roles` →
+`search_direction_ranking` → this run is the supported route, and unlike a
+one-off form it persists the keyword and accumulates the outcome statistics
+the ranking reads.
+
+Two things came *out* of hiding in the same pass, on the rule that a fold is
+for reference material and never for a control: **how many search units the
+button is about to start** (it sat inside 搜索选项, and it is the number worth
+reading before pressing 开始搜索), and **刷新状态** (status is read on open and
+on regaining focus, so nothing on a running search moves on its own - and the
+only control that advances it was inside 高级设置与诊断). The two `<details>`
+nested *inside* that already-collapsed block were flattened for the same
+reason: one layer of hiding is a choice, two is how a control stops existing.
+
 The queue filters the **already collected** library the same way, locally and
 for free: `QueueFilters.max_required_years` drops a proposal whose *minimum*
 requirement is above what the user says they have. Measured on the library it

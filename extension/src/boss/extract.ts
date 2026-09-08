@@ -1919,9 +1919,30 @@ var BossExtract = (function () {
     // supplied are echoed; no page text is copied out.
     const present = (wanted: string): boolean =>
       values.some((value) => value.includes(wanted))
+
+    /** How far above the pane the text first appears, or -1 if the document
+     *  does not contain it at all.
+     *
+     *  Widening the scope to the pane's parent did not find the company
+     *  either (2026-09-08: `co=0,ti=1p,n=63` then `n=64` - one node more), so
+     *  the next question is no longer "is my rule too strict" but "where is
+     *  it". This answers it in one number: 0 inside the pane, 1 its parent, 2
+     *  its grandparent, -1 nowhere - meaning the header is not text at all
+     *  and no amount of widening will help. */
+    const distance = (wanted: string): number => {
+      if (!doc.body || !(doc.body.textContent || '').includes(wanted)) return -1
+      let node: Element | null = pane
+      for (let up = 0; up < 12 && node; up += 1) {
+        if ((node.textContent || '').includes(wanted)) return up
+        node = node.parentElement
+      }
+      return 99
+    }
+
     const detail = `co=${company ? 1 : 0}${present(expectedCompany) ? 'p' : ''}`
       + `,ti=${title ? 1 : 0}${present(expectedTitle) ? 'p' : ''}`
       + `,n=${values.length}`
+      + `,coUp=${distance(expectedCompany)},tiUp=${distance(expectedTitle)}`
 
     // Neither read means the header could not be read at all; one of the two
     // means this is a conversation about something else.

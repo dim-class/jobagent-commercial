@@ -218,11 +218,15 @@ Check the raw text before treating a grounding violation as real.
 
 Removing it had a side effect worth recording: with no question to build toward, the "start from the job" rule went slack and three of four openers reverted to 「您好，我做云基础设施…」 - the identical-template problem v2 existed to fix. v14 makes naming the posting in the first sentence mandatory rather than preferred. Four real runs came back at 124-133 characters against a stated 125; the overshoot is left alone, because tightening the number produced clipped phrasing and loosening it produced longer output.
 
+**v15 reframed the fourth item** (user asked 2026-09-07: 「正在学什么什么没有说服力」). They are right - 「正在学 K8s」 tells a recruiter you do not have it, which turns a usable card into a stated gap. It is now 相关基础, written as 「自己搭过」 / 「有基础」.
+
+**The line this must not cross is written into the prompt in the same breath.** 「自己搭过 K8s 集群」 is a wording change over a fact the résumé already states; 「有 K8s 生产经验」 is a different claim, and an interview exposes it at a cost far higher than the three characters saved. 正在学 / 在学习 joined the banned list so the model cannot drift back on its own.
+
 Grounding never moved through any of it: a warmer register may not buy itself
 one fabricated fact, and a number that is not in the résumé is a fabricated
 fact.
 
-`PROMPT_VERSION` is `v14`, so **only newly analyzed jobs get the new
+`PROMPT_VERSION` is `v15`, so **only newly analyzed jobs get the new
 greeting**. 投递队列's 刷新招呼语 refreshes the listed ones, and it needed no new
 endpoint or service: `analyze-batch/plan` then `analyze-batch` with
 **`force=false`**, because `analysis_cache_key` already contains the prompt

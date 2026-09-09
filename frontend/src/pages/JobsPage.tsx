@@ -956,7 +956,7 @@ export default function JobsPage() {
         >
           <ul className="small">
             <li>选中岗位：{batchPlan.selected} 个</li>
-            <li>本批次上限（MAX_ANALYSES_PER_RUN）：{batchPlan.limit} 个</li>
+            <li>本批次上限：{batchPlan.limit} 个</li>
             <li>本次实际处理：{batchPlan.in_batch} 个</li>
             <li>已命中缓存（不消耗 API）：{batchPlan.cached} 个</li>
             <li>

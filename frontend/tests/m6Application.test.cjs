@@ -58,7 +58,11 @@ test('an unknown M6 click result immediately offers the existing human mark-appl
   assert.match(page, /setConfirmApplyFromM6\(true\)/)
   assert.match(page, /setConfirmApply\(attemptedJob\)/)
   assert.match(page, /api\.markApplied\(proposal\.job_id, applyNote, appliedResume\)/)
-  assert.match(page, /复用现有 mark_applied 唯一路径进入已投递列表/)
+  // The wording moved off the implementation - it named a function to someone
+  // deciding whether to record an application - but the claim it was making is
+  // the one that matters and is still pinned: this dialog routes into the one
+  // existing applied path rather than a second one.
+  assert.match(page, /确认后这个岗位进入已投递列表/)
   assert.match(page, /取消会保留“结果待确认”的审计记录/)
   assert.doesNotMatch(page, /reply\.ok[\s\S]{0,500}api\.markApplied/)
 })

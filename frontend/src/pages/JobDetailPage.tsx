@@ -936,7 +936,7 @@ export default function JobDetailPage() {
             analyzedResumeId={analysis?.meta.resume_id ?? null}
           />
           <div className="field-hint">
-            这是完全手动记录入口，不会操作招聘网站；M6 单岗位确认入口仅在投递队列中提供。
+            这里只是记录，不会操作招聘网站。要让 JobAgent 代你点「立即沟通」，请到投递队列。
           </div>
         </Modal>
       ) : null}

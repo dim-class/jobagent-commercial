@@ -44,7 +44,7 @@ const M6_PREFLIGHT_REASON: Record<string, string> = {
     'BOSS 显示该职位已关闭，没有执行投递。自动跳过没有成功，所以它还在列表里 —— '
     + '请手动点「跳过」，原因写「职位已关闭」。',
   control_wrong_state:
-    '这个岗位已经沟通过了（按钮显示「继续沟通」）。M6 只负责第一次投递，'
+    '这个岗位已经沟通过了（按钮显示「继续沟通」）。JobAgent 只负责第一次投递，'
     + '不会点击已有对话的按钮。换一个还没沟通过的岗位即可。',
   control_missing: '页面上找不到「立即沟通」按钮，可能页面还没加载完或版式变了。',
   control_ambiguous: '页面上有多个「立即沟通」按钮，无法确定该点哪个，已停止。',
@@ -416,7 +416,7 @@ export default function ApplicationQueuePage() {
       })
       setM6Target(null)
       setM6Approval(null)
-      setApplyNote('M6 单次确认投递；已在 BOSS 人工核对结果')
+      setApplyNote('确认后由 JobAgent 沟通；已在 BOSS 人工核对结果')
       // 仅沟通, because that is what M6 did: it clicks 立即沟通 and sends the
       // greeting. No resume is submitted by that action, so defaulting to the
       // analysis resume made every M6 application start out claiming a resume
@@ -492,7 +492,8 @@ export default function ApplicationQueuePage() {
         <div>
           <h1>今日投递队列</h1>
           <p>
-            AI 只负责推荐。你可以完全手动投递并回来记录，或对单个岗位使用 M6 双重人工确认入口。
+            AI 只负责推荐。你可以自己投递完回来记录，也可以逐个岗位确认后，
+            让 JobAgent 在你眼前点一次「立即沟通」。
           </p>
         </div>
         <div className="page-actions">
@@ -599,7 +600,7 @@ export default function ApplicationQueuePage() {
         <Card title="确认重新分析">
           <ul className="small">
             <li>列表中的岗位：{greetPlan.selected} 个</li>
-            <li>本批次上限（MAX_ANALYSES_PER_RUN）：{greetPlan.limit} 个</li>
+            <li>本批次上限：{greetPlan.limit} 个</li>
             <li>本次实际处理：{greetPlan.in_batch} 个</li>
             <li>其中招呼语已是最新、不花钱：{greetPlan.cached} 个</li>
             <li>
@@ -696,9 +697,6 @@ export default function ApplicationQueuePage() {
               <option value="5">5 年</option>
               <option value="8">8 年</option>
             </select>
-            <span className="small faint">
-              只看要求不超过这个年数的岗位。没写要求的一律保留。
-            </span>
           </div>
 
           <div className="field">
@@ -763,6 +761,10 @@ export default function ApplicationQueuePage() {
             </select>
           </div>
         </div>
+
+        <p className="small faint mt-1">
+          「我的经验年数」只看要求不超过这个年数的岗位；没写要求的一律保留。
+        </p>
 
         <div className="row mt-1">
           <div className="checkbox-row">
@@ -875,7 +877,7 @@ export default function ApplicationQueuePage() {
             {proposal.company_applied_title ? (
               <p className="small faint mt-1">
                 已投递该公司的「{proposal.company_applied_title}」。BOSS 的对话是按人建立的，
-                如果是同一个 HR，这个岗位的按钮会显示「继续沟通」，M6 会拒绝执行。
+                如果是同一个 HR，这个岗位的按钮会显示「继续沟通」，JobAgent 会拒绝执行。
                 同公司未必同 HR，仅作提醒。
               </p>
             ) : null}
@@ -941,7 +943,7 @@ export default function ApplicationQueuePage() {
                   去投递 ↗
                 </a>
               ) : (
-                <span className="small faint" title="该岗位没有可核对的原始链接，可能是早期导入或测试数据">
+                <span className="small faint" title="该岗位没有可核对的原始链接，可能是早期导入的记录">
                   无可用岗位链接
                 </span>
               )}
@@ -975,7 +977,7 @@ export default function ApplicationQueuePage() {
                   disabled={busy || m6Busy}
                   onClick={() => openM6Confirmation(proposal)}
                 >
-                  单次确认投递（M6）
+                  确认并沟通
                 </button>
               ) : null}
               <button
@@ -1051,7 +1053,7 @@ export default function ApplicationQueuePage() {
           />
           {confirmApplyFromM6 ? (
             <p className="small faint">
-              已默认「仅沟通」：M6 点的是「立即沟通」并发送招呼语，这个动作本身不提交简历。
+              已默认「仅沟通」：刚才点的是「立即沟通」并发送招呼语，这个动作本身不提交简历。
               如果你另外单独发过简历，改选对应的那份即可。
             </p>
           ) : null}
@@ -1066,8 +1068,8 @@ export default function ApplicationQueuePage() {
           </div>
           <div className="field-hint">
             {confirmApplyFromM6
-              ? '确认后复用现有 mark_applied 唯一路径进入已投递列表；不会创建第二套投递记录。'
-              : '这是完全手动记录入口，不会操作招聘网站；M6 单岗位确认入口与此处相互独立。'}
+              ? '确认后这个岗位进入已投递列表。'
+              : '这里只是记录，不会操作招聘网站。'}
           </div>
         </Modal>
       ) : null}

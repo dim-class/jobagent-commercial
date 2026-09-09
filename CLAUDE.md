@@ -1927,9 +1927,28 @@ Rules specific to it:
 - **exactly one send, in two steps.** `sendConfirmedGreeting` types and stops;
   `submitConfirmedGreeting` clicks, after re-running every check - the page
   identity, the single composer, the single send control - plus one more: the
-  box must still hold exactly this greeting. That last check is what makes a
-  second call harmless, because a real send empties the composer and the text
-  no longer matches.
+  box must still hold exactly this greeting.
+
+  **That check is real but TIME-DEPENDENT, and on its own it was not enough
+  (2026-09-09).** BOSS clears its composer on its own tick, so a second
+  delivery arriving inside that window finds the text still sitting there and
+  clicks again. The delivery came from `askTab`'s packaged-injection recovery,
+  which re-sends the message it failed to get a response for - correct for a
+  read, wrong for a click, and a click landing as BOSS tears down the message
+  port is exactly when a response goes missing. `m6-execute` never allowed
+  that retry; the greeting send did, and it was the only mutating message that
+  did.
+
+  Two fixes, because either alone leaves the guarantee resting on timing: the
+  send message is no longer retried, and `submitConfirmedGreeting` latches on
+  the content script's own isolated-world window so **one body is clicked at
+  most once per page load**, whatever the transport does. The latch is set
+  *before* the click - a re-entrant delivery during it must not slip past -
+  and it writes nothing to BOSS's DOM. A second delivery now reports
+  `already_sent` instead of clicking, which also makes the next occurrence
+  self-diagnosing rather than something to infer from counting chat bubbles.
+  Failing closed costs a greeting the user sends by hand; failing open sends a
+  real person a second message, which M6 may never do.
 
   They are separate because clicking in the same synchronous turn as the input
   event clicked a control BOSS had not enabled yet. Its editor enables 发送 on

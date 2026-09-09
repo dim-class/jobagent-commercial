@@ -79,6 +79,9 @@ const M6_GREETING_REASON: Record<string, string> = {
     'BOSS 聊天页的结构变了，无法把左侧联系人列表排除在核对范围外，'
     + '为避免发错人没有发送。请到 BOSS 手动补一条。',
   input_not_empty: 'BOSS 自己已经发了一条招呼语，所以没有再发第二条。',
+  already_sent:
+    '这条招呼语已经点过一次发送，没有重复点。'
+    + '请到 BOSS 看一眼这个对话，确认是发出去了还是没发出去。',
   no_composer: '没等到输入框出现，招呼语没有发出去，请到 BOSS 手动补一条。',
   ambiguous_composer: '页面上有多个输入框，无法确定发给谁，没有发送。',
   no_send_control: '找不到发送按钮，招呼语没有发出去，请到 BOSS 手动补一条。',

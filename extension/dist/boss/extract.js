@@ -1837,6 +1837,22 @@ var BossExtract = (function () {
         if (send.disabled || send.getAttribute('aria-disabled') === 'true') {
             return { status: 'send_disabled' };
         }
+        // One body, one click, for the life of this page - whatever the transport
+        // does. The "still holds exactly this greeting" check above is a real
+        // guard, but a TIME-DEPENDENT one: BOSS clears its composer on its own
+        // tick, so a second delivery arriving inside that window finds the text
+        // still sitting there and clicks again. On 2026-09-09 one approval put two
+        // identical greetings in one conversation that way.
+        //
+        // The latch lives on the content script's own isolated-world window, so it
+        // writes nothing to the page, and it is set BEFORE the click - a re-entrant
+        // delivery during the click must not slip past it. Failing closed here
+        // means at worst a greeting the user sends by hand; failing open means a
+        // second message to a real person, which M6 may never do.
+        const latch = view;
+        if (latch.__jobagentGreetingSent === body)
+            return { status: 'already_sent' };
+        latch.__jobagentGreetingSent = body;
         send.click();
         return { status: 'sent' };
     }

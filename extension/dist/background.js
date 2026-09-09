@@ -3413,13 +3413,23 @@ async function executeM6Application(approvalId, source) {
                             status = 'foreground_lost';
                             break;
                         }
+                        // NO packaged-injection retry, exactly like `m6-execute`.
+                        // `askTab`'s recovery re-sends the same message after injecting,
+                        // which is right for a read and wrong for a click: if BOSS tears
+                        // the message port down as it re-renders after the send, the
+                        // response is lost, the retry fires immediately, and the composer
+                        // has not been cleared yet - so the "box must still hold exactly
+                        // this greeting" guard is satisfied and it clicks again. That put
+                        // two identical greetings in one conversation on 2026-09-09.
+                        // A lost response here is reported, never retried; the typing step
+                        // above has already proved a receiver exists.
                         const sent = await askTab(tabId, {
                             type: 'jobagent:m6-greeting-send',
                             greeting: approval.answers_text,
                             expectedExternalId: approval.external_id,
                             expectedCompany: approval.company,
                             expectedTitle: approval.title,
-                        }, true);
+                        });
                         status = sent.ok && sent.result ? sent.result.status : 'send_unanswered';
                         // `send_disabled` is the one worth waiting out - it means the
                         // control exists and the page has not enabled it yet.

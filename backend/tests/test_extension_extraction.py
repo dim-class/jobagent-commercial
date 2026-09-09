@@ -1312,6 +1312,44 @@ async def test_a_contenteditable_composer_is_typed_into_and_sent(
 
 
 @pytest.mark.asyncio
+async def test_a_second_submit_can_never_click_send_again(
+    browser_page, extension_bundle
+):
+    """One approval, one message - even if the message arrives twice.
+
+    The composer check ("it must still hold exactly this greeting") is a real
+    guard but a TIME-DEPENDENT one: BOSS clears its own composer on its
+    framework's tick, so a delivery arriving inside that window finds the text
+    still there and clicks again. `askTab`'s packaged-injection recovery
+    re-sends the message it just failed to get a response for, which is right
+    for a read and wrong for a click - and a click that lands as BOSS tears
+    down the message port is exactly when the response goes missing.
+
+    This fixture reproduces the window for free: its send button does not clear
+    the box, so nothing but the latch stands between one click and two.
+    """
+    await _load_fixture(
+        browser_page, extension_bundle, "boss_chat_contenteditable.html", url=CHAT_URL
+    )
+    result = await browser_page.evaluate(
+        """([text, company, title]) => {
+          let clicks = 0
+          document.querySelector('.btn-v2').addEventListener('click', () => { clicks += 1 })
+          const args = [document, text, document.location.href, 'any-id', company, title]
+          const typed = BossExtract.sendConfirmedGreeting(...args).status
+          const first = BossExtract.submitConfirmedGreeting(...args).status
+          const second = BossExtract.submitConfirmedGreeting(...args).status
+          return { typed, first, second, clicks }
+        }""",
+        [GREETING, CHAT_COMPANY, CHAT_TITLE],
+    )
+    assert result["typed"] == "typed"
+    assert result["first"] == "sent"
+    assert result["second"] == "already_sent", "the second delivery must refuse, not click"
+    assert result["clicks"] == 1, "exactly one message reaches a real person"
+
+
+@pytest.mark.asyncio
 async def test_a_contenteditable_that_already_has_text_is_left_alone(
     browser_page, extension_bundle
 ):

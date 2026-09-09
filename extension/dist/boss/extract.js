@@ -1467,9 +1467,41 @@ var BossExtract = (function () {
             `ifr=${frames.length ? Array.from(new Set(frames)).join('+') : '0'}`,
             `snd=${sends.length ? Array.from(new Set(sends)).slice(0, 3).join('+') : 'none'}`,
             `vw=${view ? view.innerWidth : '?'}`,
+            paneChain(doc),
             chatHeaderShape(doc),
         ];
-        return parts.join('|').slice(0, 240);
+        return parts.join('|').slice(0, 320);
+    }
+    /**
+     * Where the open conversation sits relative to the list, by class name only.
+     *
+     * `co=0` beside `coL=1` says the approved company is inside the conversation
+     * list and nowhere else - but not whether BOSS renders the recruiter row
+     * (「徐先生｜上海思芮｜招聘专员」) inside that list container while painting it
+     * at the top of the right column. Those two readings need opposite fixes and
+     * three rounds of guessing did not separate them, so this measures it: each
+     * ancestor of `.chat-conversation` by its first class, marked `*` when it
+     * contains the list. The first `*` is the level the exclusion starts eating,
+     * and anything the header needs above that is unreachable by construction.
+     *
+     * Class names only, never text - the same rule the send-control shape above
+     * follows, and the reason this can be recorded without copying a real
+     * conversation into the attempt note.
+     */
+    function paneChain(doc) {
+        const pane = pickAll(doc, BossSelectors.CHAT_CONVERSATION).nodes[0];
+        if (!pane)
+            return 'pane=none';
+        const lists = Array.from(doc.querySelectorAll(BossSelectors.CHAT_LIST.join(',')));
+        const rungs = [];
+        let node = pane;
+        for (let up = 0; up < 6 && node; up += 1) {
+            const cls = (node.getAttribute('class') || '').split(/\s+/).filter(Boolean)[0] || node.tagName.toLowerCase();
+            const holdsList = lists.some((list) => node !== list && node.contains(list));
+            rungs.push(`${cls}${holdsList ? '*' : ''}`);
+            node = node.parentElement;
+        }
+        return `pane=${rungs.join('<')}`;
     }
     /**
      * The structural shape of the chat page's job header, for a failure note.
@@ -1699,8 +1731,18 @@ var BossExtract = (function () {
             + `,lst=${listSelector}:${listRoots.length}`
             + `,coL=${inList(expectedCompany) ? 1 : 0}`
             + `,coUp=${distance(expectedCompany)},tiUp=${distance(expectedTitle)}`;
-        // Neither read means the header could not be read at all; one of the two
-        // means this is a conversation about something else.
+        // NOT a "half-rendered header, wait for it" status, though that is what
+        // 2026-09-09's refusal looked like: `ti=1p,tiUp=0` with `co=0,coL=1`, and
+        // the same page had read another company's header correctly nineteen
+        // seconds earlier. The rule that would have waited - one half matched, the
+        // other absent from scope - failed three existing tests on the spot, and
+        // they were right: 「浩鲸科技 + 私有云运维工程师」 against an open
+        // 「中信建投证券 + 私有云运维工程师」 conversation is ALSO one half matched
+        // and the other absent. `co=0` cannot tell "my company has not rendered
+        // yet" from "a different company is rendered there", so treating it as
+        // "not ready" would wait on exactly the wrong-person case this gate
+        // exists to stop. It stays a refusal until `pane=` says where the header
+        // actually lives.
         return {
             status: `${company || title ? 'chat_wrong_job' : 'chat_job_unknown'}|${detail}`,
         };

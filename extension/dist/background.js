@@ -3456,8 +3456,11 @@ async function executeM6Application(approvalId, source) {
                 // the DOM rather than another guess. Read-only, and best-effort: a
                 // diagnostic that fails must not change the outcome.
                 let shape = '';
+                // `chat_wrong_job` was missing from this list, and it is the status
+                // that has needed the shape most: three refusals in a row could say
+                // which half of the identity missed but not where the header lives.
                 if (status === 'no_composer' || status === 'no_send_control'
-                    || status.startsWith('chat_job_')) {
+                    || status.startsWith('chat_')) {
                     const diag = await askTab(tabId, {
                         type: 'jobagent:m6-greeting-diagnostic',
                     });

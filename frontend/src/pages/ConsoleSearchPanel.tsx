@@ -751,7 +751,7 @@ export default function ConsoleSearchPanel() {
       <button type="button" className="btn-sm" disabled={busy || checking}
         onClick={() => void refresh()}>{checking ? '刷新中…' : '刷新状态'}</button>
       <span className="small faint">
-        需要保持已登录的 BOSS 标签页在正常 Chrome 中打开；首次识别特殊字体薪资时，请在该标签页点击一次 JobAgent 图标并关闭弹窗。
+        在正常 Chrome 里开着已登录的 BOSS 标签页即可。
       </span>
     </div>
 
@@ -805,7 +805,7 @@ export default function ConsoleSearchPanel() {
             try { window.localStorage.setItem(TARGET_KEY, String(next)) } catch { /* ignore */ }
           }} />
         <span>个新岗位</span>
-        <span className="small faint">库里已有的会跳过，不占名额；每个方向最多打开 60 个详情。</span>
+        <span className="small faint">库里已有的会跳过，不占名额。</span>
       </div>
 
       {/* Not folded away. Which experience bands to search is one of the
@@ -838,15 +838,12 @@ export default function ConsoleSearchPanel() {
           </div>
           <p className="small faint">
             {activeExpLabel
-              ? `本次只搜：${activeExpLabel}。BOSS 直接按这些档返回结果，不是搜回来再扔掉。`
-              : '一个都不勾 = 不限，搜全部经验要求。勾上「经验不限」和「1-3年」是最常用的组合。'}
-            {' '}它作用在每一次搜索上，不会像薪资分段那样把名额切开。
+              ? `本次只搜：${activeExpLabel}。`
+              : '不勾＝不限。常用组合：经验不限 ＋ 1-3年。'}
           </p>
           <details>
             <summary className="small faint">
-              档位来源：{expFromSite
-                ? 'BOSS 页面（已自动读取）'
-                : '内置默认（2026-09-07 读自 BOSS；经验不限·101 与 1-3年·104 已对照地址栏核对一致）'}
+              档位来源：{expFromSite ? 'BOSS 页面' : '内置默认'}
             </summary>
             <div className="row mt-1">
               {expBands.map(band => (
@@ -854,6 +851,8 @@ export default function ConsoleSearchPanel() {
               ))}
             </div>
             <p className="small faint">
+              内置默认于 2026-09-07 读自 BOSS，其中「经验不限·101」与「1-3年·104」
+              已对照地址栏核对一致。
               选中后 JobAgent 就是把这些代码拼进搜索地址（experience=101,104），
               BOSS 打开后「工作经验」里会直接是勾上的状态——和你自己在页面上点是同一件事。
               核对方法：在 BOSS 上点一下同名档位，看地址栏 experience= 后面的数字对不对得上。
@@ -949,15 +948,15 @@ export default function ConsoleSearchPanel() {
           experience bands were moved out of. */}
       {searchOptions && cities.length ? (
         <p className="small faint">
-          本次将创建{' '}
+          本次共{' '}
           <strong>
             {Math.min(searchOptions.max_batch_tasks,
               Math.max(1, Math.floor(searchOptions.max_batch_tasks
                 / (cities.length * Math.max(1, activeBandCodes.length))))
               * cities.length * Math.max(1, activeBandCodes.length))}
           </strong>{' '}
-          个搜索单元（上限 {searchOptions.max_batch_tasks}）：{cities.length} 城市 ×{' '}
-          最多 {Math.min(searchOptions.max_directions,
+          次搜索：{cities.length} 个城市 ×{' '}
+          {Math.min(searchOptions.max_directions,
             Math.max(1, Math.floor(searchOptions.max_batch_tasks
               / (cities.length * Math.max(1, activeBandCodes.length)))))} 个方向
           {activeBandCodes.length ? ` × ${activeBandCodes.length} 个薪资档` : ''}。
@@ -1076,7 +1075,7 @@ export default function ConsoleSearchPanel() {
           <strong>简历方向分析</strong>
           <span className="small faint">
             {aiPlan.cached
-              ? ` · 已分析并缓存，${aiPlan.model}，重复使用不再收费`
+              ? ' · 已缓存，重复查看不收费'
               : ' · 尚未分析，当前排序只能靠用词重合度猜测'}
           </span>
         </div>
@@ -1103,7 +1102,7 @@ export default function ConsoleSearchPanel() {
                   : `用 AI 分析我的方向（${aiPlan.pending_calls} 次调用）`}
             </button>
             <span className="small faint">
-              一次调用覆盖全部 {aiPlan.candidates.length} 个方向；简历或职业策略变了会自动重新分析。
+              简历或职业策略变了会自动重新分析。
             </span>
           </div>
         )}
@@ -1172,7 +1171,7 @@ export default function ConsoleSearchPanel() {
 
     <button type="button" className="btn-sm mt-1" aria-expanded={showAdvanced}
       onClick={() => setShowAdvanced(current => !current)}>
-      {showAdvanced ? '收起高级设置' : '高级设置与诊断'}
+      {showAdvanced ? '收起高级设置' : '高级设置'}
     </button>
 
     {showAdvanced ? <div className="card-block mt-1">
@@ -1266,6 +1265,14 @@ export default function ConsoleSearchPanel() {
       </div>
       </section>
       <section aria-label="连接诊断">
+        {/* Moved off the top of the page: it is a one-time grant, and the
+            capability it unlocks supplied 4 salaries against 775 read straight
+            off the detail page. It belongs where setup lives, not above the
+            controls someone uses every day. */}
+        <p className="small faint">
+          薪资 OCR（可选）：BOSS 有些薪资是图形字体，只能截图识别。
+          需要在那个 BOSS 标签页上点一次 JobAgent 图标再关掉弹窗，本次浏览器会话才有截图权限。
+        </p>
         <p>本机服务：{backendDetail}。任务接口：{planDetail}。</p>
         <p>扩展诊断：{bridgeDetail}</p>
         <p>诊断码：{diagnosticCode} · 最近检查：{checkedAt}{checking ? ' · 检查中…' : ''}</p>

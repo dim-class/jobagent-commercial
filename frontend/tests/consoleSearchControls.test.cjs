@@ -53,8 +53,10 @@ test('nothing that decides or advances a run is hidden behind 高级设置', () 
   // How many searches the button is about to start is the number to read
   // before pressing it. It spent its life inside a collapsed block, which is
   // the same mistake the experience bands were moved out of.
-  const unitCount = panel.indexOf('本次将创建')
-  assert.ok(unitCount > 0 && unitCount < advanced, '搜索单元数 must be visible by default')
+  // Anchored on the computation, not its wording - 「搜索单元」 was the
+  // backend's word for a task and has since become 「次搜索」.
+  const unitCount = panel.indexOf('Math.min(searchOptions.max_batch_tasks,')
+  assert.ok(unitCount > 0 && unitCount < advanced, 'the search count must be visible by default')
 
   // Status is read on open and on regaining focus, so while a run is on
   // screen nothing moves on its own; this button is what advances it.

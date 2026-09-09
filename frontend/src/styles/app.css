@@ -567,21 +567,30 @@ input[type="range"] {
   accent-color: var(--accent);
 }
 
-/* One collapsible block per offer on the decision page. */
-details {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 10px 12px;
-  margin-bottom: 10px;
-  background: var(--surface-2);
-}
-details[open] { background: var(--surface); }
+/* A fold is a line you can click, not a box.
+   The boxed treatment below was written for one page's list of offers and
+   applied to every `<details>` in the app, which turned the search console
+   into three stacked full-width grey slabs - most of what made a finished
+   page read as a debug build. */
+details { margin-bottom: 10px; }
 details > summary {
   cursor: pointer;
   list-style-position: outside;
+  color: var(--text-muted);
 }
+details > summary:hover { color: var(--text); }
 details > summary .cell-sub,
 details > summary .faint { display: inline; }
+
+/* Opt in where a fold really is a panel: one block per offer on the decision
+   page, where the list needs the boxes to read as separate offers. */
+.details-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: var(--surface-2);
+}
+.details-panel[open] { background: var(--surface); }
 
 /* ------------------------------------------------------------ responsive */
 

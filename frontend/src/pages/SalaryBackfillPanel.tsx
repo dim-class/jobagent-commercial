@@ -121,11 +121,12 @@ export default function SalaryBackfillPanel() {
   return <section id="salary-backfill" className="card" style={{ marginTop: 16 }}>
     <h2>补全缺失的薪资</h2>
     <p className="small faint">
-      BOSS 的列表和详情面板里薪资是特殊字体，读不到，所以要逐个打开岗位自己的详情页去取。
-      只处理已入库的岗位，不会新建，也不投递。
+      BOSS 列表里的薪资是特殊字体，读不到，只能逐个打开岗位详情页去取。只补已入库的岗位。
     </p>
-    {plan && <p>岗位 {plan.total_jobs} 个 · 已有薪资 {plan.salary_present} 个 ·
-      可回填 {plan.eligible_jobs} 个 · 不可回填 {plan.ineligible_jobs} 个</p>}
+    {plan && <p>
+      {plan.total_jobs} 个岗位，{plan.salary_present} 个已有薪资
+      {plan.eligible_jobs ? ` · 可回填 ${plan.eligible_jobs} 个` : ' · 没有需要补的'}
+    </p>}
     {run ? <p>计划 #{run.id}：{run.state} · {run.processed_jobs}/{run.total_jobs} ·
       成功 {run.updated_jobs} · 无法读取 {run.unavailable_jobs} · 失败 {run.failed_jobs}
       · 本次授权 {run.session_processed}/{run.session_cap}
@@ -183,9 +184,15 @@ export default function SalaryBackfillPanel() {
       ) : null}
     {message && <p>{message}</p>}
     <p className="small faint">
-      启动前请把同一 Chrome 窗口里的 BOSS 标签页停在<strong>搜索结果页</strong>
-      （<code>/web/geek/job</code> 或 <code>/web/geek/recommend</code>）或<strong>职位详情页</strong>
-      （<code>/job_detail/…</code>）；首页、聊天页、登录页与验证页不会被采用，扩展会直接拒绝启动。
+      启动前把同一 Chrome 窗口里的 BOSS 标签页停在搜索结果页或职位详情页。
     </p>
+    <details>
+      <summary className="small faint">哪些页面可以，哪些不行</summary>
+      <p className="small faint">
+        可以：搜索结果页（<code>/web/geek/job</code> 或 <code>/web/geek/recommend</code>）、
+        职位详情页（<code>/job_detail/…</code>）。
+        不行：首页、聊天页、登录页与验证页——扩展会直接拒绝启动。
+      </p>
+    </details>
   </section>
 }

@@ -30,3 +30,18 @@ test('the filter row aligns by stretch, so one hint cannot lift its neighbours',
   // after the select and wrapping around it.
   assert.match(filters, /\.filters \.field \{[^}]*flex-direction: column/s)
 })
+
+test('the boxed fold style and the one page that wants it stay paired', () => {
+  // The box moved off the base `details` selector, so the page it was written
+  // for has to opt in by name. If either half is renamed without the other,
+  // the offers list silently loses the borders that separate one offer from
+  // the next - a visual regression no type-check would catch.
+  const decision = fs.readFileSync(
+    path.join(__dirname, '../src/pages/DecisionPage.tsx'), 'utf8')
+  assert.match(css, /\.details-panel \{/)
+  assert.match(decision, /className="details-panel"/)
+
+  // And the base selector must not carry the box again.
+  const base = css.slice(css.indexOf('details {'), css.indexOf('details > summary'))
+  assert.doesNotMatch(base, /border|background/)
+})

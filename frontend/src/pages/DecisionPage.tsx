@@ -355,6 +355,7 @@ export default function DecisionPage() {
           <Card title="② 你怎么看这几个 Offer" sub="主观评分，只有人能填">
             {result.offers.map((offer) => (
               <details
+                className="details-panel"
                 key={offer.offer_id}
                 open={openOffer === offer.offer_id}
                 onToggle={(event) =>

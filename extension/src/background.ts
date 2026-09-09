@@ -3429,13 +3429,32 @@ type M6PageResult = {
 }
 
 let m6AttemptBusy = false
+/** BOSS's own id alphabet, and it must stay the same in three places.
+ *
+ *  `urls.py`'s extractor and `boss/selectors.ts`'s `JOB_URL_PATTERNS` both
+ *  allow `~`; this check did not, and it is the one that runs last. So a
+ *  posting whose id ends in `~` was found, stored, analyzed, queued and
+ *  confirmed - and then refused at the moment of acting, with a message
+ *  blaming the confirmation. Measured 2026-09-09: 7 of 857 stored BOSS jobs,
+ *  none of which could ever be applied to.
+ *
+ *  `~` is RFC 3986 unreserved, so it is legal unescaped in a path. `.` stays
+ *  out deliberately: the id is interpolated into a path, and excluding it
+ *  makes `..` unrepresentable rather than merely unlikely.
+ *
+ *  The worker is a classic script (`module: none`, MV3 has no importable
+ *  worker module here) so the three cannot share one constant. A test pins
+ *  them to each other instead, the way `test_console_bridge_bounds.py`
+ *  already pins the four copies of the candidate cap. */
+const M6_EXTERNAL_ID = /^[A-Za-z0-9_~-]+$/
+
 function isM6CanonicalUrl(raw: string, externalId: string): boolean {
   try {
     const url = new URL(raw)
     return url.origin === REQUIRED_ORIGIN && !url.username && !url.password
       && !url.search && !url.hash
       && url.pathname === `/job_detail/${externalId}.html`
-      && /^[A-Za-z0-9_-]+$/.test(externalId)
+      && M6_EXTERNAL_ID.test(externalId)
   } catch { return false }
 }
 
@@ -3535,10 +3554,20 @@ async function executeM6Application(
     const typed = approval.answers_source === 'boss_typed_greeting'
     const shapeOk = (dynamic && approval.answers_text === '')
       || (typed && approval.answers_text.trim().length > 0)
-    if (approval.id !== approvalId || approval.state !== 'pending' || !shapeOk
-      || !isM6CanonicalUrl(approval.canonical_url, approval.external_id)) {
-      return { ok: false, error: '投递确认无效、已使用或招呼语模式不合法；不会执行。' }
-    }
+    // Four different refusals used to share one sentence, and it named three
+    // causes without naming the fourth. The one that actually fired on
+    // 2026-09-09 was the URL check, so the screen said 「已使用或招呼语模式不
+    // 合法」 about a fresh confirmation whose greeting was fine.
+    const invalid = approval.id !== approvalId
+      ? '这条投递确认与请求的不是同一条。'
+      : approval.state !== 'pending'
+        ? '这条投递确认已经用过了，请关闭本窗口重新确认一次。'
+        : !shapeOk
+          ? '招呼语的模式与内容不匹配（勾选了发送却没有内容，或未勾选却带着内容）。'
+          : !isM6CanonicalUrl(approval.canonical_url, approval.external_id)
+            ? `岗位链接不符合要求，未执行：${approval.canonical_url}`
+            : ''
+    if (invalid) return { ok: false, error: `${invalid}不会执行。` }
     const existing = await reusableBossTab(source.windowId!)
     const target = existing?.id
       ? await chrome.tabs.update(existing.id, { active: true })

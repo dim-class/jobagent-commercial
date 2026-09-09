@@ -2158,6 +2158,30 @@ hidden text.
 Identity is re-checked immediately before submitting, not only at confirmation
 time. Any mismatch stops and hands control back to the user.
 
+**The id's alphabet is defined three times, and the check that runs LAST must
+not be the strictest (2026-09-09).** `urls.py`'s extractor and the extension's
+`JOB_URL_PATTERNS` both accept `~`; the worker's own `isM6CanonicalUrl`
+re-check did not. So a posting whose id ends in one was found, stored,
+analyzed, queued and confirmed - and then refused at the moment of acting.
+Measured that day: **7 of 857 stored BOSS jobs**, none of which could ever be
+applied to, and invisible until someone tried that exact job.
+
+`~` is RFC 3986 unreserved and legal unescaped in a path. `.` stays out of all
+three on purpose: the id is interpolated into a path, and excluding it makes
+`..` unrepresentable rather than merely unlikely. The worker is a classic
+script (`module: none` - an MV3 service worker here cannot import the
+selectors), so the three cannot share one constant;
+`tests/test_boss_external_id_alphabet.py` pins them to each other instead,
+exactly as `test_console_bridge_bounds.py` pins the four copies of the
+candidate cap. **This is the second time a duplicated constant has failed this
+way, and both times the copy that broke was the one nobody had touched.**
+
+The refusal also named three causes and not the fourth. One sentence covered
+four different checks, so a fresh confirmation with a perfectly good greeting
+was reported as 「已使用或招呼语模式不合法」. Each check now says which one it
+was, and the URL check echoes the URL - the same rule the chat-page diagnostics
+follow, and for the same reason.
+
 #### 5. Hard stops - stop and return control, never work around
 
 A CAPTCHA, a login prompt, identity/phone verification, a security or

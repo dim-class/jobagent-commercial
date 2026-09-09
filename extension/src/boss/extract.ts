@@ -1773,16 +1773,21 @@ var BossExtract = (function () {
         const cls = (node.getAttribute('class') || '').split(/\s+/).filter(Boolean)[0] || '-'
         return `${node.tagName.toLowerCase()}.${cls}${visible(node) ? '' : '!hidden'}`
       })
+    // Ordered by what a refusal most needs, because the tail is what gets cut:
+    // the attempt detail this ends up inside is capped at 256 characters by the
+    // backend's own schema, and a 414-character one was rejected outright on
+    // 2026-09-09 - losing the record instead of shortening it. `pane=` answers
+    // the question three refusals in a row could not, so it goes first.
     const parts = [
+      paneChain(doc),
       `ta=${textareas.filter(visible).length}/${textareas.length}`,
       `ce=${editable.filter(visible).length}/${editable.length}`,
-      `ifr=${frames.length ? Array.from(new Set(frames)).join('+') : '0'}`,
       `snd=${sends.length ? Array.from(new Set(sends)).slice(0, 3).join('+') : 'none'}`,
+      `ifr=${frames.length ? Array.from(new Set(frames)).join('+') : '0'}`,
       `vw=${view ? view.innerWidth : '?'}`,
-      paneChain(doc),
       chatHeaderShape(doc),
     ]
-    return parts.join('|').slice(0, 320)
+    return parts.join('|').slice(0, 150)
   }
 
   /**

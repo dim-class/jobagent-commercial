@@ -2220,6 +2220,34 @@ what happened and decides what to do next.
   response, timeout, unclear confirmation UI - the outcome is recorded as
   **`application_result_unknown`**. It is never upgraded to `applied` by
   guessing, and it is never silently discarded; the user resolves it.
+- **An exception is an outcome too (2026-09-09).** Once `/begin` has claimed
+  the approval, *every* exit owes it one - including an exit by exception. A
+  bare `catch {}` around the whole attempt threw away both halves at once:
+  approval #116 sat in `executing` forever while BOSS had actually opened the
+  conversation, and the screen said 「单岗位投递执行中断或后端结果未确认」, which
+  names no cause. The catch now settles `unknown` with the thrown reason
+  (`attempt_interrupted:<why>`) and shows it, and only falls back to the
+  queue's manual close when settling *also* fails - a plausible outcome, since
+  an unreachable backend is one of the things that throws. Query strings are
+  stripped from the reason first: BOSS puts `lid` and `securityId` there and an
+  error can carry a URL. `tests/test_m6_attempt_settlement.py` pins it, against
+  the built bundle as well as the source. It lives in its own file because
+  `test_extension_m4a_contract.py`'s `background_source` fixture slices the
+  worker down to the M4a scope - the first version of the test passed happily
+  against an unrelated `catch` block in that slice.
+- **A diagnostic must never be able to destroy the record it explains
+  (2026-09-09, self-inflicted an hour later).** Enabling the page-shape note
+  for `chat_*` and raising its cap pushed one `detail` to **414 characters
+  against the schema's `max_length=256`**; the POST came back 422
+  「请求参数不合法」 and the exception took the whole attempt down with it. The
+  first thing the new settle-on-exception path reported was a bug the same
+  session had just introduced - which is the argument for it. `settleM6Outcome`
+  is the single place that posts an outcome and now truncates there, so no
+  caller and no future diagnostic can overrun it; the shape's parts are ordered
+  most-useful-first because the tail is what gets cut; and the test reads the
+  256 out of the Pydantic field rather than repeating it, so the two cannot
+  drift. **A note that arrives shortened is worth incomparably more than one
+  that does not arrive.**
 - The greeting is not known or site-verified merely because the click occurred.
   The attempt record must preserve that its mode/source was
   `boss_dynamic_unverified`; only an independent, visible application-success

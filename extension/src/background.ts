@@ -3523,6 +3523,17 @@ async function openM6Detail(tabId: number, canonicalUrl: string): Promise<boolea
   })
 }
 
+/** The schema's own ceiling on `detail` (`schemas/application.py`).
+ *
+ *  Truncating here rather than trusting every caller to stay under it: on
+ *  2026-09-09 a richer greeting diagnostic pushed one detail to 414 characters,
+ *  the POST came back 422 「请求参数不合法」, and the whole attempt record was
+ *  lost to the exception - a diagnostic destroying the very record it exists to
+ *  explain. A note that arrives shortened is worth incomparably more than one
+ *  that does not arrive.
+ */
+const M6_DETAIL_MAX = 256
+
 async function settleM6Outcome(
   approval: ApplicationApprovalWire,
   identity: { observed_url: string; observed_external_id: string },
@@ -3531,7 +3542,7 @@ async function settleM6Outcome(
 ): Promise<void> {
   await fetchJson(`/api/application-approvals/${approval.id}/outcome`, {
     method: 'POST',
-    body: { ...identity, outcome, detail },
+    body: { ...identity, outcome, detail: detail.slice(0, M6_DETAIL_MAX) },
   })
 }
 
@@ -3542,10 +3553,13 @@ async function executeM6Application(
   application?: { approvalId: number; outcome: 'unknown' | 'failed'; detail: string } }> {
   if (m6AttemptBusy) return { ok: false, error: '已有单岗位投递确认正在处理；不会并发或重复执行。' }
   m6AttemptBusy = true
+  let claimed: { observed_url: string; observed_external_id: string } | null = null
+  let claimedApproval: ApplicationApprovalWire | null = null
   try {
     if (activeRunToken !== null || salaryBackfillBusy || await getRunnerPointer()
       || await getGlobalPointer()) return { ok: false, error: '已有浏览器任务运行；请先结束后再逐岗位确认。' }
     const approval = await fetchJson<ApplicationApprovalWire>(`/api/application-approvals/${approvalId}`)
+    claimedApproval = approval
     // Two modes, each with its own strict shape. `boss_dynamic_unverified`
     // means BOSS decides and we cannot see it, so a body there would be a guess
     // presented as a plan; `boss_typed_greeting` means the human read and
@@ -3659,6 +3673,10 @@ async function executeM6Application(
     await fetchJson<ApplicationApprovalWire>(`/api/application-approvals/${approval.id}/begin`, {
       method: 'POST', body: observed,
     })
+    // From here the approval is CLAIMED, so every exit owes it an outcome -
+    // including an exit by exception. `observed` is block-scoped to this try,
+    // so the catch could not settle even if it wanted to.
+    claimed = observed
 
     // Applying is never backgrounded: `true` is passed explicitly so this does
     // not depend on the flag being unset (authorized 2026-09-04 covers search
@@ -3799,8 +3817,36 @@ async function executeM6Application(
     // always recorded as unknown, never guessed into Job.status=applied.
     await settleM6Outcome(approval, observed, 'unknown', detail)
     return { ok: true, application: { approvalId, outcome: 'unknown', detail } }
-  } catch {
-    return { ok: false, error: '单岗位投递执行中断或后端结果未确认；请人工核对，不会自动重试。' }
+  } catch (err) {
+    // A bare `catch {}` here threw away two things at once: the reason, and
+    // the claimed approval's outcome. Approval #116 (2026-09-09) sat in
+    // `executing` forever while BOSS had actually opened the conversation, and
+    // the screen said only 「执行中断或后端结果未确认」 - which names no cause
+    // and leaves the record for a human to close by hand.
+    //
+    // `unknown` is the honest outcome and the one CLAUDE.md names: the click
+    // may or may not have landed, and nothing here may guess `applied`. If
+    // settling ALSO fails - the backend being unreachable is a very plausible
+    // reason for the original throw - the manual close stays available and the
+    // message says so rather than pretending the record is complete.
+    const why = String((err as Error)?.message || err || 'unknown')
+      // BOSS puts session tokens in a query string, and an error can carry a
+      // URL. Strip queries before this reaches a record or the screen.
+      .replace(/\?[^\s]*/g, '').slice(0, 120)
+    if (claimed && claimedApproval) {
+      try {
+        await settleM6Outcome(claimedApproval, claimed, 'unknown', `attempt_interrupted:${why}`)
+        return {
+          ok: false,
+          application: { approvalId, outcome: 'unknown', detail: `attempt_interrupted:${why}` },
+          error: `单岗位投递中断，已记为「结果未知」：${why}。请到 BOSS 人工核对，不会自动重试。`,
+        }
+      } catch { /* fall through to the manual close below */ }
+    }
+    return {
+      ok: false,
+      error: `单岗位投递执行中断或后端结果未确认（${why}）；请人工核对，不会自动重试。`,
+    }
   } finally {
     m6AttemptBusy = false
   }

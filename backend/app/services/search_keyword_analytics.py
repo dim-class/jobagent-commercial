@@ -12,6 +12,12 @@ An AI recommend-rate is about the *fit of what the search surfaced*. Real
 outcomes live in `application_analytics` and need actual applications. A
 keyword can surface well-matched postings that never reply.
 
+One count here is not the model's alone: `useful` lets a human decision
+override the verdict - an application the model did not recommend counts, a
+recommendation the user skipped does not. The direction ranking weighs that
+count, because what the user did with a search's results is what a search
+exists to produce. It is still not a reply rate.
+
 Attribution is the existing `TaskCandidate` association - the same one the
 console review uses. Jobs imported outside a SearchPlan task (manual paste,
 Quick Capture) simply have no keyword and are reported as unattributed rather
@@ -30,8 +36,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
-from app.models import JobAnalysis, JobSearchTask, TaskCandidate, Verdict
-from app.models.enums import RECOMMENDED_VERDICTS
+from app.models import Job, JobAnalysis, JobSearchTask, TaskCandidate, Verdict
+from app.models.enums import DECIDED_STATUSES, RECOMMENDED_VERDICTS, JobStatus
 from app.services.statistics import (
     Confidence,
     Interval,
@@ -50,6 +56,12 @@ _TIER_RANK: dict[Confidence, int] = {
     Confidence.insufficient: 3,
 }
 
+#: A human decision settles whether a surfaced job was worth it, whatever the
+#: model said: applied or anything after it, or saved, is a yes; skipped is a
+#: no. Every other status is undecided, and the model's verdict stands in.
+_HUMAN_NO: frozenset[JobStatus] = frozenset({JobStatus.skipped})
+_HUMAN_YES: frozenset[JobStatus] = (DECIDED_STATUSES - _HUMAN_NO) | {JobStatus.saved}
+
 
 @dataclass(slots=True)
 class KeywordCohort:
@@ -60,6 +72,12 @@ class KeywordCohort:
     #: Distinct analyzed jobs this keyword's tasks brought in.
     jobs: int = 0
     recommended: int = 0
+    #: Of `jobs`, how many turned out worth applying to: the user applied to or
+    #: saved them, or the model recommended them and the user has not decided
+    #: yet. A human decision always overrides the verdict, and an undecided
+    #: recommendation still counts, so a freshly searched keyword is not
+    #: penalised for a queue nobody has read. The direction ranking weighs this.
+    useful: int = 0
     average_score: float | None = None
     recommend_rate: float | None = None
     interval: Interval | None = None
@@ -99,6 +117,15 @@ def _latest_analysis_by_job(db: Session) -> dict[int, JobAnalysis]:
     return latest
 
 
+def _useful(status: JobStatus | None, verdict: Verdict | None) -> bool:
+    """The human's decision where one exists, the model's recommendation where not."""
+    if status in _HUMAN_YES:
+        return True
+    if status in _HUMAN_NO:
+        return False
+    return verdict in RECOMMENDED_VERDICTS
+
+
 def compute(db: Session, *, settings: Settings | None = None) -> KeywordAnalytics:
     """Aggregate analysis scores by the keyword whose task surfaced the job.
 
@@ -106,6 +133,9 @@ def compute(db: Session, *, settings: Settings | None = None) -> KeywordAnalytic
     """
     cfg = settings or get_settings()
     latest = _latest_analysis_by_job(db)
+    statuses: dict[int, JobStatus] = {
+        job_id: status for job_id, status in db.execute(select(Job.id, Job.status))
+    }
 
     # keyword -> {job_id: analysis}. A job found by two tasks with the same
     # keyword counts once; a job found by two *different* keywords counts for
@@ -141,6 +171,9 @@ def compute(db: Session, *, settings: Settings | None = None) -> KeywordAnalytic
                 cities=sorted(cities.get(keyword, set())),
                 jobs=n,
                 recommended=recommended,
+                useful=sum(
+                    1 for job_id, a in jobs.items() if _useful(statuses.get(job_id), a.verdict)
+                ),
                 average_score=round(sum(a.overall_score for a in analyses) / n, 1),
                 recommend_rate=rate(recommended, n),
                 interval=wilson_interval(recommended, n),

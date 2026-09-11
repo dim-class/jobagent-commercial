@@ -2511,9 +2511,30 @@ Rules that are load-bearing:
   overlap (`云运维工程师` appearing verbatim in the résumé) would otherwise
   outrank a direction the model actually assessed at 95/100. The frontend
   renders the three sources differently for the same reason;
-- **evidence still outranks fit.** A model reading a résumé is a better guess
-  than counting bigrams, but it is still a guess about what BOSS will return; a
-  direction that already surfaced 28 jobs has told us the answer;
+- **evidence outranks fit once there is enough of it, and the weighting is
+  what makes that true (2026-09-11).** It was `fit + recommend_rate * 2`, a
+  balance struck when fit was a character overlap of about 0-0.33. An AI fit
+  spans 0-1 and every real recommend rate sat between 4% and 16%, so history
+  could move a score by at most 0.32 while the model's own noise moved it by
+  0.22 - 云运维工程师 read 69, 80 and 58 on the same résumé. The direction with
+  the best record, 179 jobs deep, ranked seventh behind one whose 22 jobs held a
+  single useful posting, and a four-city run (four directions per city) never
+  searched it. History now *replaces* fit in proportion to its depth,
+  `jobs / (jobs + analytics_recommend_sample)`: equal at 8 jobs, 96% at 179,
+  with the average surfaced job anchored to the average fit so an ordinary
+  record and a never-searched direction compete evenly. Among directions
+  searched enough to judge, the AI fit predicted nothing: 应用服务器工程师 was
+  judged 88/100 and produced 0 recommendations in 31;
+- **history is what the user did, not what the model thought.**
+  `KeywordCohort.useful` counts a surfaced job as worth it when the user applied
+  to or saved it, or when the model recommended it and the user has not decided
+  yet. A human decision always overrides the verdict, and an undecided
+  recommendation still counts, so a freshly searched direction is not
+  penalised for a queue nobody has read. The recommend rate alone ranked
+  WebSphere工程师 (25 recommended, 24 applied) below 中间件工程师 (13
+  recommended, 3 skipped). `recommended` still travels with every direction;
+  the console's 历史 column shows `useful/jobs`, the number that decided the
+  order;
 **A keyword BOSS returns nothing for is demoted (2026-09-05).** The ranking
 already weighed outcome evidence, but only over jobs it had *collected* - a
 keyword whose searches render no card at all had no cohort, so it kept being

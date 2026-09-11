@@ -28,9 +28,30 @@ character overlap. It is *passed in*, never fetched: this module makes no model
 call, so ranking stays free and reproducible, and spending money remains the
 caller's explicit, confirmed decision.
 
-Evidence still outranks fit either way. A model reading a résumé is a better
-guess than counting bigrams, but it is still a guess about what BOSS will
-return; a direction that has already surfaced 28 jobs has told us the answer.
+**Evidence outranks fit once there is enough of it** - and the weighting is
+what makes that true, which it had quietly stopped being (measured 2026-09-11).
+The score was ``fit + recommend_rate * 2``, a balance struck when fit was a
+character overlap of about 0-0.33. An AI fit spans 0-1 while every real
+recommend rate sat between 4% and 16%, so history moved a score by at most
+0.32 - and the model's own run-to-run noise moved it by 0.22 (云运维工程师 read
+69, 80 and 58 on the same résumé). The direction with the best record, 179 jobs
+deep, ranked seventh behind one whose 22 jobs held a single useful posting, and
+a four-city run never searched it.
+
+Two changes, both measured before being chosen:
+
+- **history replaces fit in proportion to how much history there is**:
+  ``weight = jobs / (jobs + analytics_recommend_sample)``. At the sample size
+  the analytics already call enough to act on the two count equally; at 179
+  jobs history is 96% of the score. Among directions searched enough to judge,
+  the AI fit predicted nothing - 应用服务器工程师 was judged 88/100 and its
+  searches produced 0 recommendations in 31. History goes on the fit scale by
+  anchoring the average surfaced job to the average fit, so an ordinary record
+  and a never-searched direction compete evenly;
+- **history is what the user did, not what the model thought**
+  (``KeywordCohort.useful``). The recommend rate alone ranked WebSphere工程师,
+  whose 25 recommendations the user applied to 24 times, below 中间件工程师, a
+  quarter of whose recommendations the user skipped.
 """
 
 from __future__ import annotations
@@ -41,11 +62,12 @@ from dataclasses import dataclass, field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.models import JobSearchTask, Resume
 from app.models.enums import SearchTaskRunStatus
 from app.schemas.direction import ResumeDirectionAnalysis
 from app.services import search_keyword_analytics as keyword_analytics
-from app.services.statistics import Confidence
+from app.services.statistics import Confidence, rate
 
 #: Tokens shared by nearly every Chinese engineering job title. Left in, they
 #: dominate the overlap: 云计算工程师 / 云运维工程师 / 云平台工程师 each scored
@@ -61,8 +83,8 @@ _GENERIC_ROLE_TOKENS = frozenset(
 #: direction with real evidence still outranks a Chinese one without.
 _CHINESE_BONUS = 0.15
 
-#: A direction whose every surfaced job was rejected is not worth searching
-#: again while that remains the only thing we know about it.
+#: A direction none of whose surfaced jobs turned out worth applying to is not
+#: worth searching again while that remains the only thing we know about it.
 _PROVEN_EMPTY_PENALTY = 1.0
 
 #: A direction whose completed searches have never rendered a single card is
@@ -73,6 +95,10 @@ _PROVEN_EMPTY_PENALTY = 1.0
 #: completed runs to say so, because one run can end early for its own reasons.
 _BARREN_PENALTY = 10.0
 _BARREN_MIN_RUNS = 2
+
+#: Where an average record lands when there is no fit to anchor it to (no
+#: résumé, nothing judged): the middle of the scale.
+_NEUTRAL_FIT_ANCHOR = 0.5
 
 
 def _is_chinese(text: str) -> bool:
@@ -111,6 +137,11 @@ class DirectionScore:
     recommend_rate: float | None = None
     jobs: int = 0
     recommended: int = 0
+    #: Of `jobs`, how many turned out worth applying to - applied to or saved by
+    #: the user, or recommended and not yet decided. This, not `recommended`,
+    #: is what the ranking weighs.
+    useful: int = 0
+    useful_rate: float | None = None
     confidence: Confidence = Confidence.insufficient
     reasons: list[str] = field(default_factory=list)
     #: Repeatedly searched and never rendered a card - BOSS returns nothing for
@@ -188,6 +219,28 @@ def _text_fit(role: str, vocabulary: set[str]) -> float:
     return len(role_tokens & vocabulary) / len(role_tokens)
 
 
+def _history_weight(jobs: int, sample: int) -> float:
+    """How much of a direction's score its own history decides.
+
+    Half at the sample size the analytics call enough to act on, approaching
+    all of it as the history deepens. A fit is a guess about what BOSS will
+    return; a direction searched a hundred times has already answered.
+    """
+    return jobs / (jobs + sample) if jobs > 0 else 0.0
+
+
+def _history_on_fit_scale(useful_rate: float, pooled_rate: float | None, anchor: float) -> float:
+    """A useful rate, expressed on the same 0-1 scale as fit.
+
+    The average surfaced job maps to the average fit, so an ordinary record and
+    a never-searched direction (ranked on fit alone) compete evenly, and only a
+    record better or worse than average moves a direction away from there.
+    """
+    if not pooled_rate:
+        return 0.0
+    return min(1.0, useful_rate / pooled_rate * anchor)
+
+
 def rank(
     db: Session,
     *,
@@ -222,15 +275,19 @@ def rank(
     analytics = keyword_analytics.compute(db)
     cohorts = {c.keyword: c for c in analytics.cohorts}
     barren = _barren_keywords(db)
+    sample = get_settings().analytics_recommend_sample
 
-    scored: list[DirectionScore] = []
-    for role in dict.fromkeys([*roles, *suggested_roles]):
+    candidates = list(dict.fromkeys([*roles, *suggested_roles]))
+    fits: dict[str, tuple[float, str, list[str]]] = {}
+    for role in candidates:
         reasons: list[str] = []
         judged = ai_fits.get(role)
         if judged is not None:
             fit = judged[0] / 100
             fit_source = "ai"
-            reasons.append(f"AI 判断简历支撑度 {judged[0]}/100：{judged[1]}")
+            # The model ends its reason with 。 and the notes join reasons with
+            # ；, which rendered as 「经历。；历史」.
+            reasons.append(f"AI 判断简历支撑度 {judged[0]}/100：{judged[1].rstrip('。')}")
         elif ai is not None:
             # An AI analysis exists but skipped this direction (the prompt says
             # to cover every one, so this is a model defect). A character count
@@ -246,9 +303,42 @@ def rank(
             fit_source = "text"
             if fit > 0:
                 reasons.append(f"与简历用词重合度 {fit:.0%}（未经 AI 判断）")
+        fits[role] = (fit, fit_source, reasons)
+
+    # The two reference points that put history on the fit scale: how often the
+    # average surfaced job turned out worth applying to, and the average fit
+    # being ranked. An `unjudged` 0 is not a measurement, so it stays out.
+    pooled_rate = rate(
+        sum(c.useful for c in analytics.cohorts), sum(c.jobs for c in analytics.cohorts)
+    )
+    measured = [fit for fit, source, _ in fits.values() if source != "unjudged"]
+    anchor = (sum(measured) / len(measured) if measured else 0.0) or _NEUTRAL_FIT_ANCHOR
+
+    scored: list[DirectionScore] = []
+    for role in candidates:
+        fit, fit_source, reasons = fits[role]
         score = fit
         if role in suggested_roles:
             reasons.append("AI 依据简历补充的方向，未写入职业策略")
+
+        cohort = cohorts.get(role)
+        jobs = cohort.jobs if cohort else 0
+        useful = cohort.useful if cohort else 0
+        useful_rate = rate(useful, jobs)
+        confidence = cohort.confidence if cohort else Confidence.insufficient
+        if confidence is not Confidence.insufficient and useful_rate is not None:
+            weight = _history_weight(jobs, sample)
+            history = _history_on_fit_scale(useful_rate, pooled_rate, anchor)
+            score = weight * history + (1 - weight) * fit
+            reasons.append(
+                f"历史 {jobs} 个岗位中 {useful} 个值得投递（{useful_rate:.0%}），"
+                f"排序中占 {weight:.0%}"
+            )
+            if useful == 0:
+                score -= _PROVEN_EMPTY_PENALTY
+                reasons.append("搜到的岗位里没有一个被投递或收藏，也没有待处理的推荐")
+        elif jobs:
+            reasons.append(f"已搜过 {jobs} 个岗位，样本不足以下结论")
 
         if _is_chinese(role):
             score += _CHINESE_BONUS
@@ -260,22 +350,6 @@ def rank(
             score -= _BARREN_PENALTY
             reasons.append(f"过去 {runs} 次搜索一张卡片都没返回，已停止使用")
 
-        cohort = cohorts.get(role)
-        rate = jobs = recommended = None
-        confidence = Confidence.insufficient
-        if cohort is not None:
-            jobs, recommended = cohort.jobs, cohort.recommended
-            rate, confidence = cohort.recommend_rate, cohort.confidence
-            if confidence is not Confidence.insufficient and rate is not None:
-                # Real outcome evidence outweighs a text-overlap guess.
-                score += rate * 2
-                reasons.append(f"历史推荐率 {recommended}/{jobs}（{rate:.0%}）")
-                if recommended == 0:
-                    score -= _PROVEN_EMPTY_PENALTY
-                    reasons.append("此前没有一个岗位被判定为推荐投递")
-            elif jobs:
-                reasons.append(f"已搜过 {jobs} 个岗位，样本不足以下结论")
-
         scored.append(
             DirectionScore(
                 keyword=role,
@@ -283,9 +357,11 @@ def rank(
                 fit=round(fit, 4),
                 fit_source=fit_source,
                 suggested=role in suggested_roles,
-                recommend_rate=rate,
-                jobs=jobs or 0,
-                recommended=recommended or 0,
+                recommend_rate=cohort.recommend_rate if cohort else None,
+                jobs=jobs,
+                recommended=cohort.recommended if cohort else 0,
+                useful=useful,
+                useful_rate=useful_rate,
                 confidence=confidence,
                 reasons=reasons,
                 barren=bool(runs),
@@ -294,7 +370,7 @@ def rank(
 
     # Highest score first; ties break on evidence, then on the configured order
     # so the result is stable rather than arbitrary.
-    order = {role: i for i, role in enumerate(dict.fromkeys([*roles, *suggested_roles]))}
+    order = {role: i for i, role in enumerate(candidates)}
     scored.sort(key=lambda d: (-d.score, not d.has_evidence, order[d.keyword]))
 
     evidenced = sum(1 for d in scored if d.has_evidence)
@@ -341,10 +417,10 @@ def _build_notes(ranking: DirectionRanking, evidenced: int) -> list[str]:
         f"优先搜索「{best.keyword}」"
         + (f"：{'；'.join(best.reasons)}。" if best.reasons else "。")
     )
-    dropped = [d for d in ranking.directions if d.recommended == 0 and d.has_evidence]
+    dropped = [d for d in ranking.directions if d.useful == 0 and d.has_evidence]
     for direction in dropped:
         notes.append(
-            f"「{direction.keyword}」已搜过 {direction.jobs} 个岗位且无一推荐，已排到最后。"
+            f"「{direction.keyword}」已搜过 {direction.jobs} 个岗位，没有一个值得投递，已排到最后。"
         )
     suggested = [d.keyword for d in ranking.directions if d.suggested]
     if suggested:

@@ -177,6 +177,8 @@ def quick_prepare(
                 jobs=d.jobs,
                 recommended=d.recommended,
                 recommend_rate=d.recommend_rate,
+                useful=d.useful,
+                useful_rate=d.useful_rate,
                 has_evidence=d.has_evidence,
                 fit=d.fit,
                 fit_source=d.fit_source,

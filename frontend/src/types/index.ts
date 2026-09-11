@@ -2253,6 +2253,11 @@ export interface DirectionChoice {
   jobs: number
   recommended: number
   recommend_rate: number | null
+  /** Of `jobs`, how many turned out worth applying to: applied to or saved by
+   *  the user, or recommended by the model and not yet decided. The ranking
+   *  weighs this, not `recommended`. */
+  useful: number
+  useful_rate: number | null
   has_evidence: boolean
   fit: number
   fit_source: DirectionFitSource

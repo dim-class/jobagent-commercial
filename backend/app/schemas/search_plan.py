@@ -152,6 +152,10 @@ class DirectionChoiceOut(BaseModel):
     jobs: int = 0
     recommended: int = 0
     recommend_rate: float | None = None
+    #: Of `jobs`, how many turned out worth applying to - applied to or saved by
+    #: the user, or recommended and not yet decided. What the ranking weighs.
+    useful: int = 0
+    useful_rate: float | None = None
     has_evidence: bool = False
     #: 0-1. Read with `fit_source`: an AI judgement and a character-overlap
     #: guess are not the same claim and must not render identically.

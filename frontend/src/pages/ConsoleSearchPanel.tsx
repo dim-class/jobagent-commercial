@@ -1171,7 +1171,7 @@ export default function ConsoleSearchPanel() {
           <span className="small faint"> · 结合简历判断与历史结果，排序本身不消耗 AI 额度</span>
         </div>
         <table className="mt-1">
-          <thead><tr><th>方向</th><th>历史</th><th>匹配度</th><th>依据</th></tr></thead>
+          <thead><tr><th>方向</th><th title="你投递或收藏的，加上 AI 推荐但你还没处理的">历史（值得投递）</th><th>匹配度</th><th>依据</th></tr></thead>
           <tbody>
             {chosen.map(d => (
               <tr key={d.keyword}>
@@ -1179,8 +1179,10 @@ export default function ConsoleSearchPanel() {
                   {d.keyword}
                   {d.suggested ? <span className="chip" style={{ marginLeft: 6 }}>AI 补充</span> : null}
                 </td>
+                {/* The number that decided the order, not the model's own
+                    recommend count: a human decision overrides the verdict. */}
                 <td className="nowrap">
-                  {d.jobs ? `${d.recommended}/${d.jobs}` : '—'}
+                  {d.jobs ? `${d.useful}/${d.jobs}` : '—'}
                   {d.jobs && !d.has_evidence ? <span className="small faint"> 样本不足</span> : null}
                 </td>
                 {/* An AI judgement and a character count are different claims,

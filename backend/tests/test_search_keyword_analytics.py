@@ -187,3 +187,31 @@ def test_the_route_returns_the_same_numbers(client, db, active_resume):
     assert cohort["interval_low"] is not None and cohort["interval_high"] is not None
     assert body["attributed_jobs"] == 6
     assert any("不代表这些岗位更容易收到回复" in line for line in body["observations"])
+
+
+def test_useful_lets_what_the_user_did_override_the_verdict(db, active_resume):
+    """The direction ranking weighs this count, so its definition is pinned here.
+
+    The user's decision wins wherever one exists, and an undecided
+    recommendation still counts - a freshly searched keyword has a queue nobody
+    has read yet, and that is not a poor result.
+    """
+    cases = [
+        (Verdict.apply, JobStatus.applied, True),
+        (Verdict.apply, JobStatus.skipped, False),  # the user turned it down
+        (Verdict.apply, JobStatus.new, True),  # not decided yet
+        (Verdict.skip, JobStatus.applied, True),  # applied anyway
+        (Verdict.skip, JobStatus.saved, True),
+        (Verdict.skip, JobStatus.new, False),
+        (Verdict.maybe, JobStatus.reviewed, False),
+    ]
+    jobs = []
+    for n, (verdict, status, _) in enumerate(cases):
+        job = analyzed(db, active_resume, n, score=60, verdict=verdict)
+        job.status = status
+        jobs.append(job)
+    task_with(db, "云计算工程师", jobs)
+
+    cohort = next(c for c in ska.compute(db).cohorts if c.keyword == "云计算工程师")
+    assert cohort.useful == sum(1 for *_, useful in cases if useful)
+    assert cohort.recommended == 3, "the model's own count is unchanged"

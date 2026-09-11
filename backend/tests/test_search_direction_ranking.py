@@ -12,6 +12,7 @@ import hashlib
 import pytest
 
 from app.models import Job, JobAnalysis, JobSearchTask, JobStatus, TaskCandidate, Verdict
+from app.schemas.direction import DirectionFit, ResumeDirectionAnalysis
 from app.services import search_direction_ranking as sdr
 
 STRATEGY = {
@@ -34,8 +35,15 @@ CLOUD_RESUME = FakeResume(
 )
 
 
-def searched(db, resume, keyword: str, *, total: int, recommended: int) -> None:
-    """Give one direction a real history of surfaced jobs."""
+def searched(
+    db, resume, keyword: str, *, total: int, recommended: int, skipped: int = 0
+) -> None:
+    """Give one direction a real history of surfaced jobs.
+
+    The first `recommended` jobs carry an apply verdict, and the first `skipped`
+    of those the user then turned down. Every other job is still undecided.
+    """
+    assert skipped <= recommended
     task = JobSearchTask(name=f"北京 · {keyword}", keywords=keyword, city="北京")
     db.add(task)
     db.flush()
@@ -49,7 +57,7 @@ def searched(db, resume, keyword: str, *, total: int, recommended: int) -> None:
             raw_description="JD",
             normalized_description="jd",
             content_hash=hashlib.sha256(f"{keyword}-{i}".encode()).hexdigest(),
-            status=JobStatus.new,
+            status=JobStatus.skipped if i < skipped else JobStatus.new,
         )
         db.add(job)
         db.flush()
@@ -67,6 +75,15 @@ def searched(db, resume, keyword: str, *, total: int, recommended: int) -> None:
         )
         db.add(TaskCandidate(task_id=task.id, job_id=job.id))
     db.commit()
+
+
+def ai_fits(**fits: int) -> ResumeDirectionAnalysis:
+    return ResumeDirectionAnalysis(
+        directions=[
+            DirectionFit(keyword=k, fit=v, reason="简历里写过相关经历") for k, v in fits.items()
+        ],
+        summary="偏云与基础设施方向",
+    )
 
 
 def test_a_direction_matching_the_resume_outranks_one_that_does_not(db):
@@ -88,20 +105,68 @@ def test_a_direction_that_surfaced_nothing_is_pushed_to_the_end(db, active_resum
     empty = next(d for d in ranking.directions if d.keyword == "基础设施")
 
     assert order[-1] == "基础设施" or order.index("基础设施") > order.index("云计算工程师")
-    assert empty.recommended == 0
-    assert any("没有一个" in reason or "推荐率" in reason for reason in empty.reasons)
-    assert any("无一推荐" in note for note in ranking.notes)
+    assert empty.useful == 0
+    assert any("没有一个" in reason for reason in empty.reasons)
+    assert any("没有一个值得投递" in note for note in ranking.notes)
 
 
-def test_real_history_outweighs_a_text_overlap_guess(db, active_resume):
-    """A direction with a proven rate beats one that merely reads similar."""
-    searched(db, active_resume, "云平台工程师", total=12, recommended=6)
+def test_with_enough_history_the_record_decides_not_the_fit(db, active_resume):
+    """A direction that reads like the résumé but keeps surfacing nothing worth
+    applying to must rank below one that reads less like it and does.
+
+    Chosen so the old ``fit + recommend_rate * 2`` fails it: 基础设施 overlaps
+    the résumé at 75% against 50%, and a 13% record against a 3% one moved the
+    old score by only 0.2.
+    """
+    searched(db, active_resume, "基础设施", total=30, recommended=1)
+    searched(db, active_resume, "云平台工程师", total=30, recommended=4)
 
     ranking = sdr.rank(db, resume=CLOUD_RESUME, strategy=STRATEGY)
-    proven = next(d for d in ranking.directions if d.keyword == "云平台工程师")
-    assert proven.has_evidence is True
+    by_keyword = {d.keyword: d for d in ranking.directions}
+    assert by_keyword["基础设施"].fit > by_keyword["云平台工程师"].fit, "fit says the opposite"
+
+    order = [d.keyword for d in ranking.directions]
+    assert order.index("云平台工程师") < order.index("基础设施")
+    assert any("值得投递" in reason for reason in by_keyword["云平台工程师"].reasons)
+
+
+def test_the_models_noise_cannot_outvote_a_deep_record(db, active_resume):
+    """The 2026-09-11 ranking, scaled down.
+
+    The model judged 基础设施工程师 85 and 云运维工程师 58 - and the same model
+    read 云运维工程师 as 69, 80 and 58 on the same résumé - while the searches
+    said one useful posting in 22 against 16%. The old score put the
+    better-sounding direction first, and a four-city run never searched the
+    better one.
+    """
+    strategy = {"preferred_roles": ["基础设施工程师", "云运维工程师"], "relevant_skills": []}
+    searched(db, active_resume, "基础设施工程师", total=22, recommended=1)
+    searched(db, active_resume, "云运维工程师", total=50, recommended=8)
+
+    ranking = sdr.rank(
+        db, resume=active_resume, strategy=strategy, ai=ai_fits(基础设施工程师=85, 云运维工程师=58)
+    )
+    assert [d.keyword for d in ranking.directions] == ["云运维工程师", "基础设施工程师"]
+
+
+def test_a_recommendation_the_user_turned_down_is_not_a_useful_result(db, active_resume):
+    """What the user did outranks what the model thought.
+
+    On real data the recommend rate alone ranked 中间件工程师 - a quarter of
+    whose recommendations the user skipped - above WebSphere工程师, whose 25
+    recommendations were applied to 24 times.
+    """
+    strategy = {"preferred_roles": ["云计算工程师", "云平台工程师"], "relevant_skills": []}
+    searched(db, active_resume, "云计算工程师", total=20, recommended=8, skipped=6)
+    searched(db, active_resume, "云平台工程师", total=20, recommended=4)
+
+    ranking = sdr.rank(
+        db, resume=active_resume, strategy=strategy, ai=ai_fits(云计算工程师=70, 云平台工程师=70)
+    )
+    by_keyword = {d.keyword: d for d in ranking.directions}
+    assert by_keyword["云计算工程师"].recommended > by_keyword["云平台工程师"].recommended
+    assert (by_keyword["云计算工程师"].useful, by_keyword["云平台工程师"].useful) == (2, 4)
     assert ranking.directions[0].keyword == "云平台工程师"
-    assert any("历史推荐率" in reason for reason in proven.reasons)
 
 
 def test_a_thin_history_is_not_treated_as_evidence(db, active_resume):
@@ -154,6 +219,8 @@ def test_the_comprehensive_search_uses_the_ranking_and_reports_why(
     assert set(used) == {task["keywords"] for task in body["tasks"]}
     assert "基础设施" not in used or used[-1] == "基础设施"
     assert body["direction_notes"], "and why"
+    # The console's 历史 column renders the count the order was decided on.
+    assert all("useful" in d and "useful_rate" in d for d in body["directions"])
 
 
 # ---------------------------------------------------------------------------

@@ -420,8 +420,14 @@ was not. Its `/openapi.json` still advertised
 an error, a warning or a log line.
 
 Vite hot-reloads the frontend, so a long session drifts naturally into exactly
-this state: new UI talking to old routes. `scripts/dev.ps1 start -Reload` is
-what keeps the backend current.
+this state: new UI talking to old routes. `scripts\launch-console.ps1 -Reload`
+is what keeps the backend current - not `dev.ps1`, which has no such switch
+(its `start` always reloads). `Start-JobAgent.cmd` starts the backend without a
+file watcher, and `launch-console` reuses a backend that is already running, so
+a stale one has to be stopped first (`-Stop`). On 2026-09-11 the backend
+serving the console dated from 09-09 16:11: that day's search cooldown, task
+prune, narrowed task list and direction-ranking fix were all committed, and
+none of them was live.
 
 The console now checks rather than trusts. `SearchPlanTaskOut.search_url` is
 the URL the runner will actually navigate to, so after preparing, a run that

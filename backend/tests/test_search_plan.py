@@ -6,10 +6,24 @@ policy" M4e/M4f amendment.
 
 from __future__ import annotations
 
+import hashlib
+from datetime import datetime, timedelta, timezone
+
 import pytest
+from sqlalchemy import select
 
 from app.core.errors import NotFoundError, ValidationError
-from app.models import JobSearchTask, SearchTaskRunStatus
+from app.models import (
+    Job,
+    JobSearchTask,
+    JobStatus,
+    OrchestrationEvent,
+    SearchTaskRunStatus,
+    SupervisedSession,
+    TaskCandidate,
+    TaskMode,
+)
+from app.models.enums import OrchestrationEventType
 from app.services import boss_cities, boss_search_url, search_plan, search_task_runner, task_console
 
 
@@ -114,20 +128,24 @@ def test_prepare_resume_search_creates_a_fresh_bounded_resume_task(db, active_re
     first, resume_name = search_plan.prepare_resume_search(
         db, city="北京", target_count=7
     )
+    first_id = first.id
     second, _ = search_plan.prepare_resume_search(db, city="北京", target_count=7)
 
-    assert first.id != second.id
-    assert first.resume_id == active_resume.id
-    assert first.city == "北京"
-    assert first.city_id == "101010100"
+    # Fresh each time - and the first was prepared and never started, so the
+    # second prepare clears it instead of leaving it behind for good.
+    assert second.id > first_id
+    assert db.execute(select(JobSearchTask.id).where(JobSearchTask.id == first_id)).first() is None
+    assert second.resume_id == active_resume.id
+    assert second.city == "北京"
+    assert second.city_id == "101010100"
     from app.services.search_direction_ranking import _is_chinese
 
-    assert _is_chinese(first.keywords), "a Chinese direction still leads"
-    assert first.max_candidates == 7
-    assert first.run_status == SearchTaskRunStatus.pending
-    assert first.mode.value == "manual_review_only"
-    assert first.notes == search_plan.QUICK_SEARCH_NOTE
-    assert first.early_career_policy == "exclude"
+    assert _is_chinese(second.keywords), "a Chinese direction still leads"
+    assert second.max_candidates == 7
+    assert second.run_status == SearchTaskRunStatus.pending
+    assert second.mode.value == "manual_review_only"
+    assert second.notes == search_plan.QUICK_SEARCH_NOTE
+    assert second.early_career_policy == "exclude"
     assert resume_name == active_resume.display_name
 
 
@@ -567,3 +585,196 @@ def test_a_segmented_task_searches_the_url_its_filters_describe(db, active_resum
     url = build_search_url(task.city_id, task.keywords, task.search_filters_json)
     assert "salary=406" in url
     assert f"city={task.city_id}" in url
+
+
+# --------------------------------------------------------------------------
+# never-started quick searches are cleared, safely
+# --------------------------------------------------------------------------
+
+
+def _ids(db) -> set[int]:
+    return set(db.scalars(select(JobSearchTask.id)))
+
+
+def test_a_new_search_clears_the_previous_one_that_never_started(db, active_resume):
+    """Every 开始搜索 prepares a fresh batch, and one dismissed at its
+    confirmation used to stay forever: 532 of 889 rows on 2026-09-11, all
+    downloaded by the console on every refresh."""
+    first, _, _ = search_plan.prepare_resume_searches(db, cities=["北京"], target_count=3)
+    first_ids = {task.id for task in first}
+    second, _, _ = search_plan.prepare_resume_searches(db, cities=["北京"], target_count=3)
+    second_ids = {task.id for task in second}
+
+    left = _ids(db)
+    assert not left & first_ids, "the batch nobody started is gone"
+    assert second_ids <= left, "the one just prepared is not"
+
+
+def test_a_cleared_id_is_never_handed_to_a_new_task(db, active_resume):
+    """``job_search_tasks`` has no AUTOINCREMENT, so SQLite issues
+    ``max(rowid) + 1`` - delete the newest rows and their ids come straight back
+    for the next insert, while the extension's batch pointer still holds a
+    stopped batch's task ids. Inserting before pruning is what prevents it; this
+    fails the moment the order is swapped."""
+    batches = []
+    for _ in range(3):
+        tasks, _, _ = search_plan.prepare_resume_searches(db, cities=["北京"], target_count=3)
+        batches.append([task.id for task in tasks])
+    for earlier, later in zip(batches, batches[1:]):
+        assert min(later) > max(earlier), "a new batch reused a cleared id"
+
+
+def test_a_task_with_any_trace_at_all_survives(db, active_resume):
+    """No history to lose is the whole justification, so the slightest trace
+    keeps a row: a start, a supervised session, an event, a candidate, or a
+    finished run."""
+    tasks, _, _ = search_plan.prepare_resume_searches(db, cities=["北京"], target_count=3)
+    started, with_session, with_event, with_candidate, finished = tasks[:5]
+
+    started.run_started_at = datetime.now(timezone.utc)
+    db.add(SupervisedSession(
+        task_id=with_session.id, page_cap=1, candidate_cap=1, scroll_cap=1,
+        tab_origin="https://www.zhipin.com",
+    ))
+    db.add(OrchestrationEvent(task_id=with_event.id, event_type=OrchestrationEventType.opened))
+    job = Job(
+        source="boss", external_id="prunekeep1",
+        source_url="https://www.zhipin.com/job_detail/prunekeep1.html",
+        company="保留测试", title="云平台工程师", city="北京",
+        raw_description="x", normalized_description="x",
+        content_hash=hashlib.sha256(b"prune-keep").hexdigest(), status=JobStatus.reviewed,
+    )
+    db.add(job)
+    db.flush()
+    db.add(TaskCandidate(task_id=with_candidate.id, job_id=job.id))
+    finished.run_status = SearchTaskRunStatus.completed
+    finished.run_stopped_at = datetime.now(timezone.utc) - timedelta(days=2)
+    db.commit()
+    kept = {started.id, with_session.id, with_event.id, with_candidate.id, finished.id}
+    untouched = {task.id for task in tasks[5:]}
+
+    search_plan.prepare_resume_searches(db, cities=["上海"], target_count=3)
+
+    left = _ids(db)
+    assert kept <= left, "a row with any trace was deleted"
+    assert not untouched & left, "and the untouched ones still go"
+
+
+def test_tasks_the_plan_generator_made_are_never_cleared(db, active_resume):
+    """The popup lists these for a human to start one at a time."""
+    search_plan.generate_search_plan(db, cities=["北京"], keywords=["SRE"])
+    generated = _ids(db)
+    search_plan.prepare_resume_searches(db, cities=["北京"], target_count=3)
+    assert generated <= _ids(db)
+
+
+# --------------------------------------------------------------------------
+# a combination that just came back empty gives its slot away
+# --------------------------------------------------------------------------
+
+FOUR = ["北京", "上海", "广州", "杭州"]
+
+
+def _past_run(db, *, city, keyword, imported, hours_ago, filters=None, status=None):
+    """A completed run of one combination, ended ``hours_ago``.
+
+    ``observed_count`` is non-zero on purpose: two empty runs that saw no cards
+    would trip the keyword-wide *barren* rule and drop the keyword outright,
+    which is a different mechanism from the one under test.
+    """
+    stopped = datetime.now(timezone.utc) - timedelta(hours=hours_ago)
+    task = JobSearchTask(
+        name=f"{city} · {keyword} · 历史", keywords=keyword, city=city,
+        city_id=boss_cities.city_id_for(city), is_search_plan=True,
+        run_status=status or SearchTaskRunStatus.completed,
+        mode=TaskMode.manual_review_only, notes=search_plan.QUICK_SEARCH_NOTE,
+        early_career_policy="exclude", search_filters_json=filters or {},
+        run_started_at=stopped - timedelta(minutes=2), run_stopped_at=stopped,
+        observed_count=30, imported_jobs=imported,
+    )
+    db.add(task)
+    db.commit()
+    return task
+
+
+def _by_city(tasks) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for task in tasks:
+        out.setdefault(task.city, []).append(task.keywords)
+    return out
+
+
+def _plan(db, cities):
+    tasks, _, ranking = search_plan.prepare_resume_searches(db, cities=cities, target_count=3)
+    return _by_city(tasks), ranking
+
+
+def test_a_combination_that_just_came_back_empty_gives_its_slot_away(db, active_resume):
+    """Measured 2026-09-11: after one run that imported nothing, a rerun within
+    six hours found anything 33% of the time (93 runs) against 55% for any run.
+    Four cities leave four slots each, so the slot goes to the next direction."""
+    before, _ = _plan(db, FOUR)
+    lead = before["北京"][0]
+    _past_run(db, city="北京", keyword=lead, imported=0, hours_ago=1)
+
+    after, ranking = _plan(db, FOUR)
+
+    assert lead not in after["北京"], "the empty combination gave its slot away"
+    assert len(after["北京"]) == len(before["北京"]), "and the slot was refilled"
+    for city in ("上海", "广州", "杭州"):
+        assert after[city] == before[city], "per city: the same direction elsewhere is untouched"
+    assert any(f"北京 · {lead}" in note for note in ranking.notes), "and the plan says why"
+
+
+def test_with_slots_to_spare_it_still_runs_just_last(db, active_resume):
+    """Moved to the back, never removed: one city has more slots than
+    directions, and a one-in-three chance beats an empty slot."""
+    before, _ = _plan(db, ["北京"])
+    lead = before["北京"][0]
+    _past_run(db, city="北京", keyword=lead, imported=0, hours_ago=1)
+
+    after, ranking = _plan(db, ["北京"])
+
+    assert after["北京"][-1] == lead
+    assert sorted(after["北京"]) == sorted(before["北京"])
+    assert any("排在最后" in note and lead in note for note in ranking.notes)
+
+
+def test_an_empty_run_past_the_window_leaves_the_plan_alone(db, active_resume):
+    before, _ = _plan(db, FOUR)
+    hours = search_plan.SATURATION_WINDOW.total_seconds() / 3600
+    _past_run(db, city="北京", keyword=before["北京"][0], imported=0, hours_ago=hours + 1)
+    after, _ = _plan(db, FOUR)
+    assert after == before, "a cooldown, never a ban"
+
+
+def test_a_productive_run_after_an_empty_one_ends_the_cooldown(db, active_resume):
+    """Only the latest run of a combination counts."""
+    before, _ = _plan(db, FOUR)
+    lead = before["北京"][0]
+    _past_run(db, city="北京", keyword=lead, imported=0, hours_ago=3)
+    _past_run(db, city="北京", keyword=lead, imported=4, hours_ago=1)
+    after, _ = _plan(db, FOUR)
+    assert after == before
+
+
+def test_a_different_filter_is_a_different_list(db, active_resume):
+    """An empty run under 1-3年 says nothing about the unfiltered list."""
+    before, _ = _plan(db, FOUR)
+    _past_run(
+        db, city="北京", keyword=before["北京"][0], imported=0, hours_ago=1,
+        filters={"experience": "104"},
+    )
+    after, _ = _plan(db, FOUR)
+    assert after == before
+
+
+def test_a_failed_run_says_nothing_about_the_list(db, active_resume):
+    """A run that failed may have stopped before reading anything."""
+    before, _ = _plan(db, FOUR)
+    _past_run(
+        db, city="北京", keyword=before["北京"][0], imported=0, hours_ago=1,
+        status=SearchTaskRunStatus.failed,
+    )
+    after, _ = _plan(db, FOUR)
+    assert after == before

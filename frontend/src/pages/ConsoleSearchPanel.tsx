@@ -279,6 +279,12 @@ export default function ConsoleSearchPanel() {
     })
     .join(' ｜ ')
   const [selected, setSelected] = useState<number | null>(null)
+  // Mirrors for `refresh`, which is created once and would otherwise read these
+  // as they were on mount.
+  const portfolioIdsRef = useRef<number[]>([])
+  const selectedRef = useRef<number | null>(null)
+  useEffect(() => { portfolioIdsRef.current = portfolioTaskIds }, [portfolioTaskIds])
+  useEffect(() => { selectedRef.current = selected }, [selected])
   const [connection, setConnection] = useState<ConsoleReply | null>(null)
   const [backendReady, setBackendReady] = useState(false)
   const [backendDetail, setBackendDetail] = useState('检查中')
@@ -337,9 +343,26 @@ export default function ConsoleSearchPanel() {
     const sequence = ++refreshSequence.current
     setChecking(true)
     setBackendReady(false) // stale success must not enable start during a new probe
-    const [health, plan, bridge] = await Promise.allSettled([
-      api.health(AbortSignal.timeout(5000)), api.listSearchPlan(AbortSignal.timeout(5000)), consoleExtension('status'),
+    const [health, bridge] = await Promise.allSettled([
+      api.health(AbortSignal.timeout(5000)), consoleExtension('status'),
     ])
+    if (!alive.current || sequence !== refreshSequence.current) return
+    // Only the tasks this panel can show: the running batch, the one just
+    // prepared, and the selected task. The whole table used to come down here
+    // on every open, focus and 刷新状态 - 889 rows, 1023 KiB, 263 ms on
+    // 2026-09-11 - to look up about sixteen. The popup still asks for all.
+    const pointer = bridge.status === 'fulfilled' && assessConsoleConnection(bridge.value).ready
+      ? bridge.value.batch?.taskIds ?? []
+      : []
+    const shown = (): number[] => [...new Set([
+      ...pointer,
+      ...portfolioIdsRef.current,
+      ...(selectedRef.current === null ? [] : [selectedRef.current]),
+    ])]
+    const plan = await api.listSearchPlan(AbortSignal.timeout(5000), shown()).then(
+      value => ({ status: 'fulfilled' as const, value }),
+      (reason: unknown) => ({ status: 'rejected' as const, reason }),
+    )
     if (!alive.current || sequence !== refreshSequence.current) return
     const healthy = health.status === 'fulfilled' && health.value?.status === 'ok' && health.value.database === 'ok'
     const planOk = plan.status === 'fulfilled' && Array.isArray(plan.value?.items)
@@ -347,7 +370,18 @@ export default function ConsoleSearchPanel() {
     setBackendDetail(healthy ? '后端和数据库正常' : health.status === 'fulfilled'
       ? '健康检查未通过；不是扩展连接错误' : '健康检查失败或超时；请检查本机 8000 服务')
     setPlanDetail(planOk ? '任务 API 正常' : '任务 API 不可用；请检查后端版本或服务')
-    if (planOk && plan.status === 'fulfilled') setTasks(plan.value.items)
+    if (planOk && plan.status === 'fulfilled') {
+      const fresh = plan.value.items
+      // Merged, not replaced: a search prepared while this request was in
+      // flight is already in state, and a response that predates it must not
+      // drop it - the batch confirmation checks those very rows.
+      setTasks(current => {
+        const byId = new Map(current.map(row => [row.id, row]))
+        for (const row of fresh) byId.set(row.id, row)
+        const keep = new Set(shown())
+        return [...byId.values()].filter(row => keep.has(row.id))
+      })
+    }
     if (bridge.status === 'fulfilled') {
       const assessment = assessConsoleConnection(bridge.value)
       setConnection(assessment.ready ? bridge.value : null)

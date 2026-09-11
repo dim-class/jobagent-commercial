@@ -248,7 +248,13 @@ export interface JobFilters {
 
 export const api = {
   health: (signal?: AbortSignal) => request<HealthResponse>('/health', { signal }),
-  listSearchPlan: (signal?: AbortSignal) => request<{ items: SearchPlanTask[] }>('/api/tasks/search-plan', { signal }),
+  // Bare, every search-plan task (what the extension popup needs). With `ids`,
+  // only those - the console refreshes on every focus and has no use for the rest.
+  listSearchPlan: (signal?: AbortSignal, ids?: number[]) =>
+    request<{ items: SearchPlanTask[] }>(
+      ids === undefined ? '/api/tasks/search-plan' : `/api/tasks/search-plan?ids=${ids.join(',')}`,
+      { signal },
+    ),
   getSearchPlanOptions: (signal?: AbortSignal) =>
     request<SearchPlanOptions>('/api/tasks/search-plan/options', { signal }),
   generateSearchPlan: (city: string, keyword: string) =>

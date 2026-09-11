@@ -67,3 +67,16 @@ test('nothing that decides or advances a run is hidden behind 高级设置', () 
   const rest = panel.slice(advanced)
   assert.doesNotMatch(rest, /<summary/, 'no folds nested inside the collapsed block')
 })
+
+test('a refresh downloads only the tasks the panel shows', () => {
+  // The console refreshes on open, on focus and on every 刷新状态, and each time
+  // pulled the whole task table: 889 rows, 1023 KiB, 263 ms on 2026-09-11, to
+  // look up about sixteen. The extension popup still lists every task, so only
+  // the console's call narrows - the bare endpoint keeps its old answer.
+  assert.match(panel, /api\.listSearchPlan\(AbortSignal\.timeout\(5000\), shown\(\)\)/)
+  assert.doesNotMatch(panel, /api\.listSearchPlan\(AbortSignal\.timeout\(5000\)\)/)
+  // Merged rather than replaced, so a search prepared mid-request survives.
+  assert.match(panel, /setTasks\(current => \{[\s\S]*?byId\.set\(row\.id, row\)/)
+  const client = fs.readFileSync(path.join(__dirname, '../src/api/client.ts'), 'utf8')
+  assert.match(client, /ids === undefined \? '\/api\/tasks\/search-plan'/)
+})

@@ -22,6 +22,8 @@ supervised navigation policy" M4e/M4f amendment.
 from __future__ import annotations
 
 from fastapi import APIRouter, Body, Depends, Request, Query
+
+from app.core.errors import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -242,14 +244,40 @@ def direction_analyze(
     )
 
 
+#: A whole batch plus the task a human selected, with room to spare. A list any
+#: longer is not something the console asks for.
+_MAX_LISTED_IDS = 64
+
+
+def _parse_task_ids(raw: str) -> list[int]:
+    parts = [part.strip() for part in raw.split(",") if part.strip()]
+    if len(parts) > _MAX_LISTED_IDS or not all(part.isascii() and part.isdigit() for part in parts):
+        raise ValidationError("任务 id 列表格式不正确。", detail={"ids": raw[:80]})
+    return sorted({int(part) for part in parts})
+
+
 @router.get("/search-plan", response_model=SearchPlanTaskListResponse)
-def list_search_plan(request: Request, db: Session = Depends(get_db)) -> SearchPlanTaskListResponse:
+def list_search_plan(
+    request: Request,
+    ids: str | None = Query(default=None, max_length=512),
+    db: Session = Depends(get_db),
+) -> SearchPlanTaskListResponse:
+    """Search-plan tasks, oldest first.
+
+    Bare, it returns every one - the extension popup needs that to offer a task
+    to start. With ``ids`` it returns only those: the console refreshes on open,
+    on focus and on every 刷新状态, and was downloading all 889 rows (1023 KiB,
+    263 ms, measured 2026-09-11) to look up the sixteen or so it shows. An empty
+    ``ids`` is an empty answer, never "everything".
+    """
     require_loopback(request)
-    tasks = db.scalars(
-        select(JobSearchTask)
-        .where(JobSearchTask.is_search_plan.is_(True))
-        .order_by(JobSearchTask.id.asc())
-    ).all()
+    query = select(JobSearchTask).where(JobSearchTask.is_search_plan.is_(True))
+    if ids is not None:
+        wanted = _parse_task_ids(ids)
+        if not wanted:
+            return SearchPlanTaskListResponse(items=[])
+        query = query.where(JobSearchTask.id.in_(wanted))
+    tasks = db.scalars(query.order_by(JobSearchTask.id.asc())).all()
     return SearchPlanTaskListResponse(items=[_task_out(t) for t in tasks])
 
 

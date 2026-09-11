@@ -13,12 +13,22 @@ idempotent.
 
 from __future__ import annotations
 
-from sqlalchemy import select
+import json
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import delete, exists, func, select
 from sqlalchemy.orm import Session
 
 from app.core.career_strategy import load_strategy
 from app.core.errors import ValidationError
-from app.models import JobSearchTask, SearchTaskRunStatus, TaskMode
+from app.models import (
+    JobSearchTask,
+    OrchestrationEvent,
+    SearchTaskRunStatus,
+    SupervisedSession,
+    TaskCandidate,
+    TaskMode,
+)
 from app.services.boss_cities import city_id_for
 from app.services import boss_search_filters, direction_analysis
 from app.services.job_matcher import get_active_resume
@@ -63,6 +73,19 @@ MAX_SEARCH_DIRECTIONS = 16
 MAX_TARGET_COUNT = 60
 MAX_SELECTED_CITIES = 4
 
+#: How long a (city, direction, filters) combination whose last run came back
+#: with nothing new is moved to the back of the plan.
+#:
+#: Measured on the user's own run history (2026-09-11), not chosen: after one
+#: completed run that imported nothing, rerunning the same combination within
+#: six hours found anything 33% of the time (93 runs) against 55% for any
+#: completed run; past six hours it was 63% (35 runs). BOSS's list for a query
+#: does not turn over within hours, so a same-day rerun mostly re-reads cards
+#: the library already holds - which is what 111 of the 144 completed runs that
+#: imported nothing were. Past the window the odds are ordinary again, so this
+#: is a cooldown and never a ban.
+SATURATION_WINDOW = timedelta(hours=6)
+
 
 def _is_chinese(text: str) -> bool:
     return any("一" <= char <= "鿿" for char in text)
@@ -95,6 +118,123 @@ def resume_search_keywords(strategy: dict, *, limit: int) -> list[str]:
 def _resume_search_keyword(strategy: dict) -> str:
     """Single-keyword form, for callers that genuinely want just one."""
     return resume_search_keywords(strategy, limit=1)[0]
+
+
+def _as_utc(value: datetime) -> datetime:
+    """SQLite returns a naive datetime even for a timezone-aware column."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
+def _filters_key(filters: dict[str, str] | None) -> str:
+    return json.dumps(filters or {}, sort_keys=True, ensure_ascii=False)
+
+
+def cooling_combinations(
+    db: Session,
+    *,
+    cities: list[str],
+    now: datetime | None = None,
+) -> dict[tuple[str, str, str], datetime]:
+    """Combinations whose latest completed run imported nothing, recently.
+
+    Keyed by ``(city, keyword, filters)`` and mapped to when that run ended.
+    Per city on purpose: the ranking's ``_barren_keywords`` is keyword-wide and
+    fires only on zero cards *seen*, so it could see neither 「北京 · 云计算工程师」
+    re-reading cards the library already held while the same keyword still
+    produced elsewhere, nor any empty run that saw cards at all - 111 of 144.
+
+    Only the LATEST completed run of a combination counts, so a productive run
+    after an empty one ends the cooldown at once. A failed or cancelled run says
+    nothing about the list and is ignored. No model call, no network.
+    """
+
+    since = (now or datetime.now(timezone.utc)) - SATURATION_WINDOW
+    rows = db.execute(
+        select(
+            JobSearchTask.city,
+            JobSearchTask.keywords,
+            JobSearchTask.search_filters_json,
+            JobSearchTask.imported_jobs,
+            JobSearchTask.run_stopped_at,
+        )
+        .where(
+            JobSearchTask.is_search_plan.is_(True),
+            JobSearchTask.run_status == SearchTaskRunStatus.completed,
+            JobSearchTask.city.in_(cities),
+            JobSearchTask.run_stopped_at.is_not(None),
+        )
+        .order_by(JobSearchTask.run_stopped_at.asc(), JobSearchTask.id.asc())
+    ).all()
+    latest: dict[tuple[str, str, str], tuple[int, datetime]] = {}
+    for city, keyword, filters, imported, stopped in rows:
+        latest[(city, keyword, _filters_key(filters))] = (imported or 0, _as_utc(stopped))
+    return {
+        key: stopped
+        for key, (imported, stopped) in latest.items()
+        if imported == 0 and stopped >= since
+    }
+
+
+def _cooling_notes(deferred: list[str], ran_last: list[str]) -> list[str]:
+    """Template sentences, like every other ranking note - re-derivable and checkable."""
+
+    hours = int(SATURATION_WINDOW.total_seconds() // 3600)
+
+    def listing(items: list[str]) -> str:
+        head = "、".join(items[:6])
+        return head if len(items) <= 6 else f"{head} 等 {len(items)} 个"
+
+    notes: list[str] = []
+    if deferred:
+        notes.append(
+            f"{listing(deferred)} 最近 {hours} 小时内搜过且没有新岗位，这次先不重复搜，"
+            "名额顺延给了后面的方向。BOSS 的列表几小时内不太会换新，马上重搜多半只会看到库里已有的岗位。"
+        )
+    if ran_last:
+        notes.append(
+            f"{listing(ran_last)} 最近 {hours} 小时内搜过且没有新岗位，"
+            "但其他方向不够填满名额，这次排在最后。"
+        )
+    return notes
+
+
+def _prune_untouched_quick_tasks(db: Session, *, below_id: int) -> int:
+    """Delete quick-search tasks that were prepared and never touched in any way.
+
+    Every 开始搜索 prepares a fresh batch, and one dismissed at its confirmation
+    used to stay behind for good: on 2026-09-11, 532 of 889 search-plan rows
+    were exactly that - no start, no candidate, no session, no event - and the
+    console downloaded every one of them on each refresh. Such a row has no
+    history to lose, so it is removed rather than hidden.
+
+    Anything with the slightest trace is kept: a start timestamp, a candidate,
+    a supervised session, an orchestration event, and every completed, failed or
+    cancelled run. So is every task the M4e generator made - the popup lists
+    those for a human to start one at a time, and they were never this
+    function's to clear.
+
+    ``below_id`` is what makes deleting safe at all. ``job_search_tasks`` has no
+    AUTOINCREMENT, so SQLite issues ``max(rowid) + 1`` and would hand a deleted
+    id straight back out if the highest rows went - while the extension's batch
+    pointer keeps a stopped batch's task ids. The caller inserts the new batch
+    FIRST and passes its lowest id, so every deleted row sits below a row that
+    survives and no deleted id can ever be issued again.
+    """
+
+    untouched = select(JobSearchTask.id).where(
+        JobSearchTask.is_search_plan.is_(True),
+        JobSearchTask.notes == QUICK_SEARCH_NOTE,
+        JobSearchTask.run_status == SearchTaskRunStatus.pending,
+        JobSearchTask.run_started_at.is_(None),
+        JobSearchTask.id < below_id,
+        ~exists().where(TaskCandidate.task_id == JobSearchTask.id),
+        ~exists().where(SupervisedSession.task_id == JobSearchTask.id),
+        ~exists().where(OrchestrationEvent.task_id == JobSearchTask.id),
+    )
+    doomed = list(db.scalars(untouched))
+    if doomed:
+        db.execute(delete(JobSearchTask).where(JobSearchTask.id.in_(doomed)))
+    return len(doomed)
 
 
 def prepare_resume_searches(
@@ -150,19 +290,43 @@ def prepare_resume_searches(
         strategy=strategy,
         ai=direction_analysis.cached_analysis(db),
     )
-    keywords = ranking.top(limit) or resume_search_keywords(strategy, limit=limit)
+    # The whole usable order, not only the first `limit`: a city whose leading
+    # directions are cooling refills from the ones after them. With nothing
+    # cooling this is exactly `ranking.top(limit)`, as before.
+    ordered = ranking.top(len(ranking.directions)) or resume_search_keywords(strategy, limit=limit)
+    cooling = cooling_combinations(db, cities=normalized_cities)
+    segment_keys = [_filters_key(segment) for segment in segments]
     early_career_policy = str(strategy["early_career_policy"])
-    previous = db.scalars(
-        select(JobSearchTask)
-        .where(JobSearchTask.notes == QUICK_SEARCH_NOTE)
-        .order_by(JobSearchTask.id.asc())
-    ).all()
-    run_number = len(previous) + 1
+    # From the highest id rather than a count of earlier quick runs: runs that
+    # never started are pruned below, so a count would go backwards and hand the
+    # same number out twice.
+    run_number = (db.scalar(select(func.max(JobSearchTask.id))) or 0) + 1
+    chosen_by_city: dict[str, list[str]] = {}
+    deferred: list[str] = []
+    ran_last: list[str] = []
+    for city in normalized_cities:
+        # Cooling moves a direction to the BACK of this city's order; it does
+        # not remove it. In a multi-city batch, where four cities leave four
+        # slots each, it simply falls off. In a single-city batch with fewer
+        # directions than slots it still runs, last - a one-in-three chance
+        # beats an empty slot. It cools only when EVERY segment of this plan is
+        # cooling for it: a salary band not searched today is a different list.
+        stale = [
+            keyword
+            for keyword in ordered
+            if all((city, keyword, key) in cooling for key in segment_keys)
+        ]
+        fresh = [keyword for keyword in ordered if keyword not in stale]
+        chosen = (fresh + stale)[:limit]
+        chosen_by_city[city] = chosen
+        deferred += [f"{city} · {keyword}" for keyword in stale if keyword not in chosen]
+        ran_last += [f"{city} · {keyword}" for keyword in stale if keyword in chosen]
+    ranking.notes.extend(_cooling_notes(deferred, ran_last))
     tasks: list[JobSearchTask] = []
     pairs = [
         (city, keyword, segment)
         for city in normalized_cities
-        for keyword in keywords
+        for keyword in chosen_by_city[city]
         for segment in segments
     ]
     for offset, (city, keyword, segment) in enumerate(pairs):
@@ -187,6 +351,12 @@ def prepare_resume_searches(
         )
         db.add(task)
         tasks.append(task)
+    # Insert first, prune second, in one transaction: the new rows take ids
+    # above everything that exists, so every row the prune removes lies below a
+    # survivor and SQLite can never reissue its id (see the prune's docstring).
+    db.flush()
+    if tasks:
+        _prune_untouched_quick_tasks(db, below_id=min(task.id for task in tasks))
     db.commit()
     for task in tasks:
         db.refresh(task)

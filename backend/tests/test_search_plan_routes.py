@@ -404,3 +404,38 @@ def test_no_salary_codes_behaves_exactly_as_before(client, active_resume):
     )
     assert response.status_code == 200
     assert all("salary=" not in task["name"] for task in response.json()["tasks"])
+
+
+def test_the_list_narrows_to_the_ids_the_console_asks_for(client):
+    """The console refreshes on open, on focus and on every 刷新状态, and was
+    downloading every task each time - 889 rows, 1023 KiB, 263 ms on 2026-09-11
+    - to look up about sixteen. `ids` narrows it. The bare call is unchanged,
+    because the extension popup lists every task to offer one to start."""
+    client.post(
+        "/api/tasks/search-plan/generate",
+        json={"cities": ["北京"], "keywords": ["SRE", "AWS", "DevOps"]},
+    )
+    everything = client.get("/api/tasks/search-plan").json()["items"]
+    assert len(everything) == 3, "the bare call still returns every task"
+    first, _, last = (task["id"] for task in everything)
+    narrowed = client.get(f"/api/tasks/search-plan?ids={last},{first}").json()["items"]
+    assert [task["id"] for task in narrowed] == [first, last], "only those, oldest first"
+
+
+def test_an_empty_id_list_is_an_empty_answer_never_everything(client):
+    client.post("/api/tasks/search-plan/generate", json={"cities": ["北京"], "keywords": ["SRE"]})
+    response = client.get("/api/tasks/search-plan?ids=")
+    assert response.status_code == 200
+    assert response.json() == {"items": []}
+
+
+def test_the_id_filter_never_reaches_a_manual_task(client, db):
+    from app.services import task_console
+
+    manual = task_console.create_task(db, name="手动任务")
+    assert client.get(f"/api/tasks/search-plan?ids={manual.id}").json() == {"items": []}
+
+
+@pytest.mark.parametrize("raw", ["1,abc", "-1", "1;2", "１"])
+def test_a_malformed_id_list_is_refused(client, raw):
+    assert client.get("/api/tasks/search-plan", params={"ids": raw}).status_code == 422

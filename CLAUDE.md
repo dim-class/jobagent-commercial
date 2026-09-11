@@ -2533,6 +2533,65 @@ Deterministic, no model call, and a different claim from "these jobs are a poor
 match": that is a judgement the ranking makes, this is a fact the search itself
 established, twice.
 
+**A combination that just came back empty gives its slot away (2026-09-11).**
+The barren rule above sees only keywords that render *no cards*, keyword-wide.
+It could not see the far larger waste, measured on the user's own history: of
+321 completed runs, **144 imported nothing, and 111 of those had seen cards -
+2536 of them, every one already in the library**. They clustered on 北京 ×
+云计算/云平台/云运维/WebSphere/中间件, and new postings per 100 cards seen fell
+24 -> 11 -> 9.5 -> 6.3 over a week.
+
+`cooling_combinations()` reads the latest completed run of each (city, keyword,
+filters), and `prepare_resume_searches` moves a combination whose last run
+imported nothing within `SATURATION_WINDOW` to the **back of that city's
+order**. Three decisions, each taken from the data rather than chosen:
+
+- **six hours, not days.** After one empty run, a rerun within 6 h found
+  anything 33% of the time (93 runs) against a 55% baseline; past 6 h, 63%
+  (35 runs). BOSS's list does not turn over within hours, so the waste is the
+  same-day rerun, and a longer cooldown would skip combinations that had
+  already recovered. One empty run is enough signal - requiring two gave 29%
+  on a smaller sample and caught fewer;
+- **per city and per filter set, never per keyword.** The same keyword kept
+  producing in other cities, and an empty run under 1-3年 says nothing about the
+  unfiltered list (the first filtered day found 22 per 100 cards against 6 the
+  day before - one day, a hint rather than a finding). With several segments a
+  combination only cools when every segment is cooling for it;
+- **moved back, not dropped.** In a four-city batch each city has four slots,
+  so a cooling combination simply falls off. In a single-city batch with slots
+  to spare it still runs, last, because a one-in-three chance beats an empty
+  slot. The barren rule drops because 0% is 0%; this one is 33%.
+
+Only the latest run counts, so a productive rerun ends the cooldown at once. A
+failed or cancelled run is ignored - it may have stopped before reading
+anything. The direction notes name every combination that gave its slot away.
+Deterministic, no model call.
+
+**Never-started quick searches are deleted, and the console fetches only what
+it shows (2026-09-11).** Every 开始搜索 prepares a fresh batch by design, and a
+batch dismissed at its confirmation stayed forever: 889 search-plan rows, **532
+of them quick-search rows nobody had ever touched**, and the console downloaded
+all of them on every open, focus and 刷新状态 - **1023 KiB, 263 ms**, to look up
+about sixteen.
+
+- `GET /api/tasks/search-plan?ids=` narrows the list, and the console passes the
+  running batch, the prepared portfolio and the selected task. **The bare call
+  is unchanged**, because the extension popup lists every task to offer one to
+  start. An empty `ids` is an empty answer, never "everything". The console
+  merges rather than replaces, so a search prepared mid-request is not dropped
+  by a response that predates it;
+- `prepare_resume_searches` deletes quick-search rows that are pending, never
+  started, and carry **no candidate, no supervised session and no orchestration
+  event** - rows with no history to lose. Every finished run and every
+  M4e-generated task (the popup's) is kept;
+- **insert first, prune second.** `job_search_tasks` has no AUTOINCREMENT, so
+  SQLite issues `max(rowid) + 1` and would reissue a deleted id if the newest
+  rows went - while the extension's batch pointer keeps a stopped batch's task
+  ids. The new batch is flushed first and only rows below its lowest id are
+  pruned, so no deleted id can come back; a test fails the moment the order is
+  swapped. Run numbers in task names come from the highest id for the same
+  reason - a count of earlier runs would go backwards.
+
 - **suggested keywords are used, never written.** The model may propose Chinese
   keywords the strategy lacks (a résumé saying 基础设施工程师 while the strategy
   only lists the English `Infrastructure Engineer`). They join *this* search and

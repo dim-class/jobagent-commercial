@@ -112,6 +112,32 @@ function explainM6Failure(code: string | undefined, message: string): string {
 
 type Feedback = { tone: 'success' | 'error' | 'info' | 'warn'; text: string } | null
 
+//: 「我的经验年数」 is a fact about the person, not a per-visit filter, so it is
+//: remembered in this browser. It used to reset to 不限 on every visit, which put
+//: the 3+ year postings collected before the search-side experience filter
+//: existed back into view each time.
+const EXPERIENCE_YEARS_KEY = 'jobagent.queue.maxRequiredYears'
+
+/** Every access guarded: a private window or blocked site data throws rather
+ *  than returning empty, and an unusable store must not stop the page. */
+function loadRememberedYears(): number | undefined {
+  try {
+    const stored = Number(window.localStorage.getItem(EXPERIENCE_YEARS_KEY))
+    return Number.isInteger(stored) && stored >= 1 && stored <= 30 ? stored : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function rememberYears(years: number | undefined): void {
+  try {
+    if (years === undefined) window.localStorage.removeItem(EXPERIENCE_YEARS_KEY)
+    else window.localStorage.setItem(EXPERIENCE_YEARS_KEY, String(years))
+  } catch {
+    /* Not being able to remember it is not a reason to stop filtering. */
+  }
+}
+
 const SORT_LABEL: Record<string, string> = {
   recommended: '推荐优先',
   score: '匹配分',
@@ -142,7 +168,12 @@ export default function ApplicationQueuePage() {
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
   const [selected, setSelected] = useState<Set<number>>(new Set())
 
-  const [filters, setFilters] = useState<QueueFilters>({ sort: 'recommended', limit: 100 })
+  const [filters, setFilters] = useState<QueueFilters>(() => {
+    const years = loadRememberedYears()
+    return years === undefined
+      ? { sort: 'recommended', limit: 100 }
+      : { sort: 'recommended', limit: 100, max_required_years: years }
+  })
   //: Off by default: this records real actions, so it is opened deliberately.
   const [showBackfill, setShowBackfill] = useState(false)
   const [keywordInput, setKeywordInput] = useState('')
@@ -247,6 +278,7 @@ export default function ApplicationQueuePage() {
 
   function updateFilter<K extends keyof QueueFilters>(key: K, value: QueueFilters[K]) {
     setFilters((prev) => ({ ...prev, [key]: value }))
+    if (key === 'max_required_years') rememberYears(typeof value === 'number' ? value : undefined)
   }
 
   async function run(jobId: number, action: () => Promise<{ message: string }>) {
@@ -785,6 +817,8 @@ export default function ApplicationQueuePage() {
             onClick={() => {
               setKeywordInput('')
               setFilters({ sort: 'recommended', limit: 100 })
+              // Reset means reset: the remembered experience goes with it.
+              rememberYears(undefined)
             }}
           >
             重置筛选

@@ -2689,8 +2689,16 @@ Unique indexes that matter: `jobs.content_hash`, `(jobs.source, external_id)`,
   Never put it in React, never commit it, never log it, never return it from an
   API, never store it in SQLite. `services/ai_settings.py` lets the user *set*
   one from the app (so a new user need not edit a file and restart): it writes
-  the same `.env`, clears `get_settings`'s cache so it takes effect at once,
-  and returns only whether a key is configured plus its last four characters.
+  the `.env` that `Settings` reads, clears `get_settings`'s cache so it takes
+  effect at once, and returns only whether a key is configured plus its last
+  four characters. **It asks `Settings` which file that is (2026-09-15).** It
+  used to write `backend/.env` while the app read the project-root `.env`
+  (`data/.env` when packaged), so a key saved from the app went nowhere under
+  a 「已保存，立即生效」 note - and its tests stayed green, because none read a
+  saved value back through `get_settings()`. A process environment variable
+  still outranks the file; `overridden` names it rather than letting the page
+  claim a save worked. With no key configured, every page's banner carries the
+  key field itself: no screen tells the user to edit a file or restart.
   Reading one back, storing it anywhere else, or logging it stays forbidden -
   a test asserts the saved key reaches neither the response nor the log.
   `OPENAI_BASE_URL` is how this project supports providers other than OpenAI:

@@ -2380,7 +2380,11 @@ export interface AiSettingsOut {
   base_url: string
   model_fast: string
   model_smart: string
+  /** The file the backend reads, which is the file a save writes. */
   env_path: string
+  /** Names set in the backend's process environment. They outrank the file,
+   *  so a value saved for one of these is written and then not used. */
+  overridden: string[]
 }
 
 /** Absent fields are left unchanged. */

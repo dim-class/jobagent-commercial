@@ -43,8 +43,8 @@ def require_openai(settings: Settings | None = None) -> Settings:
     cfg = settings or get_settings()
     if not cfg.openai_configured:
         raise MissingApiKeyError(
-            "未配置 OPENAI_API_KEY，AI 分析功能不可用。"
-            "请在项目根目录的 .env 文件中设置 OPENAI_API_KEY 后重启后端。",
+            "未配置 API Key（OPENAI_API_KEY），AI 分析功能不可用。"
+            "请到「设置」页填写，保存后立即生效，不需要重启后端。",
             detail={"env_var": "OPENAI_API_KEY", "env_file": ".env"},
         )
     return cfg

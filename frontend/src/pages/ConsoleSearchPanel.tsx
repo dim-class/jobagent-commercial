@@ -672,7 +672,7 @@ export default function ConsoleSearchPanel() {
       if (activeExpCode && !nextTasks.some(row => (row.search_url || '').includes('experience='))) {
         throw new Error(
           '已选择经验档，但后端建出来的搜索没有带上它——后端进程多半还是改动前的版本。'
-          + '请重启后端（scripts\dev.ps1 start）后重试；这批任务不带筛选，建议删掉重建。',
+          + '请双击 Stop-JobAgent.cmd、再双击 Start-JobAgent.cmd 重启后重试；这批任务不带筛选，建议删掉重建。',
         )
       }
       const nextIds = new Set(nextTasks.map(row => row.id))

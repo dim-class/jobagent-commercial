@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import { announceAiSettingsSaved } from '@/api/aiSettingsEvents'
 import { ApiError, api } from '@/api/client'
 import { Alert, Card, Loading } from '@/components/ui'
 import type { AiSettingsOut, AppSettings, BatchAnalyzeResponse } from '@/types'
@@ -11,8 +12,9 @@ export default function SettingsPage() {
   const [batchResult, setBatchResult] = useState<BatchAnalyzeResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   //: The key is typed here and goes straight to the backend, which writes it
-  //: to `.env`. It is never read back: the field starts empty every time and
-  //: the page only ever learns whether one is set and its last four chars.
+  //: to the `.env` it reads. It is never read back: the field starts empty
+  //: every time and the page only ever learns whether one is set and its last
+  //: four chars.
   const [ai, setAi] = useState<AiSettingsOut | null>(null)
   const [apiKey, setApiKey] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
@@ -20,6 +22,7 @@ export default function SettingsPage() {
   const [modelSmart, setModelSmart] = useState('')
   const [aiBusy, setAiBusy] = useState(false)
   const [aiNote, setAiNote] = useState('')
+  const [aiWarn, setAiWarn] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -56,19 +59,33 @@ export default function SettingsPage() {
 
   async function saveAi() {
     if (aiBusy) return
-    setAiBusy(true); setAiNote(''); setError(null)
+    const typedKey = apiKey.trim()
+    setAiBusy(true); setAiNote(''); setAiWarn(''); setError(null)
     try {
       const saved = await api.saveAiSettings({
         // An empty box means "leave it alone", never "erase it" - otherwise
         // saving a model name would silently wipe the key.
-        ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
+        ...(typedKey ? { api_key: typedKey } : {}),
         base_url: baseUrl.trim(),
         model_fast: modelFast.trim(),
         model_smart: modelSmart.trim(),
       })
-      setAi(saved)
       setApiKey('')
-      setAiNote('已保存，立即生效，不需要重启后端。')
+      // An environment variable outranks the file, so a value saved for one of
+      // those was written and will not be used - and 「立即生效」 over that
+      // would be the same false note this page once showed for every save.
+      const shadowed = (saved.overridden ?? [])
+        .filter(name => name !== 'OPENAI_API_KEY' || typedKey)
+      if (shadowed.length) {
+        setAiWarn(`已写入，但后端进程里设置了同名环境变量 ${shadowed.join('、')}，它们优先，这次保存的对应值不会被使用。`)
+      } else {
+        setAiNote('已保存，立即生效，不需要重启后端。')
+      }
+      announceAiSettingsSaved()
+      // 「未配置」 and the disabled 批量分析 button read `settings`, which the
+      // save alone never refreshed: a key saved here left both saying it was
+      // missing until the page was reloaded.
+      await load()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : '保存失败')
     } finally { setAiBusy(false) }
@@ -82,7 +99,7 @@ export default function SettingsPage() {
       <header className="page-head">
         <div>
           <h1>设置</h1>
-          <p>运行时配置只读展示。所有密钥都保存在后端的 .env 中，前端永远拿不到。</p>
+          <p>AI 接口在这里填写，保存后立即生效；其余为只读展示。密钥只保存在本机后端，前端拿不到。</p>
         </div>
         <div className="page-actions">
           <button type="button" onClick={() => void load()}>
@@ -97,7 +114,7 @@ export default function SettingsPage() {
         <p className="small faint">
           支持任何 <strong>OpenAI 兼容</strong>的接口：留空就是 OpenAI 官方；
           DeepSeek、Moonshot、通义等填各自的接口地址即可。
-          Key 只写进后端的 <span className="mono">{ai?.env_path ?? 'backend/.env'}</span>，
+          Key 只写进后端读取的 <span className="mono">{ai?.env_path ?? '.env'}</span>，
           不进数据库、不进日志、不会被任何接口返回。
         </p>
         <div className="field">
@@ -133,32 +150,17 @@ export default function SettingsPage() {
           </button>
           {aiNote ? <span className="small faint">{aiNote}</span> : null}
         </div>
+        {aiWarn ? <p className="small mt-1" role="alert">{aiWarn}</p> : null}
       </Card>
 
-      {!settings.openai_configured ? (
-        <Alert tone="warn">
-          未检测到 <code className="mono">OPENAI_API_KEY</code>。在项目根目录复制{' '}
-          <code className="mono">.env.example</code> 为 <code className="mono">.env</code>，填入密钥后重启后端。
-        </Alert>
-      ) : null}
-
       <div className="grid grid-2">
-        <Card title="OpenAI 配置">
+        <Card title="分析参数">
           <dl className="meta-list">
-            <dt>API Key</dt>
-            <dd>{settings.openai_configured ? '已配置（值不会显示）' : '未配置'}</dd>
-            <dt>批量分析模型</dt>
-            <dd className="mono">{settings.model_fast}</dd>
-            <dt>高质量模型</dt>
-            <dd className="mono">{settings.model_smart}</dd>
             <dt>提示词版本</dt>
             <dd className="mono">{settings.prompt_version}</dd>
             <dt>单次分析上限</dt>
             <dd>{settings.max_analyses_per_run} 个岗位</dd>
           </dl>
-          <div className="field-hint mt-1">
-            模型 ID 来自环境变量 OPENAI_MODEL_FAST / OPENAI_MODEL_SMART，换模型不需要改代码。
-          </div>
         </Card>
 
         <Card title="运行环境">

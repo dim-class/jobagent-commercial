@@ -84,8 +84,11 @@ class AiSettingsOut(BaseModel):
     base_url: str = ""
     model_fast: str
     model_smart: str
-    #: Shown so the user knows which file this writes.
+    #: The file `Settings` reads, which is the file a save writes.
     env_path: str
+    #: Names set in the process environment, which outrank the file - a value
+    #: saved for one of these is written and then ignored.
+    overridden: list[str] = Field(default_factory=list)
 
 
 class AiSettingsIn(BaseModel):

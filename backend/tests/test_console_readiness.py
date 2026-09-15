@@ -28,6 +28,19 @@ def test_it_becomes_ready_once_the_prerequisites_exist(client, active_resume):
     assert {"resume", "directions", "openai", "library", "apply"} <= labels
 
 
+def test_the_key_is_set_in_the_app_not_in_a_file(client, db):
+    """The finished product has no step that means opening a file or a shell.
+
+    This fix used to send the user to backend/.env and a restart - a file the
+    app never read, for a key the settings page already accepted.
+    """
+    body = client.get("/api/console/readiness").json()
+    openai = next(check for check in body["checks"] if check["key"] == "openai")
+
+    assert "设置" in openai["fix"]
+    assert ".env" not in openai["fix"] and "重启" not in openai["fix"]
+
+
 def test_it_writes_nothing_and_calls_no_model(client, active_resume, db, monkeypatch):
     from app.models import Job
     from app.services import job_matcher

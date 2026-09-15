@@ -58,7 +58,10 @@ def build_readiness(db: Session) -> ReadinessOut:
             label="OpenAI API Key",
             ok=settings.openai_configured,
             detail="已配置" if settings.openai_configured else "未配置",
-            fix="在 backend/.env 里填 OPENAI_API_KEY，然后重启后端。搜索和采集不需要它，"
+            # It used to say "fill in backend/.env and restart": a file the app
+            # never read, and a step the settings page had already made
+            # unnecessary.
+            fix="到「设置」填写 API Key，保存后立即生效。搜索和采集不需要它，"
             "AI 分析和简历方向分析需要。",
             blocking=False,
         )
@@ -88,7 +91,7 @@ def build_readiness(db: Session) -> ReadinessOut:
             ok=True,
             detail="已开启" if settings.human_confirmed_apply_enabled else "未开启（默认）",
             blocking=False,
-            fix="需要时在 backend/.env 设 HUMAN_CONFIRMED_APPLY_ENABLED=true 并重启后端。"
+            fix="需要时在 .env（位置见「设置」）设 HUMAN_CONFIRMED_APPLY_ENABLED=true 并重启后端。"
             "开启只是让功能可见，每个岗位仍需你单独确认。",
         )
     )

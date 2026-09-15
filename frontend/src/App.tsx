@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 
+import { AI_SETTINGS_SAVED } from '@/api/aiSettingsEvents'
 import { api } from '@/api/client'
+import AiKeyBanner from '@/components/AiKeyBanner'
 import { Alert } from '@/components/ui'
 import ApplicationQueuePage from '@/pages/ApplicationQueuePage'
 import BrowserCapturePage from '@/pages/BrowserCapturePage'
@@ -65,19 +67,26 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false
-    api
-      .health()
-      .then((data) => {
-        if (!cancelled) {
-          setHealth(data)
-          setOffline(false)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setOffline(true)
-      })
+    const load = () => {
+      api
+        .health()
+        .then((data) => {
+          if (!cancelled) {
+            setHealth(data)
+            setOffline(false)
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setOffline(true)
+        })
+    }
+    load()
+    // A key saved anywhere - the banner below or 设置 - clears the banner and
+    // the sidebar status without a reload.
+    window.addEventListener(AI_SETTINGS_SAVED, load)
     return () => {
       cancelled = true
+      window.removeEventListener(AI_SETTINGS_SAVED, load)
     }
   }, [])
 
@@ -140,11 +149,10 @@ export default function App() {
           </Alert>
         ) : null}
 
-        {health && !health.openai_configured ? (
-          <Alert tone="warn">
-            尚未配置 <code className="mono">OPENAI_API_KEY</code>，AI 匹配分析不可用。
-            请在项目根目录的 <code className="mono">.env</code> 中填写后重启后端；其余功能可正常使用。
-          </Alert>
+        {/* The key is typed into the banner itself. 设置 has the full form,
+            so the banner steps aside there rather than showing it twice. */}
+        {health && !health.openai_configured && !location.pathname.startsWith('/settings') ? (
+          <AiKeyBanner />
         ) : null}
 
         <Routes>
